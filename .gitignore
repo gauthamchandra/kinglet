@@ -1,0 +1,62 @@
+# Gradle
+.gradle/
+build/
+
+# Eclipse
+.project
+.classpath
+.settings/
+bin/
+
+# IntelliJ
+.idea/
+*.ipr
+*.iml
+*.iws
+
+# NetBeans
+nb-configuration.xml
+
+# Visual Studio Code
+.vscode
+.factorypath
+
+# OSX
+.DS_Store
+
+# Vim
+*.swp
+*.swo
+
+# patch
+*.orig
+*.rej
+
+# Local environment
+.env
+
+# Plugin directory
+/.quarkus/cli/plugins/
+# TLS Certificates
+.certs/
+
+# Claude Code
+claude/
+
+# Docker
+.docker/
+
+# Logs
+logs/
+*.log
+
+# SpotBugs reports
+spotbugs-*.xml
+
+# Test reports
+**/target/
+**/reports/
+
+# Temporary files
+tmp/
+temp/

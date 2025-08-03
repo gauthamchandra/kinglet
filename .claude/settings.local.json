@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(quarkus create app:*)",
+      "Bash(mv:*)",
+      "Bash(./gradlew:*)",
+      "Bash(docker build:*)",
+      "Bash(docker run:*)",
+      "Bash(true)",
+      "Bash(rmdir:*)",
+      "Bash(chmod:*)"
+    ],
+    "deny": []
+  }
+}
