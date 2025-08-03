@@ -1,0 +1,13 @@
+{
+  "logging": {
+    "level": "info",
+    "format": "json"
+  },
+  "storage": {
+    "type": "hybrid",
+    "sqlitePath": "/app/data/emulator.db"
+  },
+  "server": {
+    "maxConnections": 500
+  }
+}

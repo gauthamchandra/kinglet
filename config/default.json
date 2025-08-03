@@ -1,0 +1,30 @@
+{
+  "server": {
+    "httpPort": 8765,
+    "grpcPort": 8766,
+    "maxConnections": 100
+  },
+  "storage": {
+    "type": "hybrid",
+    "sqlitePath": "./data/emulator.db",
+    "cacheSize": 104857600
+  },
+  "auth": {
+    "enabled": false,
+    "mode": "bypass",
+    "mockCredentials": {
+      "projectId": "localstack-project",
+      "serviceAccount": "localstack@localstack-project.iam.gserviceaccount.com"
+    }
+  },
+  "services": {
+    "pubsub": { "enabled": true },
+    "scheduler": { "enabled": true },
+    "tasks": { "enabled": true },
+    "secrets": { "enabled": true }
+  },
+  "logging": {
+    "level": "info",
+    "format": "json"
+  }
+}

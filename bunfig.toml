@@ -1,0 +1,17 @@
+[test]
+# Test configuration for Bun
+root = "./tests"
+preload = "./tests/setup.ts"
+coverage = true
+coverageReporter = "text"
+coverageDir = "./coverage"
+
+[install]
+# Package management configuration
+frozenLockfile = false
+cache = true
+
+[build]
+# Build configuration
+minify = false
+sourcemap = "external"

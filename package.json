@@ -1,0 +1,66 @@
+{
+  "name": "localstack-gcp",
+  "version": "1.0.0",
+  "description": "LocalStack GCP Emulator - Local emulation for Google Cloud Platform services",
+  "main": "dist/index.js",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "bun build --target=bun --outdir=dist src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "healthcheck": "bun run src/healthcheck.ts",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "gcp",
+    "google-cloud",
+    "emulator",
+    "pubsub",
+    "scheduler",
+    "tasks",
+    "secrets-manager",
+    "typescript",
+    "bun"
+  ],
+  "author": "LocalStack Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@commitlint/cli": "^20.0.0",
+    "@commitlint/config-conventional": "^20.0.0",
+    "@types/bun": "latest",
+    "@types/node": "^24.5.2",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
+    "eslint": "^9.36.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "husky": "^9.1.7",
+    "prettier": "^3.6.2",
+    "typescript": "^5.4.0",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "engines": {
+    "bun": ">=1.1.0",
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.36.0",
+    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/proto-loader": "^0.8.0",
+    "cron-parser": "4.9.0",
+    "pino": "^9.11.0",
+    "zod": "^4.1.11"
+  }
+}

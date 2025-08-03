@@ -1,0 +1,9 @@
+# Run linting and formatting
+bun run lint:fix
+bun run format
+
+# Run tests
+bun test
+
+# Add any fixes back to the commit
+git add .

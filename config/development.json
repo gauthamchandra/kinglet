@@ -1,0 +1,12 @@
+{
+  "logging": {
+    "level": "debug",
+    "format": "pretty"
+  },
+  "storage": {
+    "type": "memory"
+  },
+  "auth": {
+    "mode": "mock"
+  }
+}
