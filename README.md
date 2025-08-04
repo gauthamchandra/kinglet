@@ -1,76 +1,127 @@
-# gcp-emulator-stack
+# GCP Local Emulator
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+Local emulator for Google Cloud Platform services, implementing GCP REST APIs for development and testing.
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+## Quick Start
 
-## Claude Code with Auto-Plan Mode
-
-When using Claude Code for development assistance, it's recommended to run it with auto-plan mode enabled for better task planning:
-
-```shell script
-./claude-autoplan.sh
+```bash
+./gradlew quarkusDev  # Start in development mode
+# Access at http://localhost:8080
 ```
 
-This ensures Claude will always plan tasks before executing them. For more details about auto-plan mode, see: https://claudelog.com/mechanics/auto-plan-mode/
+## Service Integration
 
-## Running the application in dev mode
+### Service Enablement Required
 
-You can run your application in dev mode that enables live coding using:
+All GCP services must be enabled before use via the Service Usage API:
 
-```shell script
-./gradlew quarkusDev
+```bash
+# Enable Secret Manager
+curl -X POST http://localhost:8080/v1/projects/my-project/services/secretmanager.googleapis.com:enable
+
+# Now Secret Manager operations work
+curl -X POST http://localhost:8080/v1/projects/my-project/secrets \
+  -H "Content-Type: application/json" \
+  -d '{"secretId": "my-secret"}'
+
+# List enabled services
+curl http://localhost:8080/v1/projects/my-project/services?filter=state:ENABLED
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at <http://localhost:8080/q/dev/>.
+### Available Services
 
-## Packaging and running the application
+| Service | API Name | Status |
+|---------|----------|--------|
+| Secret Manager | `secretmanager.googleapis.com` | ✅ Implemented |
+| Service Usage | `serviceusage.googleapis.com` | ✅ Implemented |
+| Cloud Tasks | `cloudtasks.googleapis.com` | 📋 Planned |
+| Cloud Scheduler | `cloudscheduler.googleapis.com` | 📋 Planned |
 
-The application can be packaged using:
+## API Endpoints
 
-```shell script
-./gradlew build
+### Service Usage API (`/v1`)
+
+```bash
+# Single service operations
+POST /v1/projects/{project}/services/{service}:enable
+POST /v1/projects/{project}/services/{service}:disable
+
+# Batch operations
+POST /v1/projects/{project}/services:batchEnable
+POST /v1/projects/{project}/services:batchDisable
+
+# List and query
+GET /v1/projects/{project}/services[?filter=state:ENABLED|DISABLED]
+GET /v1/operations/{operationName}
 ```
 
-It produces the `quarkus-run.jar` file in the `build/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `build/quarkus-app/lib/` directory.
+### Secret Manager API (`/v1/projects/{project}/secrets`)
 
-The application is now runnable using `java -jar build/quarkus-app/quarkus-run.jar`.
+Standard GCP Secret Manager REST API endpoints (requires service enablement).
 
-If you want to build an _über-jar_, execute the following command:
+## Integration Patterns
 
-```shell script
-./gradlew build -Dquarkus.package.jar.type=uber-jar
+### Terraform Provider Integration
+
+```hcl
+# Enable services first
+resource "google_project_service" "secret_manager" {
+  project = "my-project"
+  service = "secretmanager.googleapis.com"
+}
+
+# Then use the service
+resource "google_secret_manager_secret" "example" {
+  secret_id = "example-secret"
+  depends_on = [google_project_service.secret_manager]
+}
 ```
 
-The application, packaged as an _über-jar_, is now runnable using `java -jar build/*-runner.jar`.
+### Client Library Integration
 
-## Creating a native executable
+Point GCP client libraries to the emulator:
 
-You can create a native executable using:
-
-```shell script
-./gradlew build -Dquarkus.native.enabled=true
+```bash
+export GOOGLE_CLOUD_PROJECT=my-project
+export SECRETMANAGER_EMULATOR_HOST=localhost:8080
 ```
 
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using:
+## Development
 
-```shell script
-./gradlew build -Dquarkus.native.enabled=true -Dquarkus.native.container-build=true
+### Adding New Services
+
+1. **Add service definition** to `ServiceRegistry.initializeDefaultServices()`
+2. **Implement service logic** following the Secret Manager pattern
+3. **Add service validation** to operations
+4. **Update tests** and documentation
+
+### Build Commands
+
+```bash
+./gradlew build                    # Full build with tests
+./gradlew quarkusDev              # Development mode with hot reload
+./gradlew spotlessApply           # Fix code formatting
+./gradlew test                    # Run tests only
 ```
 
-You can then execute your native executable with: `./build/gcp-emulator-stack-1.0.0-SNAPSHOT-runner`
+### Docker
 
-If you want to learn more about building native executables, please consult <https://quarkus.io/guides/gradle-tooling>.
+```bash
+docker build -t gcp-emulator .
+docker run -p 8080:8080 gcp-emulator
+```
 
-## Related Guides
+## Architecture
 
-- REST Jackson ([guide](https://quarkus.io/guides/rest#json-serialisation)): Jackson serialization support for Quarkus REST. This extension is not compatible with the quarkus-resteasy extension, or any of the extensions that depend on it
+- **ServiceRegistry**: Central service state management
+- **ServiceUsageService**: Business logic for service operations
+- **ServiceUsageResource**: REST API endpoints
+- **Integration**: Services validate enablement before operations
 
-## Provided Code
+Data stored in-memory with ConcurrentHashMap for development/testing use cases.
 
-### REST
+## Troubleshooting
 
-Easily start your REST Web Services
-
-[Related guide section...](https://quarkus.io/guides/getting-started-reactive#reactive-jax-rs-resources)
+**Service not enabled errors**: Enable the service via Service Usage API first
+**Port conflicts**: Change port with `-Dquarkus.http.port=8081`
+**Native build issues**: Use container build option or check GraalVM compatibility

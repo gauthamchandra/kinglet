@@ -3,6 +3,7 @@ plugins {
     id 'io.quarkus'
     id 'com.github.spotbugs' version '6.0.8'
     id 'com.diffplug.spotless' version '6.25.0'
+    id 'org.openapi.generator' version '7.2.0'
 }
 
 repositories {
@@ -15,6 +16,11 @@ dependencies {
     implementation 'io.quarkus:quarkus-rest-jackson'
     implementation 'io.quarkus:quarkus-arc'
     implementation 'io.quarkus:quarkus-rest'
+
+    // OpenAPI generator dependencies
+    implementation 'jakarta.annotation:jakarta.annotation-api'
+    implementation 'jakarta.validation:jakarta.validation-api'
+
     testImplementation 'io.quarkus:quarkus-junit5'
     testImplementation 'io.rest-assured:rest-assured'
 }
@@ -81,3 +87,55 @@ spotless {
         trimTrailingWhitespace()
     }
 }
+
+// OpenAPI Generator configuration for Secret Manager
+openApiGenerate {
+    generatorName = "jaxrs-spec"
+    inputSpec = "$projectDir/src/main/resources/openapi/secret-manager-v1.yaml".toString()
+    outputDir = "$buildDir/generated/openapi".toString()
+    apiPackage = "com.gauthamchandra.secretmanager.api"
+    modelPackage = "com.gauthamchandra.secretmanager.model.generated"
+    configOptions = [
+        dateLibrary: "java8",
+        java8: "true",
+        interfaceOnly: "true",
+        useTags: "true",
+        generatePom: "false",
+        hideGenerationTimestamp: "true",
+        useJakartaEe: "true",
+        useSwaggerAnnotations: "false"
+    ]
+}
+
+// OpenAPI Generator configuration for Service Usage
+task openApiGenerateServiceUsage(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
+    generatorName = "jaxrs-spec"
+    inputSpec = "$projectDir/src/main/resources/openapi/service-usage-v1.yaml".toString()
+    outputDir = "$buildDir/generated/openapi-serviceusage".toString()
+    apiPackage = "com.gauthamchandra.serviceusage.api"
+    modelPackage = "com.gauthamchandra.serviceusage.model.generated"
+    configOptions = [
+        dateLibrary: "java8",
+        java8: "true",
+        interfaceOnly: "true",
+        useTags: "true",
+        generatePom: "false",
+        hideGenerationTimestamp: "true",
+        useJakartaEe: "true",
+        useSwaggerAnnotations: "false"
+    ]
+}
+
+// Configure source sets to include generated code
+sourceSets {
+    main {
+        java {
+            srcDirs += ["$buildDir/generated/openapi/src/gen/java"]
+            srcDirs += ["$buildDir/generated/openapi-serviceusage/src/gen/java"]
+        }
+    }
+}
+
+// Make compileJava depend on both OpenAPI generation tasks
+compileJava.dependsOn tasks.openApiGenerate
+compileJava.dependsOn tasks.openApiGenerateServiceUsage

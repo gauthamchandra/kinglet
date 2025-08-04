@@ -1,0 +1,281 @@
+openapi: 3.0.3
+info:
+  title: Service Usage API
+  description: Google Cloud Service Usage API for enabling and disabling services
+  version: v1
+servers:
+  - url: https://serviceusage.googleapis.com/v1
+paths:
+  /projects/{project}/services:
+    get:
+      summary: List services
+      operationId: listServices
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: filter
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of services
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListServicesResponse'
+    post:
+      summary: Batch enable services
+      operationId: batchEnableServices
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchEnableServicesRequest'
+      responses:
+        '200':
+          description: Operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+  /projects/{project}/services:batchEnable:
+    post:
+      summary: Batch enable services
+      operationId: batchEnableServicesAction
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchEnableServicesRequest'
+      responses:
+        '200':
+          description: Operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+  /projects/{project}/services:batchDisable:
+    post:
+      summary: Batch disable services
+      operationId: batchDisableServices
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchDisableServicesRequest'
+      responses:
+        '200':
+          description: Operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+  /projects/{project}/services/{serviceName}:enable:
+    post:
+      summary: Enable service
+      operationId: enableService
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: serviceName
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+  /projects/{project}/services/{serviceName}:disable:
+    post:
+      summary: Disable service
+      operationId: disableService
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: serviceName
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+  /operations/{operationName}:
+    get:
+      summary: Get operation status
+      operationId: getOperation
+      parameters:
+        - name: operationName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operation status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+components:
+  schemas:
+    ListServicesResponse:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/Service'
+        nextPageToken:
+          type: string
+
+    Service:
+      type: object
+      properties:
+        name:
+          type: string
+          description: "The resource name of the service"
+        config:
+          $ref: '#/components/schemas/ServiceConfig'
+        state:
+          type: string
+          enum: [ENABLED, DISABLED]
+          description: "Whether the service is enabled or disabled"
+        parent:
+          type: string
+          description: "The resource name of the parent"
+
+    ServiceConfig:
+      type: object
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        documentation:
+          $ref: '#/components/schemas/Documentation'
+        quota:
+          type: object
+
+    Documentation:
+      type: object
+      properties:
+        summary:
+          type: string
+        documentationRootUrl:
+          type: string
+
+    BatchEnableServicesRequest:
+      type: object
+      properties:
+        serviceIds:
+          type: array
+          items:
+            type: string
+
+    BatchDisableServicesRequest:
+      type: object
+      properties:
+        serviceIds:
+          type: array
+          items:
+            type: string
+        disableDependentServices:
+          type: boolean
+
+    Operation:
+      type: object
+      properties:
+        name:
+          type: string
+          description: "The server-assigned name"
+        metadata:
+          type: object
+          description: "Service-specific metadata"
+        done:
+          type: boolean
+          description: "If the value is false, it means the operation is still in progress"
+        error:
+          $ref: '#/components/schemas/Status'
+        response:
+          type: object
+          description: "The normal response of the operation"
+
+    Status:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object

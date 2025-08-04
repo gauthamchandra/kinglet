@@ -41,7 +41,7 @@ nb-configuration.xml
 .certs/
 
 # Claude Code
-claude/
+.claude/
 
 # Docker
 .docker/

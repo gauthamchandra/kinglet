@@ -77,6 +77,12 @@ This is a GCP Local Emulator project built with Quarkus 3, designed to emulate G
 - Reserve **@QuarkusTest** only when full application initialization is required
 - Follow TDD approach using Google REST API documentation for test cases
 - Use `@DisplayName` annotations for clear test descriptions
+- **Resource Test DisplayName Format**: Use format `"[<http-method>] <endpoint> - <short-test-case-description>"`
+  - Example: `"[GET] /foo/{id}/bar - successfully stores foo in the DB"`
+  - Example: `"[POST] /v1/projects/{project}/secrets - creates secret and returns 201"`
+- **Non-Resource Test DisplayName Format**: Use format `"methodName() - <short-test-case-description>"`
+  - Example: `"createSecret() - should throw exception when creating duplicate secret"`
+  - Always use parentheses without arguments to keep things brief
 
 ### GCP API Implementation
 The emulator implements GCP Secret Manager REST endpoints:
@@ -94,3 +100,9 @@ The emulator implements GCP Secret Manager REST endpoints:
 ### Dependency and Native Image Considerations
 - When installing new dependencies that will be used during runtime, prefer official quarkiverse extensions and if that isn't available, prefer ones that account for GraalVM native compilation and minimize reflection
 - Always try to whitelist in the reflect-config settings any classes used through reflection that could be stripped accidentally in the Quarkus native image build process
+
+## Quarkus Development Guidelines
+- When utilizing Quarkus, do not use reactive programming paradigms as it obfuscates stack traces, makes the code harder to read and is often not needed to justify the added complexity
+
+## Java Best Practices
+- Don't use "Collectors.toList()" when "Stream.toList()" is available especially in Java 21
