@@ -106,3 +106,6 @@ The emulator implements GCP Secret Manager REST endpoints:
 
 ## Java Best Practices
 - Don't use "Collectors.toList()" when "Stream.toList()" is available especially in Java 21
+
+## Gradle Development Guidelines
+- Ensure when making changes in Gradle, you don't utilize deprecated syntax
