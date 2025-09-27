@@ -1,0 +1,10 @@
+dist/
+node_modules/
+coverage/
+*.log
+.env*
+*.lock
+package-lock.json
+yarn.lock
+bun.lockb
+*.md
