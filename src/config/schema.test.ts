@@ -136,12 +136,15 @@ describe('Configuration Schema', () => {
 
     test('should handle boolean transformations', () => {
       const env1 = EnvConfigSchema.parse({ AUTH_ENABLED: 'true' });
+
       expect(env1.AUTH_ENABLED).toBe(true);
 
       const env2 = EnvConfigSchema.parse({ AUTH_ENABLED: 'false' });
+
       expect(env2.AUTH_ENABLED).toBe(false);
 
       const env3 = EnvConfigSchema.parse({ AUTH_ENABLED: 'TRUE' });
+
       expect(env3.AUTH_ENABLED).toBe(true);
     });
   });

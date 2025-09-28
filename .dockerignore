@@ -1,0 +1,63 @@
+# Development and testing files
+**/*.test.ts
+**/*.spec.ts
+**/*.test.js
+**/*.spec.js
+test-utils/
+coverage/
+tests/
+
+# Documentation and config files
+*.md
+docs/
+.github/
+commitlint.config.js
+.husky/
+
+# Development dependencies and build artifacts
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+.cache/
+
+# Environment and IDE files
+.env*
+.vscode/
+.idea/
+*.log
+*.swp
+*.swo
+*~
+
+# Source control
+.git/
+.gitignore
+.gitattributes
+
+# Development tools
+.eslintrc*
+.prettierrc*
+eslint.config.js
+.eslintignore
+.prettierignore
+bunfig.toml
+tsconfig*.json
+vitest.config.*
+jest.config.*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp

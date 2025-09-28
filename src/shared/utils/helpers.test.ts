@@ -10,7 +10,7 @@ import {
   delay,
   generateTestId,
   expectToThrow,
-} from '../helpers.ts';
+} from '../../../test-utils/helpers';
 
 describe('Test Helpers', () => {
   describe('createTestConfig', () => {
@@ -100,6 +100,7 @@ describe('Test Helpers', () => {
   describe('delay', () => {
     test('should wait for specified time', async () => {
       const start = Date.now();
+
       await delay(100);
       const end = Date.now();
 

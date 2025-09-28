@@ -951,7 +951,7 @@ Memory Usage (idle):
   "devDependencies": {
     "@types/bun": "^1.1.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0", // Testing framework
+    "@types/node": "^20.0.0", // Type definitions
     "docker": "^1.0.0" // Container building
   }
 }
@@ -976,25 +976,79 @@ Memory Usage (idle):
 
 ### 7.4 Development Tools
 
+#### Test Discovery and Execution
+
+With co-located tests, Bun's test runner can discover and execute tests more efficiently:
+
+```bash
+# Run all tests (*.test.ts, *.spec.ts files)
+bun test
+
+# Run tests for a specific module
+bun test src/services/pubsub
+
+# Run only unit tests
+bun test --grep '\.test\.ts$'
+
+# Run only integration tests
+bun test --grep '\.integration\.test\.ts$'
+
+# Watch mode for development
+bun test --watch src/services/pubsub
+```
+
+#### Test Coverage
+
+Co-located tests make coverage analysis more intuitive:
+
+```bash
+# Generate coverage report
+bun test --coverage
+
+# Coverage excludes test files automatically
+# Only analyzes .ts files without .test.ts or .spec.ts suffix
+```
+
 ```typescript
-// Project structure
+// Project structure with co-located tests
 localstack-gcp/
 ├── src/
 │   ├── core/           # Core framework
 │   │   ├── gateway/    # API gateway
+│   │   │   ├── index.ts
+│   │   │   ├── router.ts
+│   │   │   ├── router.test.ts    # Unit tests co-located
+│   │   │   └── gateway.test.ts
 │   │   ├── discovery/  # Discovery API
+│   │   │   ├── index.ts
+│   │   │   ├── registry.ts
+│   │   │   └── registry.test.ts  # Unit tests co-located
 │   │   └── storage/    # Storage layer
+│   │       ├── index.ts
+│   │       ├── manager.ts
+│   │       └── manager.test.ts   # Unit tests co-located
 │   ├── services/       # Service implementations
 │   │   ├── pubsub/
+│   │   │   ├── index.ts
+│   │   │   ├── service.ts
+│   │   │   ├── service.test.ts   # Service tests co-located
+│   │   │   └── service.integration.test.ts  # Integration tests
 │   │   ├── scheduler/
+│   │   │   ├── index.ts
+│   │   │   └── scheduler.test.ts # Tests next to source
 │   │   ├── tasks/
+│   │   │   ├── index.ts
+│   │   │   └── tasks.spec.ts     # Alternative naming
 │   │   └── secrets/
+│   │       ├── index.ts
+│   │       └── secrets.test.ts
 │   ├── shared/         # Shared utilities
+│   │   ├── utils.ts
+│   │   └── utils.test.ts         # Utility tests co-located
 │   └── index.ts        # Entry point
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── e2e/
+├── e2e/                # End-to-end tests remain separate
+│   ├── client-compatibility.test.ts
+│   └── performance.test.ts
 ├── docker/
 │   └── Dockerfile
 ├── config/
@@ -1107,10 +1161,24 @@ const statements = {
 
 ## 9. Testing Strategy
 
+### Test Organization
+
+Tests are co-located with their source files for improved maintainability and discoverability. This strategy ensures that:
+- Tests are immediately visible next to the code they test
+- Tests move with their source files during refactoring
+- Test coverage is more apparent at a glance
+- Related test utilities can be shared within the same directory
+
+**Test File Naming Conventions:**
+- Unit tests: `*.test.ts` or `*.spec.ts`
+- Integration tests: `*.integration.test.ts`
+- End-to-end tests: Remain in dedicated `/e2e` directory due to their cross-cutting nature
+
 ### 9.1 Unit Testing
 
 ```typescript
-// Example unit test for Pub/Sub
+// Example: src/services/pubsub/service.test.ts
+// Co-located with src/services/pubsub/service.ts
 describe('PubSubService', () => {
   let service: PubSubService;
 
@@ -1119,6 +1187,8 @@ describe('PubSubService', () => {
   });
 
   test('should create topic', async () => {
+    // Test is now in src/services/pubsub/service.test.ts
+    // Direct access to implementation details and types
     const topic = await service.createTopic({
       name: 'projects/test/topics/my-topic',
       labels: { env: 'test' },
@@ -1129,6 +1199,7 @@ describe('PubSubService', () => {
   });
 
   test('should publish message', async () => {
+    // Co-located test can easily import test helpers from same directory
     await service.createTopic({ name: 'projects/test/topics/my-topic' });
 
     const result = await service.publish('projects/test/topics/my-topic', {
@@ -1144,18 +1215,25 @@ describe('PubSubService', () => {
     expect(result.messageIds[0]).toMatch(/^[a-zA-Z0-9]+$/);
   });
 });
+
+// Test utilities can be in the same directory
+// Example: src/services/pubsub/test-utils.ts for shared test helpers
 ```
 
 ### 9.2 Integration Testing
 
 ```typescript
-// Integration test with actual GCP client library
+// Example: src/services/pubsub/service.integration.test.ts
+// Co-located integration tests for cross-component testing
 import { PubSub } from '@google-cloud/pubsub';
 
+// Located at: src/services/pubsub/service.integration.test.ts
 describe('GCP Client Library Integration', () => {
   let pubsub: PubSub;
 
   beforeAll(() => {
+    // Integration test co-located with service implementation
+    // Easy access to service internals for setup/teardown
     pubsub = new PubSub({
       projectId: 'test-project',
       apiEndpoint: 'localhost:8765',
@@ -1179,9 +1257,12 @@ describe('GCP Client Library Integration', () => {
 ### 9.3 Performance Testing
 
 ```typescript
-// Load testing with autocannon
+// Example: e2e/performance.test.ts
+// Performance tests remain in e2e/ due to their system-wide nature
 import autocannon from 'autocannon';
 
+// Located at: e2e/performance.test.ts
+// E2E and performance tests remain separate due to their cross-cutting nature
 describe('Performance Tests', () => {
   test('should handle 1000 req/s', async () => {
     const result = await autocannon({

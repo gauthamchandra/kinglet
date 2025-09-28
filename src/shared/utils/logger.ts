@@ -9,7 +9,7 @@ export interface LogEntry {
   level: LogLevel;
   component: string;
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
 export class Logger {
@@ -32,7 +32,7 @@ export class Logger {
     return levels[level] >= levels[this.logLevel];
   }
 
-  private formatMessage(level: LogLevel, message: string, data?: any): LogEntry {
+  private formatMessage(level: LogLevel, message: string, data?: unknown): LogEntry {
     return {
       timestamp: new Date().toISOString(),
       level,
@@ -65,25 +65,25 @@ export class Logger {
     }
   }
 
-  debug(message: string, data?: any): void {
+  debug(message: string, data?: unknown): void {
     if (this.shouldLog('debug')) {
       this.output(this.formatMessage('debug', message, data));
     }
   }
 
-  info(message: string, data?: any): void {
+  info(message: string, data?: unknown): void {
     if (this.shouldLog('info')) {
       this.output(this.formatMessage('info', message, data));
     }
   }
 
-  warn(message: string, data?: any): void {
+  warn(message: string, data?: unknown): void {
     if (this.shouldLog('warn')) {
       this.output(this.formatMessage('warn', message, data));
     }
   }
 
-  error(message: string, data?: any): void {
+  error(message: string, data?: unknown): void {
     if (this.shouldLog('error')) {
       this.output(this.formatMessage('error', message, data));
     }

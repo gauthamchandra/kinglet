@@ -51,6 +51,6 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "test-utils/**/*", "*.test.ts"],
   "exclude": ["node_modules", "dist", "coverage"]
 }

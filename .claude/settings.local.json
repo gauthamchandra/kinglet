@@ -1,6 +1,15 @@
 {
   "permissions": {
-    "allow": ["Bash(bun test:*)", "Bash(bun run lint:*)", "Bash(bun run:*)", "Bash(bunx prettier:*)"],
+    "allow": [
+      "Bash(bun test:*)",
+      "Bash(bun run lint:*)",
+      "Bash(bun run:*)",
+      "Bash(bunx prettier:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(bunx tsc:*)",
+      "Bash(bunx eslint:*)"
+    ],
     "deny": [],
     "ask": []
   }

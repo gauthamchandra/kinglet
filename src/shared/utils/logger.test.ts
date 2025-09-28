@@ -8,6 +8,7 @@ import { Logger } from '@/shared/utils/logger.ts';
 describe('Logger', () => {
   test('should create logger with component name', () => {
     const logger = new Logger('TestComponent');
+
     expect(logger).toBeDefined();
   });
 
@@ -17,6 +18,7 @@ describe('Logger', () => {
     // Capture console output
     const originalInfo = console.info;
     let capturedMessage = '';
+
     console.info = (message: string) => {
       capturedMessage = message;
     };
@@ -36,6 +38,7 @@ describe('Logger', () => {
 
     const originalDebug = console.debug;
     let debugCalled = false;
+
     console.debug = () => {
       debugCalled = true;
     };
@@ -52,6 +55,7 @@ describe('Logger', () => {
 
     const originalInfo = console.info;
     let capturedMessage = '';
+
     console.info = (message: string) => {
       capturedMessage = message;
     };
@@ -64,6 +68,7 @@ describe('Logger', () => {
     const timestampMatch = capturedMessage.match(
       /\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\]/
     );
+
     expect(timestampMatch).toBeTruthy();
     expect(new Date(timestampMatch![1]).toISOString()).toBe(timestampMatch![1]);
   });
