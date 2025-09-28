@@ -4,7 +4,7 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { MemoryStorageProvider } from './memory';
-import { StorageConfig, BaseRecord, QueryFilter } from '../types';
+import type { StorageConfig, BaseRecord, QueryFilter } from '../types';
 
 interface TestRecord extends BaseRecord {
   name: string;
@@ -96,9 +96,9 @@ describe('MemoryStorageProvider', () => {
       const created = await provider.createMany<TestRecord>('test_records', data);
 
       expect(created).toHaveLength(3);
-      expect(created[0].name).toBe('Alice');
-      expect(created[1].name).toBe('Bob');
-      expect(created[2].name).toBe('Charlie');
+      expect(created[0]?.name).toBe('Alice');
+      expect(created[1]?.name).toBe('Bob');
+      expect(created[2]?.name).toBe('Charlie');
     });
 
     test('should find record by ID', async () => {
@@ -222,9 +222,9 @@ describe('MemoryStorageProvider', () => {
         sort: [{ field: 'age', direction: 'desc' }],
       });
 
-      expect(result.data[0].age).toBe(35); // Bob
-      expect(result.data[1].age).toBe(32); // David
-      expect(result.data[2].age).toBe(28); // Charlie
+      expect(result.data[0]?.age).toBe(35); // Bob
+      expect(result.data[1]?.age).toBe(32); // David
+      expect(result.data[2]?.age).toBe(28); // Charlie
     });
 
     test('should paginate results', async () => {
@@ -398,7 +398,8 @@ describe('MemoryStorageProvider', () => {
       expect(found1).not.toBeNull();
 
       // Check if it's in cache
-      const cached = await cache!.get(`test_records:${created.id}`);
+      if (!cache) throw new Error('cache should be available');
+      const cached = await cache.get(`test_records:${created.id}`);
 
       expect(cached).not.toBeNull();
     });
@@ -460,7 +461,7 @@ describe('MemoryStorageProvider', () => {
       const result = await provider.find<TestRecord>('test_records', { filter });
 
       expect(result.data).toHaveLength(1);
-      expect(result.data[0].age).toBe(28);
+      expect(result.data[0]?.age).toBe(28);
     });
 
     test('should handle LIKE operator', async () => {
@@ -471,7 +472,7 @@ describe('MemoryStorageProvider', () => {
       const result = await provider.find<TestRecord>('test_records', { filter });
 
       expect(result.data).toHaveLength(1);
-      expect(result.data[0].name).toBe('Alice Johnson');
+      expect(result.data[0]?.name).toBe('Alice Johnson');
     });
 
     test('should handle case insensitive LIKE operator', async () => {
@@ -482,7 +483,7 @@ describe('MemoryStorageProvider', () => {
       const result = await provider.find<TestRecord>('test_records', { filter });
 
       expect(result.data).toHaveLength(1);
-      expect(result.data[0].name).toBe('Alice Johnson');
+      expect(result.data[0]?.name).toBe('Alice Johnson');
     });
   });
 });

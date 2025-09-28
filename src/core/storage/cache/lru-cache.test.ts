@@ -3,7 +3,8 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { LRUCache, LRUCacheConfig } from './lru-cache';
+import { LRUCache } from './lru-cache';
+import type { LRUCacheConfig } from './lru-cache';
 
 describe('LRUCache', () => {
   let cache: LRUCache;
@@ -89,10 +90,10 @@ describe('LRUCache', () => {
       await smallCache.set('key4', 'value4');
       expect(smallCache.size()).toBe(3);
 
-      expect(await smallCache.get('key1')).toBe('value1'); // Should still exist
+      expect(await smallCache.get<string>('key1')).toBe('value1'); // Should still exist
       expect(await smallCache.get('key2')).toBeNull(); // Should be evicted
-      expect(await smallCache.get('key3')).toBe('value3'); // Should still exist
-      expect(await smallCache.get('key4')).toBe('value4'); // Should exist
+      expect(await smallCache.get<string>('key3')).toBe('value3'); // Should still exist
+      expect(await smallCache.get<string>('key4')).toBe('value4'); // Should exist
 
       smallCache.destroy();
     });
@@ -112,7 +113,7 @@ describe('LRUCache', () => {
       // Update existing key
       await smallCache.set('key1', 'updated-value1');
       expect(smallCache.size()).toBe(3);
-      expect(await smallCache.get('key1')).toBe('updated-value1');
+      expect(await smallCache.get<string>('key1')).toBe('updated-value1');
 
       smallCache.destroy();
     });
@@ -122,7 +123,7 @@ describe('LRUCache', () => {
     test('should expire items after TTL', async () => {
       await cache.set('key1', 'value1', 0.1); // 100ms TTL
 
-      expect(await cache.get('key1')).toBe('value1');
+      expect(await cache.get<string>('key1')).toBe('value1');
 
       // Wait for expiration
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -134,11 +135,11 @@ describe('LRUCache', () => {
     test('should use default TTL when not specified', async () => {
       await cache.set('key1', 'value1'); // Uses default TTL of 2 seconds
 
-      expect(await cache.get('key1')).toBe('value1');
+      expect(await cache.get<string>('key1')).toBe('value1');
 
       // Should still exist before expiration
       await new Promise(resolve => setTimeout(resolve, 100));
-      expect(await cache.get('key1')).toBe('value1');
+      expect(await cache.get<string>('key1')).toBe('value1');
     });
 
     test('should not expire items without TTL', async () => {
@@ -150,7 +151,7 @@ describe('LRUCache', () => {
       await neverExpireCache.set('key1', 'value1');
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(await neverExpireCache.get('key1')).toBe('value1');
+      expect(await neverExpireCache.get<string>('key1')).toBe('value1');
 
       neverExpireCache.destroy();
     });
@@ -193,11 +194,11 @@ describe('LRUCache', () => {
       await cache.set('array', [1, 2, 3]);
       await cache.set('null', null);
 
-      expect(await cache.get('string')).toBe('hello');
-      expect(await cache.get('number')).toBe(42);
-      expect(await cache.get('boolean')).toBe(true);
-      expect(await cache.get('object')).toEqual({ foo: 'bar' });
-      expect(await cache.get('array')).toEqual([1, 2, 3]);
+      expect(await cache.get<string>('string')).toBe('hello');
+      expect(await cache.get<number>('number')).toBe(42);
+      expect(await cache.get<boolean>('boolean')).toBe(true);
+      expect(await cache.get<{ foo: string }>('object')).toEqual({ foo: 'bar' });
+      expect(await cache.get<number[]>('array')).toEqual([1, 2, 3]);
       expect(await cache.get('null')).toBe(null);
     });
   });
@@ -217,7 +218,7 @@ describe('LRUCache', () => {
 
       expect(cache.size()).toBe(1);
       expect(await cache.get('key1')).toBeNull();
-      expect(await cache.get('key2')).toBe('value2');
+      expect(await cache.get<string>('key2')).toBe('value2');
     });
   });
 

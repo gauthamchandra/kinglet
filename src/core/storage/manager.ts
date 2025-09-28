@@ -5,21 +5,21 @@
  * for storage operations and supports hybrid storage (SQLite + Cache) strategies.
  */
 
-import {
+import { ValidationError } from './types.js';
+import type {
   BaseRecord,
   CacheOperations,
-  IStorageManager,
   QueryFilter,
   QueryOptions,
   QueryResult,
   StorageConfig,
+  StorageOperations,
   StorageProvider,
-  StorageStats,
   TableSchema,
   TransactionOptions,
-  ValidationError,
 } from './types.js';
-import {
+import type { IStorageManager, StorageStats } from './interfaces.js';
+import type {
   IStorageEventEmitter,
   StorageEvent,
   StorageEventData,
@@ -83,7 +83,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
   }
 
   async withTransaction<T>(
-    fn: (tx: StorageManager) => Promise<T>,
+    fn: (tx: StorageOperations) => Promise<T>,
     options?: TransactionOptions
   ): Promise<T> {
     if (!this.provider) {
@@ -102,7 +102,10 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     try {
       const result = await transaction.execute(async () => {
         // Create a transaction-aware storage manager wrapper
-        const txManager = new TransactionalStorageManager(this.provider!, this);
+        if (!this.provider) {
+          throw new ValidationError('Storage manager not initialized');
+        }
+        const txManager = new TransactionalStorageManager(this.provider, this);
 
         return await fn(txManager);
       });
@@ -531,14 +534,16 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
       provider: this.config?.type ?? 'unknown',
       tablesCount: tables.length,
       totalRecords,
-      cacheStats: cacheStats
+      ...(cacheStats
         ? {
-            hits: cacheStats.hits,
-            misses: cacheStats.misses,
-            entries: cacheStats.entries,
-            hitRate: cacheStats.hitRate,
+            cacheStats: {
+              hits: cacheStats.hits,
+              misses: cacheStats.misses,
+              entries: cacheStats.entries,
+              hitRate: cacheStats.hitRate,
+            },
           }
-        : undefined,
+        : {}),
       performance: {
         avgQueryTime: Math.round(avgQueryTime * 100) / 100,
         totalQueries: this.operationStats.totalQueries,
@@ -562,7 +567,12 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, new Set());
     }
-    this.eventListeners.get(event)!.add(listener);
+    const listeners = this.eventListeners.get(event);
+
+    if (!listeners) {
+      throw new Error('Event listeners set should exist after initialization');
+    }
+    listeners.add(listener);
   }
 
   off(event: StorageEvent, listener: StorageEventListener): void {

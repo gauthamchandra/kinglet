@@ -5,7 +5,7 @@
  * It provides high-performance caching with automatic eviction of stale and least recently used entries.
  */
 
-import { CacheOperations, CacheStats } from '../types';
+import type { CacheOperations, CacheStats } from '../types';
 
 /**
  * Cache entry with metadata
@@ -47,7 +47,10 @@ export class LRUCache implements CacheOperations {
   constructor(private config: LRUCacheConfig) {
     // Start cleanup timer if specified
     if (config.cleanupInterval && config.cleanupInterval > 0) {
-      this.cleanupTimer = setInterval(() => this.cleanup(), config.cleanupInterval * 1000);
+      this.cleanupTimer = setInterval(
+        () => this.cleanup(),
+        config.cleanupInterval * 1000
+      ) as unknown as number;
     }
   }
 
@@ -86,13 +89,18 @@ export class LRUCache implements CacheOperations {
     if (existingEntry) {
       // Update existing entry
       existingEntry.value = value;
-      existingEntry.expiresAt = expiresAt;
+
+      if (expiresAt !== undefined) {
+        existingEntry.expiresAt = expiresAt;
+      } else {
+        delete existingEntry.expiresAt;
+      }
       this.moveToHead(key);
     } else {
       // Create new entry
       const entry: CacheEntry<T> = {
         value,
-        expiresAt,
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
       };
 
       this.entries.set(key, entry as CacheEntry<unknown>);
@@ -150,8 +158,8 @@ export class LRUCache implements CacheOperations {
 
   async clear(): Promise<void> {
     this.entries.clear();
-    this.head = undefined;
-    this.tail = undefined;
+    delete this.head;
+    delete this.tail;
     this.stats.sets = 0;
     this.stats.hits = 0;
     this.stats.misses = 0;
@@ -197,11 +205,11 @@ export class LRUCache implements CacheOperations {
   destroy(): void {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
-      this.cleanupTimer = undefined;
+      delete this.cleanupTimer;
     }
     this.entries.clear();
-    this.head = undefined;
-    this.tail = undefined;
+    delete this.head;
+    delete this.tail;
   }
 
   /**
@@ -227,8 +235,10 @@ export class LRUCache implements CacheOperations {
 
     if (!entry) return;
 
-    entry.next = this.head;
-    entry.prev = undefined;
+    if (this.head !== undefined) {
+      entry.next = this.head;
+    }
+    delete entry.prev;
 
     if (this.head) {
       const headEntry = this.entries.get(this.head);
@@ -257,24 +267,36 @@ export class LRUCache implements CacheOperations {
       const prevEntry = this.entries.get(entry.prev);
 
       if (prevEntry) {
-        prevEntry.next = entry.next;
+        if (entry.next !== undefined) {
+          prevEntry.next = entry.next;
+        } else {
+          delete prevEntry.next;
+        }
       }
-    } else {
+    } else if (entry.next) {
       this.head = entry.next;
+    } else {
+      delete this.head;
     }
 
     if (entry.next) {
       const nextEntry = this.entries.get(entry.next);
 
       if (nextEntry) {
-        nextEntry.prev = entry.prev;
+        if (entry.prev !== undefined) {
+          nextEntry.prev = entry.prev;
+        } else {
+          delete nextEntry.prev;
+        }
       }
-    } else {
+    } else if (entry.prev) {
       this.tail = entry.prev;
+    } else {
+      delete this.tail;
     }
 
-    entry.prev = undefined;
-    entry.next = undefined;
+    delete entry.prev;
+    delete entry.next;
   }
 
   /**
@@ -294,7 +316,10 @@ export class LRUCache implements CacheOperations {
    * Evict entries to free memory
    */
   private async evictByMemory(): Promise<void> {
-    const maxMemoryBytes = this.config.maxMemoryMb! * 1024 * 1024;
+    if (this.config.maxMemoryMb === undefined) {
+      throw new Error('maxMemoryMb should be defined for memory eviction');
+    }
+    const maxMemoryBytes = this.config.maxMemoryMb * 1024 * 1024;
 
     while (this.getMemoryUsage() > maxMemoryBytes && this.tail) {
       await this.evictLRU();

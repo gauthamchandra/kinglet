@@ -5,7 +5,14 @@ coverage = true
 coverageReporter = "text"
 coverageDir = "./coverage"
 
-# Include test files from test-utils directory
+# Exclude test files from coverage reports
+coverageExclude = [
+  "**/*.test.ts",
+  "test-utils/**/*",
+  "e2e/**/*"
+]
+
+# Include test files from co-located structure and test-utils directory
 include = [
   "src/**/*.test.ts",
   "test-utils/**/*.test.ts"
@@ -24,9 +31,7 @@ sourcemap = "external"
 # Exclude test files and development utilities from builds
 exclude = [
   "**/*.test.ts",
-  "**/*.spec.ts",
   "**/*.test.js",
-  "**/*.spec.js",
   "test-utils/",
   "coverage/",
   "docs/",

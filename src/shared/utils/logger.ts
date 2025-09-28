@@ -88,4 +88,15 @@ export class Logger {
       this.output(this.formatMessage('error', message, data));
     }
   }
+
+  /**
+   * Create a child logger with additional context
+   */
+  child(context: Record<string, unknown>): Logger {
+    const childComponent = Object.entries(context)
+      .map(([key, value]) => `${key}:${value}`)
+      .join('|');
+
+    return new Logger(`${this.component}[${childComponent}]`, this.logLevel);
+  }
 }

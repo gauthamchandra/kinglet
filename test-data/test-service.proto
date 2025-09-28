@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package test;
+
+// Test service for gRPC tests
+service TestService {
+  // A simple unary RPC
+  rpc TestCall(TestRequest) returns (TestResponse);
+}
+
+// Test request message
+message TestRequest {
+  string message = 1;
+}
+
+// Test response message
+message TestResponse {
+  string result = 1;
+}

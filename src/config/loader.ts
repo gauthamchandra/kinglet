@@ -8,9 +8,14 @@ import { join } from 'path';
 import type { Config } from './schema.ts';
 import { mapEnvToConfig, validateConfig, validateEnv } from './schema.ts';
 
+// Deep partial type for configuration merging
+type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
 export interface ConfigSource {
   name: string;
-  load(): Promise<Partial<Config> | null>;
+  load(): Promise<DeepPartial<Config> | null>;
 }
 
 /**
@@ -19,7 +24,7 @@ export interface ConfigSource {
 export class EnvConfigSource implements ConfigSource {
   name = 'environment';
 
-  async load(): Promise<Partial<Config> | null> {
+  async load(): Promise<DeepPartial<Config> | null> {
     try {
       const envConfig = validateEnv(process.env);
 
@@ -41,7 +46,7 @@ export class JsonConfigSource implements ConfigSource {
     public readonly name: string = `json:${filePath}`
   ) {}
 
-  async load(): Promise<Partial<Config> | null> {
+  async load(): Promise<DeepPartial<Config> | null> {
     try {
       if (!existsSync(this.filePath)) {
         return null;
@@ -51,7 +56,7 @@ export class JsonConfigSource implements ConfigSource {
       const rawConfig = JSON.parse(content);
 
       // Validate the structure but allow partial configuration
-      return rawConfig as Partial<Config>;
+      return rawConfig as DeepPartial<Config>;
     } catch (error) {
       console.warn(`Failed to load configuration from ${this.filePath}: ${error}`);
 
@@ -95,18 +100,7 @@ export class ConfigLoader {
    * Later sources override earlier sources
    */
   async load(): Promise<Config> {
-    let mergedConfig: Partial<Config> = {
-      server: {},
-      storage: {},
-      auth: {},
-      services: {
-        pubsub: {},
-        scheduler: {},
-        tasks: {},
-        secrets: {},
-      },
-      logging: {},
-    };
+    let mergedConfig: DeepPartial<Config> = {};
 
     for (const source of this.sources) {
       const config = await source.load();
@@ -116,15 +110,33 @@ export class ConfigLoader {
       }
     }
 
+    // Ensure all required top-level objects exist before validation
+    // This allows the Zod schema defaults to be applied properly
+    const configWithDefaults = {
+      server: {},
+      storage: {},
+      auth: {},
+      logging: {},
+      ...mergedConfig,
+      // Ensure nested services objects are merged properly with defaults
+      services: {
+        pubsub: {},
+        scheduler: {},
+        tasks: {},
+        secrets: {},
+        ...mergedConfig.services,
+      },
+    };
+
     // Validate the final merged configuration
-    return validateConfig(mergedConfig);
+    return validateConfig(configWithDefaults);
   }
 
   /**
    * Deep merge two configuration objects
    * Later config values override earlier ones
    */
-  mergeConfigs(target: Partial<Config>, source: Partial<Config>): Partial<Config> {
+  mergeConfigs(target: DeepPartial<Config>, source: DeepPartial<Config>): DeepPartial<Config> {
     const result = { ...target };
 
     for (const [key, value] of Object.entries(source)) {
@@ -135,8 +147,8 @@ export class ConfigLoader {
       if (typeof value === 'object' && !Array.isArray(value) && key in result) {
         // Deep merge objects
         (result as Record<string, unknown>)[key] = this.mergeConfigs(
-          ((result as Record<string, unknown>)[key] as Partial<Config>) || {},
-          value as Partial<Config>
+          ((result as Record<string, unknown>)[key] as DeepPartial<Config>) || {},
+          value as DeepPartial<Config>
         );
       } else {
         // Direct assignment for primitives and arrays
@@ -228,22 +240,22 @@ export async function loadConfigFromEnv(
   const envConfig = validateEnv(env);
   const partialConfig = mapEnvToConfig(envConfig);
 
-  // Provide base configuration structure
-  const baseConfig: Partial<Config> = {
+  // Ensure all required top-level objects exist before validation
+  const configWithDefaults = {
     server: {},
     storage: {},
     auth: {},
+    logging: {},
+    ...partialConfig,
+    // Ensure nested services objects are merged properly with defaults
     services: {
       pubsub: {},
       scheduler: {},
       tasks: {},
       secrets: {},
+      ...partialConfig.services,
     },
-    logging: {},
   };
 
-  const loader = new ConfigLoader();
-  const mergedConfig = loader.mergeConfigs(baseConfig, partialConfig);
-
-  return validateConfig(mergedConfig);
+  return validateConfig(configWithDefaults);
 }
