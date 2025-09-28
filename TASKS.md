@@ -12,18 +12,19 @@ tasks that build incrementally toward a fully functional system.
 ### Phase Overview
 
 1. **Foundation (Week 1)**: Core infrastructure, tooling, and project setup
-2. **Core Framework (Week 2)**: API Gateway, Discovery API, Storage Layer
-3. **Service Implementation (Weeks 3-5)**: Individual GCP service emulation
-4. **Integration & Testing (Week 6)**: End-to-end testing, client library
+2. **Test Migration (Week 1.5)**: Transition to co-located testing structure
+3. **Core Framework (Week 2)**: API Gateway, Discovery API, Storage Layer
+4. **Service Implementation (Weeks 3-5)**: Individual GCP service emulation
+5. **Integration & Testing (Week 6)**: End-to-end testing, client library
    validation
-5. **Deployment & Documentation (Week 7)**: Containerization, deployment,
+6. **Deployment & Documentation (Week 7)**: Containerization, deployment,
    documentation
 
 ## Phase 1: Foundation Setup
 
 ### 1. Project Infrastructure
 
-- [ ] **1.1 Initialize Bun TypeScript Project**
+- [x] **1.1 Initialize Bun TypeScript Project**
   - Create project directory structure
   - Initialize package.json with Bun
   - Configure TypeScript with tsconfig.json
@@ -31,7 +32,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Working Bun project with TypeScript support
   - **Success Criteria**: `bun run --version` works, TypeScript compiles
 
-- [ ] **1.2 Configure Development Tooling**
+- [x] **1.2 Configure Development Tooling**
   - Set up asdf with .tool-versions file
   - Configure ESLint for TypeScript/Bun
   - Set up Prettier with project conventions
@@ -40,7 +41,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Consistent development environment
   - **Success Criteria**: Linting and formatting work on commit
 
-- [ ] **1.3 Establish Project Structure**
+- [x] **1.3 Establish Project Structure**
   - Create src/core directory for framework
   - Create src/services directory for GCP services
   - Create src/shared directory for utilities
@@ -49,7 +50,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Organized project structure
   - **Success Criteria**: Clear separation of concerns
 
-- [ ] **1.4 Set Up Testing Framework**
+- [x] **1.4 Set Up Testing Framework**
   - Configure Bun test runner
   - Set up test utilities and helpers
   - Create test database fixtures
@@ -57,7 +58,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Working test suite
   - **Success Criteria**: `bun test` runs successfully
 
-- [ ] **1.5 Initialize Git Repository**
+- [x] **1.5 Initialize Git Repository**
   - Create .gitignore for Bun/TypeScript
   - Set up branch protection rules
   - Configure GitHub Actions workflow
@@ -67,7 +68,7 @@ tasks that build incrementally toward a fully functional system.
 
 ### 2. Core Dependencies Installation
 
-- [ ] **2.1 Install Runtime Dependencies**
+- [x] **2.1 Install Runtime Dependencies**
   - Add @grpc/grpc-js for gRPC support
   - Add @grpc/proto-loader for protobuf
   - Add zod for validation
@@ -76,7 +77,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Installed core dependencies
   - **Success Criteria**: All imports resolve correctly
 
-- [ ] **2.2 Install Development Dependencies**
+- [x] **2.2 Install Development Dependencies**
   - Add @types/bun
   - Add typescript
   - Add @types/node for compatibility
@@ -87,26 +88,70 @@ tasks that build incrementally toward a fully functional system.
 
 ### 3. Configuration System
 
-- [ ] **3.1 Create Configuration Schema**
+- [x] **3.1 Create Configuration Schema**
   - Define Config interface with Zod
   - Create environment variable mapping
   - Implement configuration validation
   - **Deliverable**: Type-safe configuration
   - **Success Criteria**: Config validates at runtime
+  - **Status**: ✅ Complete - Comprehensive Zod schema implemented with full TypeScript support
+  - **Implementation**: src/config/schema.ts with ConfigSchema, EnvConfigSchema, and validation functions
+  - **Tests**: tests/unit/config-schema.test.ts (100% passing)
 
-- [ ] **3.2 Implement Configuration Loader**
+- [x] **3.2 Implement Configuration Loader**
   - Load from environment variables
   - Load from config files
   - Merge configurations with precedence
   - Validate final configuration
   - **Deliverable**: Flexible configuration system
   - **Success Criteria**: Multiple config sources work
+  - **Status**: ✅ Complete - Multi-source configuration loader with intelligent merging and caching
+  - **Implementation**: src/config/loader.ts with ConfigLoader, JsonConfigSource, EnvConfigSource classes
+  - **Features**: Environment variables, JSON files, precedence system, caching, error handling
+  - **Tests**: tests/unit/config-loader.test.ts (100% passing)
+
+## Phase 1.5: Test Structure Migration
+
+### Test Organization Transition
+
+- [ ] **1.5.1 Update Test Configuration for Co-located Structure**
+  - Update package.json test scripts to support co-located test discovery
+  - Configure Bun test runner to find *.test.ts and *.spec.ts files throughout src/
+  - Update test coverage configuration to exclude test files from coverage reports
+  - Set up test watch mode patterns for co-located tests
+  - **Deliverable**: Updated test configuration supporting co-located structure
+  - **Success Criteria**: `bun test` discovers all tests in both old and new locations
+
+- [ ] **1.5.2 Create Shared Test Utilities Structure**
+  - Create src/shared/test-utils/ directory for common test helpers
+  - Move tests/helpers.ts to src/shared/test-utils/helpers.ts
+  - Move tests/fixtures.ts to src/shared/test-utils/fixtures.ts
+  - Create test database utilities in src/shared/test-utils/database.ts
+  - Update import paths in existing tests to use new shared utilities
+  - **Deliverable**: Centralized test utilities accessible to all co-located tests
+  - **Success Criteria**: All shared test utilities work from new locations
+
+- [ ] **1.5.3 Migrate Foundation Tests to Co-located Structure**
+  - Move tests/unit/dependencies.test.ts to src/shared/test-utils/dependencies.test.ts
+  - Move tests/unit/dev-dependencies.test.ts to src/shared/test-utils/dev-dependencies.test.ts
+  - Update import paths in migrated test files
+  - Verify all foundation tests still pass in new locations
+  - **Deliverable**: Foundation tests co-located with appropriate modules
+  - **Success Criteria**: All foundation tests pass in new locations
+
+- [ ] **1.5.4 Create E2E Test Directory Structure**
+  - Create e2e/ directory for end-to-end tests (separate from co-located tests)
+  - Set up e2e test configuration separate from unit/integration tests
+  - Create e2e/setup.ts for end-to-end test initialization
+  - Configure e2e tests to run independently of co-located tests
+  - **Deliverable**: Dedicated e2e test infrastructure
+  - **Success Criteria**: E2E tests can run independently and don't interfere with co-located tests
 
 ## Phase 2: Core Framework
 
 ### 4. Storage Layer
 
-- [ ] **4.1 Create Storage Abstraction Interface**
+- [x] **4.1 Create Storage Abstraction Interface**
   - Define StorageProvider interface
   - Define query interfaces
   - Define transaction interfaces
@@ -114,7 +159,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Storage abstraction layer
   - **Success Criteria**: Clean separation from implementation
 
-- [ ] **4.2 Implement SQLite Storage**
+- [x] **4.2 Implement SQLite Storage**
   - Initialize Bun SQLite database
   - Create connection pool wrapper
   - Implement CRUD operations
@@ -123,7 +168,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Working SQLite backend
   - **Success Criteria**: All CRUD operations work
 
-- [ ] **4.3 Implement In-Memory Cache**
+- [x] **4.3 Implement In-Memory Cache**
   - Create LRU cache implementation
   - Add TTL support
   - Implement cache invalidation
@@ -131,7 +176,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: High-performance cache layer
   - **Success Criteria**: Sub-millisecond access times
 
-- [ ] **4.4 Create Hybrid Storage Manager**
+- [x] **4.4 Create Hybrid Storage Manager**
   - Implement cache-through logic
   - Add write-behind support
   - Create eviction policies
@@ -261,9 +306,9 @@ tasks that build incrementally toward a fully functional system.
   - Add topic validation
   - Implement topic listing
   - Add label support
-  - Write unit tests
-  - **Deliverable**: Topic management API
-  - **Success Criteria**: All topic operations work
+  - Write comprehensive unit tests co-located with topic implementation
+  - **Deliverable**: Topic management API with co-located tests
+  - **Success Criteria**: All topic operations work and tests pass
 
 - [ ] **9.3 Build Subscription System**
   - Create subscription CRUD
@@ -271,9 +316,9 @@ tasks that build incrementally toward a fully functional system.
   - Add push subscription support
   - Create filter expressions
   - Add dead letter support
-  - Write unit tests
-  - **Deliverable**: Subscription management
-  - **Success Criteria**: Subscriptions receive messages
+  - Write comprehensive unit tests co-located with subscription implementation
+  - **Deliverable**: Subscription management with co-located tests
+  - **Success Criteria**: Subscriptions receive messages and all tests pass
 
 - [ ] **9.4 Implement Message Broker**
   - Create message publishing
@@ -281,9 +326,9 @@ tasks that build incrementally toward a fully functional system.
   - Implement acknowledgment
   - Add retry logic
   - Create delivery tracking
-  - Write integration tests
-  - **Deliverable**: Complete message flow
-  - **Success Criteria**: End-to-end messaging works
+  - Write integration tests co-located with message broker implementation
+  - **Deliverable**: Complete message flow with co-located tests
+  - **Success Criteria**: End-to-end messaging works and all tests pass
 
 - [ ] **9.5 Add Pub/Sub Discovery Document**
   - Generate Discovery Document
@@ -308,18 +353,18 @@ tasks that build incrementally toward a fully functional system.
   - Add job validation
   - Implement job listing
   - Add state management
-  - Write unit tests
-  - **Deliverable**: Job management API
-  - **Success Criteria**: Jobs can be created/modified
+  - Write comprehensive unit tests co-located with job implementation
+  - **Deliverable**: Job management API with co-located tests
+  - **Success Criteria**: Jobs can be created/modified and all tests pass
 
 - [ ] **10.3 Build Cron Engine**
   - Integrate cron-parser
   - Create schedule calculator
   - Add timezone support
   - Implement next-run computation
-  - Write unit tests
-  - **Deliverable**: Cron scheduling engine
-  - **Success Criteria**: Accurate schedule calculation
+  - Write comprehensive unit tests co-located with cron engine implementation
+  - **Deliverable**: Cron scheduling engine with co-located tests
+  - **Success Criteria**: Accurate schedule calculation and all tests pass
 
 - [ ] **10.4 Create Execution Engine**
   - Build job queue processor
@@ -327,9 +372,9 @@ tasks that build incrementally toward a fully functional system.
   - Add Pub/Sub target support
   - Create retry mechanism
   - Add execution logging
-  - Write integration tests
-  - **Deliverable**: Job execution system
-  - **Success Criteria**: Jobs execute on schedule
+  - Write integration tests co-located with execution engine implementation
+  - **Deliverable**: Job execution system with co-located tests
+  - **Success Criteria**: Jobs execute on schedule and all tests pass
 
 - [ ] **10.5 Add Scheduler Discovery Document**
   - Generate Discovery Document
@@ -354,18 +399,18 @@ tasks that build incrementally toward a fully functional system.
   - Add queue state control
   - Implement rate limiting
   - Add statistics tracking
-  - Write unit tests
-  - **Deliverable**: Queue management API
-  - **Success Criteria**: Queues can be managed
+  - Write comprehensive unit tests co-located with queue implementation
+  - **Deliverable**: Queue management API with co-located tests
+  - **Success Criteria**: Queues can be managed and all tests pass
 
 - [ ] **11.3 Build Task Management**
   - Create task creation API
   - Add task scheduling
   - Implement deduplication
   - Add task deletion
-  - Write unit tests
-  - **Deliverable**: Task management system
-  - **Success Criteria**: Tasks can be created/scheduled
+  - Write comprehensive unit tests co-located with task implementation
+  - **Deliverable**: Task management system with co-located tests
+  - **Success Criteria**: Tasks can be created/scheduled and all tests pass
 
 - [ ] **11.4 Create Dispatch Engine**
   - Build token bucket rate limiter
@@ -373,9 +418,9 @@ tasks that build incrementally toward a fully functional system.
   - Add HTTP request execution
   - Create retry logic
   - Add dispatch logging
-  - Write integration tests
-  - **Deliverable**: Task dispatch system
-  - **Success Criteria**: Tasks execute with rate limits
+  - Write integration tests co-located with dispatch engine implementation
+  - **Deliverable**: Task dispatch system with co-located tests
+  - **Success Criteria**: Tasks execute with rate limits and all tests pass
 
 - [ ] **11.5 Add Tasks Discovery Document**
   - Generate Discovery Document
@@ -400,27 +445,27 @@ tasks that build incrementally toward a fully functional system.
   - Create key derivation
   - Add encryption/decryption methods
   - Implement key rotation
-  - Write security tests
-  - **Deliverable**: Secure encryption layer
-  - **Success Criteria**: Data encrypted at rest
+  - Write comprehensive security tests co-located with encryption implementation
+  - **Deliverable**: Secure encryption layer with co-located tests
+  - **Success Criteria**: Data encrypted at rest and all security tests pass
 
 - [ ] **12.3 Build Secret Management**
   - Create secret CRUD operations
   - Add label management
   - Implement secret listing
   - Add TTL support
-  - Write unit tests
-  - **Deliverable**: Secret management API
-  - **Success Criteria**: Secrets can be managed
+  - Write comprehensive unit tests co-located with secret implementation
+  - **Deliverable**: Secret management API with co-located tests
+  - **Success Criteria**: Secrets can be managed and all tests pass
 
 - [ ] **12.4 Create Version Management**
   - Implement version creation
   - Add version access control
   - Create version destruction
   - Add version listing
-  - Write unit tests
-  - **Deliverable**: Version management system
-  - **Success Criteria**: Versions work correctly
+  - Write comprehensive unit tests co-located with version implementation
+  - **Deliverable**: Version management system with co-located tests
+  - **Success Criteria**: Versions work correctly and all tests pass
 
 - [ ] **12.5 Add Secrets Discovery Document**
   - Generate Discovery Document
@@ -591,25 +636,43 @@ tasks that build incrementally toward a fully functional system.
 
 ### Priority Order
 
-1. Complete all Phase 1 tasks before moving to Phase 2
-2. Core Framework (Phase 2) must be complete before services
-3. Implement services in order: Pub/Sub → Scheduler → Tasks → Secrets
-4. Testing should be continuous but Phase 4 is comprehensive validation
-5. Documentation can be written in parallel with development
+1. Complete all Phase 1 tasks before moving to Phase 1.5
+2. Complete test structure migration (Phase 1.5) before Phase 2
+3. Core Framework (Phase 2) must be complete before services
+4. Implement services in order: Pub/Sub → Scheduler → Tasks → Secrets
+5. Co-located testing should be implemented alongside each component
+6. E2E testing (Phase 5) is comprehensive validation after all services complete
+7. Documentation can be written in parallel with development
 
 ### Task Dependencies
 
+- Test migration (Phase 1.5) must be complete before implementing new components
 - Storage Layer must be complete before any service implementation
 - Discovery API required before service registration
 - HTTP/gRPC servers needed before API implementation
+- Co-located tests should be written immediately after implementing each component
 - Integration tests require at least two services complete
+- E2E tests require all services to be implemented
 
 ### Testing Strategy
 
-- Write unit tests immediately after implementing each component
-- Run integration tests after completing each service
-- Perform E2E tests only after all services are implemented
-- Load testing should be done before optimization
+**Co-located Test Organization:**
+- All unit tests are co-located with their source files using *.test.ts or *.spec.ts naming
+- Integration tests remain co-located with services but use *.integration.test.ts naming
+- End-to-end tests remain in dedicated e2e/ directory due to their cross-cutting nature
+- Test utilities and shared helpers moved to src/shared/test-utils/
+
+**Test Execution Strategy:**
+- Write unit tests immediately after implementing each component (co-located)
+- Run integration tests after completing each service (co-located with service)
+- Perform E2E tests only after all services are implemented (in e2e/ directory)
+- Load testing should be done before optimization (co-located with performance components)
+
+**Migration Requirements:**
+- All existing tests in tests/ directory must be migrated to co-located structure
+- Import paths updated to reflect new co-located organization
+- Test configuration updated to discover *.test.ts and *.spec.ts files throughout src/
+- Coverage reporting configured to exclude test files and analyze only source files
 
 ### Success Metrics
 
@@ -639,42 +702,52 @@ tasks that build incrementally toward a fully functional system.
 ### Phase Breakdown
 
 - **Phase 1**: 5 days (Foundation)
+- **Phase 1.5**: 2 days (Test Migration)
 - **Phase 2**: 8 days (Core Framework)
 - **Phase 3**: 15 days (Services)
-- **Phase 4**: 5 days (Testing)
+- **Phase 4**: 5 days (Integration & Testing)
 - **Phase 5**: 5 days (Deployment)
 
 ### Total Effort
 
-- **Development**: 38 days
-- **Testing**: Continuous (included above)
+- **Development**: 40 days (including test migration)
+- **Testing**: Continuous co-located testing (included above)
 - **Documentation**: 3 days (parallel)
-- **Total Timeline**: 7-8 weeks with single developer
+- **Total Timeline**: 8-9 weeks with single developer
 
 ## Definition of Done
 
 Each task is considered complete when:
 
 1. Code is implemented and working
-2. Unit tests are written and passing
-3. Integration tests pass (where applicable)
-4. Documentation is updated
-5. Code review is complete (if team)
-6. Performance benchmarks are met
+2. Unit tests are co-located with source code and passing (*.test.ts or *.spec.ts)
+3. Integration tests are co-located with services and passing (*.integration.test.ts where applicable)
+4. Test coverage meets minimum requirements (>80%)
+5. Documentation is updated
+6. Code review is complete (if team)
+7. Performance benchmarks are met
+8. All co-located tests can be discovered and executed by `bun test`
 
 ## Next Steps
 
-1. Review and approve this task list
+1. Review and approve this updated task list with co-located testing strategy
 2. Set up project repository and tooling
 3. Begin Phase 1 implementation
-4. Establish daily progress tracking
-5. Plan weekly milestone reviews
+4. Execute Phase 1.5 test migration to co-located structure
+5. Begin Phase 2 implementation with co-located tests
+6. Establish daily progress tracking
+7. Plan weekly milestone reviews
 
 ## Document Control
 
 ### Version History
 
 - **v1.0.0** (2025-09-27): Initial task breakdown
+- **v1.1.0** (2025-09-27): Updated to reflect co-located testing strategy from DESIGN.md
+  - Added Phase 1.5 for test structure migration
+  - Updated all service implementation tasks to include co-located testing
+  - Added test migration tasks for existing tests in tests/ directory
+  - Updated testing strategy, dependencies, and success criteria
 
 ### Status
 

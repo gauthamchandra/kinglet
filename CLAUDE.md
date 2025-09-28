@@ -72,6 +72,13 @@ This project uses Bun as the primary runtime (see docs/adrs/001-bun-runtime-choi
 - `WebSocket` is built-in (don't use ws)
 - `Bun.file` for file operations (prefer over node:fs)
 
+### TypeScript Types
+When using TypeScript with Bun runtime, avoid Node.js-specific types:
+- Use `number` for timers (not `NodeJS.Timeout`)
+- Use standard Web API types (not Node.js equivalents)
+- Use `Bun.*` types for Bun-specific APIs
+- Prefer global JavaScript types over `NodeJS.*` namespace types
+
 ## Testing
 
 Uses Bun's built-in test runner with setup in `tests/setup.ts`:
@@ -86,4 +93,8 @@ test("example test", () => {
 
 Test environment is configured to use error-level logging and test NODE_ENV.
 - When implmenting a task, be sure to first read through the ADRs that exist in docs/adrs so you understand the historical decisions that have been made.
-- When writing typescript code, don't use the `any` type as it's bad practice. Always use `unknown` for that.
+- Use `unknown` instead of `any` type in TypeScript
+- Avoid non-null assertions (`!`) - prefer clear type definitions or optional chaining (`?`)
+- Co-locate tests with source files for easier discovery
+- Try to use `bunx` over `npx` wherever possible
+- When moving code to a new location in response to feedback from the user, do not leave useless comments such as "// BEGIN is now called explicitly via begin() method".

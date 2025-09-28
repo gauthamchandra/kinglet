@@ -24,8 +24,8 @@ export interface DiscoveryDocument {
   basePath: string;
   rootUrl: string;
   servicePath: string;
-  resources: Record<string, any>;
-  schemas: Record<string, any>;
+  resources: Record<string, unknown>;
+  schemas: Record<string, unknown>;
 }
 
 export interface Router {
@@ -43,7 +43,7 @@ export interface RequestHandler {
 export interface RequestContext {
   params: Record<string, string>;
   query: Record<string, string>;
-  body?: any;
+  body?: unknown;
   user?: AuthContext;
 }
 
@@ -123,7 +123,7 @@ export interface ErrorResponse {
     status: string;
     details?: Array<{
       '@type': string;
-      [key: string]: any;
+      [key: string]: unknown;
     }>;
   };
 }
@@ -138,7 +138,7 @@ export interface StorageProvider {
 }
 
 export interface QueryConditions {
-  where?: Record<string, any>;
+  where?: Record<string, unknown>;
   orderBy?: string;
   limit?: number;
   offset?: number;
@@ -147,5 +147,5 @@ export interface QueryConditions {
 export interface Operation {
   type: 'get' | 'set' | 'delete';
   key: string;
-  value?: any;
+  value?: unknown;
 }

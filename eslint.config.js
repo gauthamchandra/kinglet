@@ -17,6 +17,7 @@ export default [
       globals: {
         // Bun globals
         Bun: 'readonly',
+        fetch: 'readonly',
         // Node.js globals
         process: 'readonly',
         console: 'readonly',

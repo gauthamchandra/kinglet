@@ -15,7 +15,6 @@ import {
   loadConfigFromFile,
   loadConfigFromEnv,
 } from '@/config/loader.ts';
-import type { Config } from '@/config/schema.ts';
 
 describe('Configuration Loader', () => {
   const testConfigPath = join(process.cwd(), 'test-config.json');
@@ -49,9 +48,9 @@ describe('Configuration Loader', () => {
       const config = await source.load();
 
       expect(config).not.toBeNull();
-      expect(config!.server?.httpPort).toBe(9000);
-      expect(config!.server?.grpcPort).toBe(9001);
-      expect(config!.logging?.level).toBe('debug');
+      expect(config?.server?.httpPort).toBe(9000);
+      expect(config?.server?.grpcPort).toBe(9001);
+      expect(config?.logging?.level).toBe('debug');
     });
 
     test('should return null for non-existent file', async () => {
@@ -84,9 +83,9 @@ describe('Configuration Loader', () => {
         const config = await source.load();
 
         expect(config).not.toBeNull();
-        expect(config!.server?.httpPort).toBe(8080);
-        expect(config!.logging?.level).toBe('debug');
-        expect(config!.storage?.type).toBe('memory');
+        expect(config?.server?.httpPort).toBe(8080);
+        expect(config?.logging?.level).toBe('debug');
+        expect(config?.storage?.type).toBe('memory');
       } finally {
         process.env = originalEnv;
       }
@@ -104,9 +103,11 @@ describe('Configuration Loader', () => {
       );
 
       const loader = new ConfigLoader();
+
       loader.addJsonFile(testConfigPath);
 
       const originalEnv = { ...process.env };
+
       try {
         process.env.LOG_LEVEL = 'debug';
         process.env.GRPC_PORT = '8081';
@@ -146,6 +147,7 @@ describe('Configuration Loader', () => {
         );
 
         const loader = new ConfigLoader();
+
         loader.addJsonFile(firstConfigPath);
         loader.addJsonFile(secondConfigPath);
 
@@ -174,6 +176,7 @@ describe('Configuration Loader', () => {
   describe('createStandardLoader', () => {
     test('should create loader with standard configuration sources', () => {
       const loader = createStandardLoader();
+
       expect(loader).toBeInstanceOf(ConfigLoader);
     });
   });
@@ -188,6 +191,7 @@ describe('Configuration Loader', () => {
 
     test('should load fresh configuration after reset', async () => {
       const config1 = await getConfig();
+
       resetConfig();
       const config2 = await getConfig();
 
