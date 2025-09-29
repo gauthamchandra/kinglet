@@ -4,7 +4,7 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { StorageManager } from './manager';
-import { StorageConfig, BaseRecord, QueryFilter } from './types';
+import type { StorageConfig, BaseRecord, QueryFilter } from './types';
 
 interface TestRecord extends BaseRecord {
   name: string;
@@ -203,7 +203,8 @@ describe('StorageManager', () => {
       await manager.findById<TestRecord>('test_records', created.id);
 
       // Check if it's cached
-      const cached = await cache!.get(`test_records:${created.id}`);
+      if (!cache) throw new Error('cache should be available');
+      const cached = await cache.get(`test_records:${created.id}`);
 
       expect(cached).not.toBeNull();
     });
@@ -224,23 +225,24 @@ describe('StorageManager', () => {
 
       // Cache the record
       await manager.findById<TestRecord>('test_records', created.id);
-      let cached = await cache!.get(`test_records:${created.id}`);
+      if (!cache) throw new Error('cache should be available');
+      let cached = await cache.get(`test_records:${created.id}`);
 
       expect(cached).not.toBeNull();
 
       // Update should invalidate cache
       await manager.updateById<TestRecord>('test_records', created.id, { age: 31 });
-      cached = await cache!.get(`test_records:${created.id}`);
+      cached = await cache.get(`test_records:${created.id}`);
       expect(cached).toBeNull();
 
       // Cache again
       await manager.findById<TestRecord>('test_records', created.id);
-      cached = await cache!.get(`test_records:${created.id}`);
+      cached = await cache.get(`test_records:${created.id}`);
       expect(cached).not.toBeNull();
 
       // Delete should invalidate cache
       await manager.deleteById('test_records', created.id);
-      cached = await cache!.get(`test_records:${created.id}`);
+      cached = await cache.get(`test_records:${created.id}`);
       expect(cached).toBeNull();
     });
   });
@@ -331,7 +333,7 @@ describe('StorageManager', () => {
     });
 
     test('should emit events for storage operations', async () => {
-      const events: unknown[] = [];
+      const events: Array<{ type: string; data: unknown }> = [];
 
       manager.on('record:created', data => {
         events.push({ type: 'created', data });
@@ -360,9 +362,9 @@ describe('StorageManager', () => {
       await manager.deleteById('test_records', created.id);
 
       expect(events).toHaveLength(3);
-      expect(events[0].type).toBe('created');
-      expect(events[1].type).toBe('updated');
-      expect(events[2].type).toBe('deleted');
+      expect(events[0]?.type).toBe('created');
+      expect(events[1]?.type).toBe('updated');
+      expect(events[2]?.type).toBe('deleted');
     });
 
     test('should support event listener removal', async () => {
@@ -411,9 +413,9 @@ describe('StorageManager', () => {
     test('should throw error for unsupported storage type', async () => {
       const invalidManager = new StorageManager();
 
-      await expect(invalidManager.initialize({ type: 'invalid' as unknown })).rejects.toThrow(
-        'Unsupported storage type'
-      );
+      await expect(
+        invalidManager.initialize({ type: 'invalid' as 'memory' | 'sqlite' })
+      ).rejects.toThrow('Unsupported storage type');
     });
   });
 

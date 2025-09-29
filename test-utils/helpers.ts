@@ -6,12 +6,20 @@ import type { Config, StorageProvider } from '@/shared/types/index.ts';
 
 /**
  * Create a test configuration with defaults
+ * Uses dynamic port allocation to avoid conflicts
  */
-export function createTestConfig(overrides: Partial<Config> = {}): Config {
+export async function createTestConfig(overrides: Partial<Config> = {}): Promise<Config> {
+  const ports = await getAvailablePorts(2);
+  if (ports.length < 2) {
+    throw new Error('Failed to allocate required ports');
+  }
+  const httpPort = ports[0]!;
+  const grpcPort = ports[1]!;
+
   return {
     server: {
-      httpPort: 9000,
-      grpcPort: 9001,
+      httpPort,
+      grpcPort,
       maxConnections: 10,
     },
     storage: {
@@ -100,14 +108,19 @@ export function createTestRequest(
   body?: any,
   headers: Record<string, string> = {}
 ): Request {
-  return new Request(url, {
+  const requestInit: RequestInit = {
     method,
-    body: body ? JSON.stringify(body) : undefined,
     headers: {
       'Content-Type': 'application/json',
       ...headers,
     },
-  });
+  };
+
+  if (body) {
+    requestInit.body = JSON.stringify(body);
+  }
+
+  return new Request(url, requestInit);
 }
 
 /**
@@ -122,6 +135,43 @@ export function delay(ms: number): Promise<void> {
  */
 export function generateTestId(): string {
   return `test-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+}
+
+/**
+ * Find an available port using Node.js net module
+ * Returns a promise that resolves to an available port number
+ */
+export async function getAvailablePort(): Promise<number> {
+  const net = await import('node:net');
+
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+
+    server.listen(0, () => {
+      const address = server.address();
+      if (address && typeof address === 'object') {
+        const port = address.port;
+        server.close(() => resolve(port));
+      } else {
+        server.close(() => reject(new Error('Failed to get server address')));
+      }
+    });
+
+    server.on('error', err => {
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Get multiple available ports at once
+ */
+export async function getAvailablePorts(count: number): Promise<number[]> {
+  const ports: number[] = [];
+  for (let i = 0; i < count; i++) {
+    ports.push(await getAvailablePort());
+  }
+  return ports;
 }
 
 /**

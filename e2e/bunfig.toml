@@ -1,0 +1,27 @@
+# E2E Test Configuration for Bun
+# This configuration is specifically for end-to-end tests
+
+[test]
+# E2E test-specific setup
+preload = "./setup.ts"
+
+# Only include E2E tests when running from this directory
+include = [
+  "./**/*.test.ts",
+  "./**/*.e2e.ts"
+]
+
+# Exclude other test types to ensure E2E tests run independently
+exclude = [
+  "src/**/*.test.ts",
+  "test-utils/**/*.test.ts"
+]
+
+# E2E tests may need more time
+timeout = 30000
+
+# Coverage not needed for E2E tests (they test integration, not code coverage)
+coverage = false
+
+# Reduce parallel execution for E2E tests to avoid resource contention
+concurrency = 1

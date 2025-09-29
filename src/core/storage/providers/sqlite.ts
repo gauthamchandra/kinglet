@@ -5,25 +5,28 @@
  */
 
 import { Database } from 'bun:sqlite';
+import type { SQLQueryBindings } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import {
+  ConnectionError,
+  ConflictError,
+  StorageError,
+  TransactionError,
+  ValidationError,
+} from '../types.js';
+import type {
   BaseRecord,
   CacheOperations,
   ColumnDefinition,
-  ConnectionError,
-  ConflictError,
   QueryCondition,
   QueryFilter,
   QueryOptions,
   QueryResult,
   StorageConfig,
-  StorageError,
   StorageProvider,
   TableSchema,
   Transaction,
-  TransactionError,
   TransactionOptions,
-  ValidationError,
 } from '../types.js';
 
 /**
@@ -157,11 +160,15 @@ export class SQLiteStorageProvider implements StorageProvider {
     try {
       const columns = Object.keys(recordData);
       const placeholders = columns.map(() => '?').join(', ');
-      const values = Object.values(recordData).map(value => this.serializeValue(value));
+      const values = Object.values(recordData).map(value => this.serializeValue(value)) as (
+        | string
+        | number
+        | null
+      )[];
 
       const query = `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
 
-      this.db.run(query, ...values);
+      this.db.run(query, values);
 
       return recordData as T;
     } catch (error) {
@@ -197,11 +204,15 @@ export class SQLiteStorageProvider implements StorageProvider {
 
         const columns = Object.keys(recordData);
         const placeholders = columns.map(() => '?').join(', ');
-        const values = Object.values(recordData).map(value => this.serializeValue(value));
+        const values = Object.values(recordData).map(value => this.serializeValue(value)) as (
+          | string
+          | number
+          | null
+        )[];
 
         const query = `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
 
-        this.db.run(query, ...values);
+        this.db.run(query, values);
 
         records.push(recordData);
       }
@@ -278,12 +289,14 @@ export class SQLiteStorageProvider implements StorageProvider {
       const offset = options.pagination?.offset ?? 0;
       const hasMore = offset + data.length < total;
 
-      return {
+      const result: QueryResult<T> = {
         data,
         total,
         hasMore,
-        nextCursor: hasMore ? String(offset + limit) : undefined,
+        ...(hasMore && { nextCursor: String(offset + limit) }),
       };
+
+      return result;
     } catch (error) {
       throw new StorageError('Failed to find records', 'FIND_MANY_FAILED', error as Error);
     }
@@ -355,7 +368,9 @@ export class SQLiteStorageProvider implements StorageProvider {
 
       const columns = Object.keys(updateData);
       const setClause = columns.map(col => `${col} = ?`).join(', ');
-      const setValues = Object.values(updateData).map(value => this.serializeValue(value));
+      const setValues = Object.values(updateData).map(value =>
+        this.serializeValue(value)
+      ) as SQLQueryBindings[];
 
       const query = `UPDATE ${table} SET ${setClause} WHERE ${whereClause}`;
       const stmt = this.db.prepare(query);
@@ -424,7 +439,7 @@ export class SQLiteStorageProvider implements StorageProvider {
 
     try {
       let query = `SELECT COUNT(*) as count FROM ${table}`;
-      let params: unknown[] = [];
+      let params: SQLQueryBindings[] = [];
 
       if (filter) {
         const { whereClause, params: whereParams } = this.buildWhereClause(filter);
@@ -563,7 +578,7 @@ export class SQLiteStorageProvider implements StorageProvider {
   }
 
   private buildQuery(options: QueryOptions) {
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
     let whereClause = '';
     let orderClause = '';
     let limitClause = '';
@@ -599,8 +614,11 @@ export class SQLiteStorageProvider implements StorageProvider {
     return { whereClause, orderClause, limitClause, params };
   }
 
-  private buildWhereClause(filter: QueryFilter): { whereClause: string; params: unknown[] } {
-    const params: unknown[] = [];
+  private buildWhereClause(filter: QueryFilter): {
+    whereClause: string;
+    params: SQLQueryBindings[];
+  } {
+    const params: SQLQueryBindings[] = [];
     const conditions: string[] = [];
 
     for (const condition of filter.conditions) {
@@ -609,9 +627,9 @@ export class SQLiteStorageProvider implements StorageProvider {
       conditions.push(clause);
       if (param !== undefined) {
         if (Array.isArray(param)) {
-          params.push(...param);
+          params.push(...(param as SQLQueryBindings[]));
         } else {
-          params.push(param);
+          params.push(param as SQLQueryBindings);
         }
       }
     }
@@ -722,7 +740,7 @@ export class SQLiteStorageProvider implements StorageProvider {
 
   private deserializeRecord<T extends BaseRecord>(record: T): T {
     // Convert date strings back to Date objects
-    const result = { ...record };
+    const result = { ...record } as Record<string, unknown>;
 
     if (typeof result.createdAt === 'string') {
       result.createdAt = new Date(result.createdAt);
@@ -747,7 +765,7 @@ export class SQLiteStorageProvider implements StorageProvider {
       }
     }
 
-    return result;
+    return result as T;
   }
 
   private serializeValue(value: unknown): string | number | null {

@@ -56,6 +56,11 @@ export const ConfigSchema = z.object({
 // Infer the TypeScript type from the schema
 export type Config = z.infer<typeof ConfigSchema>;
 
+// Deep partial type for configuration merging
+type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
 // Environment variable mapping schema
 export const EnvConfigSchema = z.object({
   // Server configuration
@@ -110,61 +115,100 @@ export type EnvConfig = z.infer<typeof EnvConfigSchema>;
 /**
  * Map environment variables to configuration structure
  */
-export function mapEnvToConfig(env: EnvConfig): Partial<Config> {
-  const config: Partial<Config> = {
-    server: {},
-    storage: {},
-    auth: {},
-    services: {
-      pubsub: {},
-      scheduler: {},
-      tasks: {},
-      secrets: {},
-    },
-    logging: {},
-  };
+export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
+  const config: DeepPartial<Config> = {};
 
   // Map server configuration
-  if (env.PORT !== undefined) config.server.httpPort = env.PORT;
-  if (env.HTTP_PORT !== undefined) config.server.httpPort = env.HTTP_PORT;
-  if (env.GRPC_PORT !== undefined) config.server.grpcPort = env.GRPC_PORT;
-  if (env.MAX_CONNECTIONS !== undefined) config.server.maxConnections = env.MAX_CONNECTIONS;
+  if (
+    env.PORT !== undefined ||
+    env.HTTP_PORT !== undefined ||
+    env.GRPC_PORT !== undefined ||
+    env.MAX_CONNECTIONS !== undefined
+  ) {
+    config.server = {};
+    if (env.PORT !== undefined) config.server.httpPort = env.PORT;
+    if (env.HTTP_PORT !== undefined) config.server.httpPort = env.HTTP_PORT;
+    if (env.GRPC_PORT !== undefined) config.server.grpcPort = env.GRPC_PORT;
+    if (env.MAX_CONNECTIONS !== undefined) config.server.maxConnections = env.MAX_CONNECTIONS;
+  }
 
   // Map storage configuration
-  if (env.STORAGE_TYPE !== undefined) config.storage.type = env.STORAGE_TYPE;
-  if (env.SQLITE_PATH !== undefined) config.storage.sqlitePath = env.SQLITE_PATH;
-  if (env.CACHE_SIZE !== undefined) config.storage.cacheSize = env.CACHE_SIZE;
+  if (
+    env.STORAGE_TYPE !== undefined ||
+    env.SQLITE_PATH !== undefined ||
+    env.CACHE_SIZE !== undefined
+  ) {
+    config.storage = {};
+    if (env.STORAGE_TYPE !== undefined) config.storage.type = env.STORAGE_TYPE;
+    if (env.SQLITE_PATH !== undefined) config.storage.sqlitePath = env.SQLITE_PATH;
+    if (env.CACHE_SIZE !== undefined) config.storage.cacheSize = env.CACHE_SIZE;
+  }
 
   // Map authentication configuration
-  if (env.AUTH_ENABLED !== undefined) config.auth.enabled = env.AUTH_ENABLED;
-  if (env.AUTH_MODE !== undefined) config.auth.mode = env.AUTH_MODE;
-  if (env.MOCK_PROJECT_ID !== undefined || env.MOCK_SERVICE_ACCOUNT !== undefined) {
-    config.auth.mockCredentials = {
-      projectId: env.MOCK_PROJECT_ID || 'localstack-project',
-      serviceAccount:
-        env.MOCK_SERVICE_ACCOUNT || 'localstack@localstack-project.iam.gserviceaccount.com',
-    };
+  if (
+    env.AUTH_ENABLED !== undefined ||
+    env.AUTH_MODE !== undefined ||
+    env.MOCK_PROJECT_ID !== undefined ||
+    env.MOCK_SERVICE_ACCOUNT !== undefined
+  ) {
+    config.auth = {};
+    if (env.AUTH_ENABLED !== undefined) config.auth.enabled = env.AUTH_ENABLED;
+    if (env.AUTH_MODE !== undefined) config.auth.mode = env.AUTH_MODE;
+    if (env.MOCK_PROJECT_ID !== undefined || env.MOCK_SERVICE_ACCOUNT !== undefined) {
+      config.auth.mockCredentials = {
+        projectId: env.MOCK_PROJECT_ID || 'localstack-project',
+        serviceAccount:
+          env.MOCK_SERVICE_ACCOUNT || 'localstack@localstack-project.iam.gserviceaccount.com',
+      };
+    }
   }
 
-  // Map services configuration from SERVICES environment variable
-  if (env.SERVICES !== undefined) {
-    const enabledServices = env.SERVICES.split(',').map(s => s.trim().toLowerCase());
+  // Map services configuration
+  const hasServiceConfig =
+    env.SERVICES !== undefined ||
+    env.ENABLE_PUBSUB !== undefined ||
+    env.ENABLE_SCHEDULER !== undefined ||
+    env.ENABLE_TASKS !== undefined ||
+    env.ENABLE_SECRETS !== undefined;
 
-    config.services.pubsub.enabled = enabledServices.includes('pubsub');
-    config.services.scheduler.enabled = enabledServices.includes('scheduler');
-    config.services.tasks.enabled = enabledServices.includes('tasks');
-    config.services.secrets.enabled = enabledServices.includes('secrets');
+  if (hasServiceConfig) {
+    config.services = {};
+
+    // Map services configuration from SERVICES environment variable
+    if (env.SERVICES !== undefined) {
+      const enabledServices = env.SERVICES.split(',').map(s => s.trim().toLowerCase());
+
+      config.services.pubsub = { enabled: enabledServices.includes('pubsub') };
+      config.services.scheduler = { enabled: enabledServices.includes('scheduler') };
+      config.services.tasks = { enabled: enabledServices.includes('tasks') };
+      config.services.secrets = { enabled: enabledServices.includes('secrets') };
+    }
+
+    // Map individual service enablement
+    if (env.ENABLE_PUBSUB !== undefined) {
+      if (!config.services.pubsub) config.services.pubsub = {};
+      config.services.pubsub.enabled = env.ENABLE_PUBSUB;
+    }
+    if (env.ENABLE_SCHEDULER !== undefined) {
+      if (!config.services.scheduler) config.services.scheduler = {};
+      config.services.scheduler.enabled = env.ENABLE_SCHEDULER;
+    }
+    if (env.ENABLE_TASKS !== undefined) {
+      if (!config.services.tasks) config.services.tasks = {};
+      config.services.tasks.enabled = env.ENABLE_TASKS;
+    }
+    if (env.ENABLE_SECRETS !== undefined) {
+      if (!config.services.secrets) config.services.secrets = {};
+      config.services.secrets.enabled = env.ENABLE_SECRETS;
+    }
   }
-
-  // Map individual service enablement
-  if (env.ENABLE_PUBSUB !== undefined) config.services.pubsub.enabled = env.ENABLE_PUBSUB;
-  if (env.ENABLE_SCHEDULER !== undefined) config.services.scheduler.enabled = env.ENABLE_SCHEDULER;
-  if (env.ENABLE_TASKS !== undefined) config.services.tasks.enabled = env.ENABLE_TASKS;
-  if (env.ENABLE_SECRETS !== undefined) config.services.secrets.enabled = env.ENABLE_SECRETS;
 
   // Map logging configuration
-  if (env.LOG_LEVEL !== undefined) config.logging.level = env.LOG_LEVEL;
-  if (env.LOG_FORMAT !== undefined) config.logging.format = env.LOG_FORMAT;
+  if (env.LOG_LEVEL !== undefined || env.LOG_FORMAT !== undefined) {
+    config.logging = {};
+    if (env.LOG_LEVEL !== undefined) config.logging.level = env.LOG_LEVEL;
+    if (env.LOG_FORMAT !== undefined) config.logging.format = env.LOG_FORMAT;
+  }
 
   return config;
 }

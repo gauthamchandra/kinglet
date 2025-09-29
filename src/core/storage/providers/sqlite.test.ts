@@ -4,7 +4,7 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { SQLiteStorageProvider } from './sqlite';
-import { StorageConfig, BaseRecord, QueryFilter } from '../types';
+import type { StorageConfig, BaseRecord, QueryFilter, QueryOperator } from '../types';
 
 interface TestRecord extends BaseRecord {
   name: string;
@@ -98,9 +98,9 @@ describe('SQLiteStorageProvider', () => {
       const created = await provider.createMany<TestRecord>('test_records', data);
 
       expect(created).toHaveLength(3);
-      expect(created[0].name).toBe('Alice');
-      expect(created[1].name).toBe('Bob');
-      expect(created[2].name).toBe('Charlie');
+      expect(created[0]?.name).toBe('Alice');
+      expect(created[1]?.name).toBe('Bob');
+      expect(created[2]?.name).toBe('Charlie');
     });
 
     test('should find record by ID', async () => {
@@ -224,9 +224,9 @@ describe('SQLiteStorageProvider', () => {
         sort: [{ field: 'age', direction: 'desc' }],
       });
 
-      expect(result.data[0].age).toBe(35); // Bob
-      expect(result.data[1].age).toBe(32); // David
-      expect(result.data[2].age).toBe(28); // Charlie
+      expect(result.data[0]?.age).toBe(35); // Bob
+      expect(result.data[1]?.age).toBe(32); // David
+      expect(result.data[2]?.age).toBe(28); // Charlie
     });
 
     test('should paginate results', async () => {
@@ -428,7 +428,7 @@ describe('SQLiteStorageProvider', () => {
 
     test('should handle invalid query operators', async () => {
       const filter: QueryFilter = {
-        conditions: [{ field: 'name', operator: 'invalid' as unknown, value: 'test' }],
+        conditions: [{ field: 'name', operator: 'invalid' as QueryOperator, value: 'test' }],
       };
 
       await expect(provider.find('test_records', { filter })).rejects.toThrow();
@@ -479,18 +479,19 @@ describe('SQLiteStorageProvider', () => {
       const retrieved = await provider.findById<NumericTestRecord>('numeric_records', created.id);
 
       expect(retrieved).not.toBeNull();
-      expect(retrieved!.priority).toBe(0);
-      expect(retrieved!.version).toBe(1);
-      expect(retrieved!.discount).toBe(0);
-      expect(retrieved!.canvas_width).toBe(1);
-      expect(retrieved!.status).toBe(0);
+      if (!retrieved) throw new Error('retrieved should not be null');
+      expect(retrieved.priority).toBe(0);
+      expect(retrieved.version).toBe(1);
+      expect(retrieved.discount).toBe(0);
+      expect(retrieved.canvas_width).toBe(1);
+      expect(retrieved.status).toBe(0);
 
       // Ensure they are numbers, not booleans
-      expect(typeof retrieved!.priority).toBe('number');
-      expect(typeof retrieved!.version).toBe('number');
-      expect(typeof retrieved!.discount).toBe('number');
-      expect(typeof retrieved!.canvas_width).toBe('number');
-      expect(typeof retrieved!.status).toBe('number');
+      expect(typeof retrieved.priority).toBe('number');
+      expect(typeof retrieved.version).toBe('number');
+      expect(typeof retrieved.discount).toBe('number');
+      expect(typeof retrieved.canvas_width).toBe('number');
+      expect(typeof retrieved.status).toBe('number');
     });
 
     test('should handle updates of numeric 0/1 values correctly', async () => {
@@ -513,18 +514,19 @@ describe('SQLiteStorageProvider', () => {
       });
 
       expect(updated).not.toBeNull();
-      expect(updated!.priority).toBe(1);
-      expect(updated!.version).toBe(1);
-      expect(updated!.discount).toBe(0);
-      expect(updated!.canvas_width).toBe(1);
-      expect(updated!.status).toBe(0);
+      if (!updated) throw new Error('updated should not be null');
+      expect(updated.priority).toBe(1);
+      expect(updated.version).toBe(1);
+      expect(updated.discount).toBe(0);
+      expect(updated.canvas_width).toBe(1);
+      expect(updated.status).toBe(0);
 
       // Ensure they are still numbers, not booleans
-      expect(typeof updated!.priority).toBe('number');
-      expect(typeof updated!.version).toBe('number');
-      expect(typeof updated!.discount).toBe('number');
-      expect(typeof updated!.canvas_width).toBe('number');
-      expect(typeof updated!.status).toBe('number');
+      expect(typeof updated.priority).toBe('number');
+      expect(typeof updated.version).toBe('number');
+      expect(typeof updated.discount).toBe('number');
+      expect(typeof updated.canvas_width).toBe('number');
+      expect(typeof updated.status).toBe('number');
     });
   });
 });

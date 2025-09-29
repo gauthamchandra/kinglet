@@ -4,7 +4,7 @@
  * This module defines the main interfaces for the storage abstraction layer.
  */
 
-import {
+import type {
   BaseRecord,
   CacheOperations,
   QueryOptions,

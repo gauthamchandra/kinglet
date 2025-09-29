@@ -78,23 +78,49 @@ When using TypeScript with Bun runtime, avoid Node.js-specific types:
 - Use standard Web API types (not Node.js equivalents)
 - Use `Bun.*` types for Bun-specific APIs
 - Prefer global JavaScript types over `NodeJS.*` namespace types
+- Use `unknown` instead of `any` type in TypeScript
+- Avoid non-null assertions (`!`) - prefer clear type definitions or optional chaining (`?`)
 
 ## Testing
 
-Uses Bun's built-in test runner with setup in `tests/setup.ts`:
+**PURE BUN TESTING ONLY** - We use Bun's built-in test runner exclusively (see ADR-002):
 
 ```ts
-import { test, expect } from "bun:test";
+import { test, expect, mock, spyOn } from "bun:test";
 
 test("example test", () => {
   expect(1).toBe(1);
 });
+
+// Use mock() instead of jest.fn()
+const mockFunction = mock(() => 'mocked result');
+
+// Use spyOn for function spying
+const spy = spyOn(object, 'method');
 ```
+
+### Testing Standards
+- **Always use `mock()` instead of `jest.fn()`** - Never import `jest` from `bun:test`
+- **Use pure Bun primitives** - `mock()`, `spyOn()`, etc.
+- **Single test command** - `bun test` runs all tests (unit, integration, e2e)
+- **Co-locate tests** with source files for easier discovery
+- **Reset mocks properly** - Use `mockFunction.mockReset()` instead of `jest.clearAllMocks()`
 
 Test environment is configured to use error-level logging and test NODE_ENV.
 - When implmenting a task, be sure to first read through the ADRs that exist in docs/adrs so you understand the historical decisions that have been made.
-- Use `unknown` instead of `any` type in TypeScript
-- Avoid non-null assertions (`!`) - prefer clear type definitions or optional chaining (`?`)
 - Co-locate tests with source files for easier discovery
 - Try to use `bunx` over `npx` wherever possible
 - When moving code to a new location in response to feedback from the user, do not leave useless comments such as "// BEGIN is now called explicitly via begin() method".
+- Avoid non-null assertions (`!`) - they trigger ESLint warnings. Use type guards, optional chaining (`?.`), or refine type definitions instead
+- Avoid empty interface definitions - use `Record<never, never>` for truly empty types or union types with specific values instead. Empty interfaces provide no type safety and can be extended unexpectedly
+- For readability, when writing Typescript code, add a padding line between key statements to increase legibility. So instead of this:     const listeners = this.eventListeners.get(event);
+    if (!listeners) {
+      throw new Error('Event listeners set should exist after initialization');
+    }
+, do this:     const listeners = this.eventListeners.get(event);
+
+    if (!listeners) {
+      throw new Error('Event listeners set should exist after initialization');
+    }
+- When writing typescript code, use substring() instead of the deprecated substr() method.
+- When importing types in Typescript, they must be imported using a type-only import. So instead of `import { StorageConfig } from '../types'`, do `import type { StorageConfig } from '../types'`.

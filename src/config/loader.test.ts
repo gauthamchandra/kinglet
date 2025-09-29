@@ -35,9 +35,18 @@ describe('Configuration Loader', () => {
   afterEach(() => {
     resetConfig();
     // Clean up test files
-    if (existsSync(testConfigPath)) {
-      unlinkSync(testConfigPath);
-    }
+    const testFiles = [
+      testConfigPath,
+      join(process.cwd(), 'invalid-test-config.json'),
+      join(process.cwd(), 'first-config.json'),
+      join(process.cwd(), 'second-config.json'),
+    ];
+
+    testFiles.forEach(filePath => {
+      if (existsSync(filePath)) {
+        unlinkSync(filePath);
+      }
+    });
   });
 
   describe('JsonConfigSource', () => {
@@ -61,12 +70,19 @@ describe('Configuration Loader', () => {
     });
 
     test('should handle invalid JSON gracefully', async () => {
-      writeFileSync(testConfigPath, 'invalid json');
+      const invalidConfigPath = join(process.cwd(), 'invalid-test-config.json');
 
-      const source = new JsonConfigSource(testConfigPath);
+      writeFileSync(invalidConfigPath, 'invalid json');
+
+      const source = new JsonConfigSource(invalidConfigPath);
       const config = await source.load();
 
       expect(config).toBeNull();
+
+      // Clean up
+      if (existsSync(invalidConfigPath)) {
+        unlinkSync(invalidConfigPath);
+      }
     });
   });
 

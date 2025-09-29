@@ -1,8 +1,8 @@
-# ADR-002: Dual Testing Framework Approach (Bun Test + Vitest)
+# ADR-002: Pure Bun Testing Framework Approach
 
 ## Status
 
-Accepted
+Superseded (Originally: Dual Testing Framework Approach)
 
 ## Context
 
@@ -15,62 +15,57 @@ Given our choice of Bun runtime (ADR-001), we have access to Bun's built-in test
 runner, but must also consider compatibility requirements for testing with
 Node.js-based GCP client libraries during integration phases.
 
-## Decision
+## Updated Decision (December 2024)
 
-We will use a dual testing framework approach:
+We will use **pure Bun testing framework** for all testing needs:
 
-- **Primary**: Bun's built-in test runner for unit tests and development
-- **Secondary**: Vitest for integration tests and GCP client library
-  compatibility validation
+- **Single Framework**: Bun's built-in test runner for all tests (unit, integration, e2e)
+- **No Fallbacks**: Remove Vitest dependency and dual-framework complexity
+- **Simplicity First**: Focus on one well-understood testing approach
 
-## Rationale
+## Updated Rationale (Pure Bun Approach)
 
-### Bun Test Runner Strengths
+### Simplicity Over Premature Optimization
 
-- **Performance**: Extremely fast execution (~3x faster than Jest/Vitest)
-- **Native Integration**: Built into Bun runtime, no additional configuration
-- **TypeScript Support**: Native TypeScript execution without compilation
-- **Development Velocity**: Ideal for rapid unit test development cycles
+The original dual-framework approach was designed to mitigate theoretical risks that **have not materialized**:
 
-### Vitest Integration Benefits
+- **Bun Stability**: Bun test runner has proven stable and reliable
+- **Client Library Compatibility**: GCP client libraries work fine with Bun runtime
+- **Mocking Capabilities**: Bun's `mock()` function provides equivalent functionality to Jest/Vitest
 
-- **Node.js Ecosystem Compatibility**: Better support for GCP client libraries
-  designed for Node.js
-- **Mature Mocking**: Advanced mocking capabilities for HTTP/gRPC interactions
-- **Browser Environment**: JSDOM support for potential web-based testing
-  scenarios
-- **Jest Compatibility**: Familiar API for developers with Jest experience
+### Benefits of Single Framework
 
-### Risk Mitigation Strategy
+- **Reduced Complexity**: One testing framework, one configuration, one set of patterns
+- **Faster CI/CD**: No need to run multiple test suites with different runners
+- **Developer Experience**: Single mental model for all tests
+- **Maintenance**: Fewer dependencies to update and maintain
+- **Consistent Behavior**: All tests run in the same runtime environment
 
-This approach directly addresses documented technical risks:
+### When to Reconsider
 
-- **Bun Stability Risk**: Vitest provides fallback testing capability
-- **Client Library Compatibility**: Node.js-compatible testing for official GCP
-  libraries
-- **Ecosystem Integration**: Ensures broad compatibility across different
-  environments
+We will reconsider this decision only when we encounter **actual problems** (not theoretical ones):
 
-## Implementation Strategy
+- Specific GCP client libraries that genuinely don't work with Bun
+- Missing testing capabilities that are critical for our use cases
+- Performance issues with Bun test runner at scale
 
-### Phase-Based Usage
+## Updated Implementation Strategy
+
+### Single Command for All Tests
 
 ```bash
-# Phase 1-2: Foundation and Core Framework
-bun test                    # Primary usage for unit tests
-
-# Phase 4: Integration Testing
-npm run test:integration    # Vitest for GCP client library tests
-npm run test:e2e           # Vitest for end-to-end scenarios
+# All test types use Bun test runner
+bun test                    # All tests (unit, integration, e2e)
+bun test --watch           # Watch mode for development
+bun test --coverage        # Coverage reports
 ```
 
 ### Test Organization
 
-- **Unit Tests**: `tests/unit/` - Use Bun test runner
-- **Integration Tests**: `tests/integration/` - Use Vitest with Node.js
-  environment
-- **End-to-End Tests**: `tests/e2e/` - Use Vitest with full environment
-  simulation
+- **Unit Tests**: Co-located with source files (`*.test.ts`)
+- **Integration Tests**: `tests/integration/` - Use Bun test runner
+- **End-to-End Tests**: `tests/e2e/` - Use Bun test runner
+- **All tests** run in the same Bun runtime environment
 
 ## Alternatives Considered
 
@@ -91,47 +86,35 @@ execution, additional configuration overhead
 **Pros**: Most mature, extensive ecosystem **Cons**: Slowest execution, poor Bun
 compatibility
 
-## Consequences
+## Updated Consequences
 
 ### Positive
 
-- **Best of Both Worlds**: Fast development with Bun, robust integration with
-  Vitest
-- **Risk Mitigation**: Fallback testing strategy if Bun test runner has issues
-- **Client Library Validation**: Proper testing of official GCP client libraries
-- **Future Flexibility**: Can adjust framework usage based on specific needs
+- **Simplicity**: Single testing framework reduces cognitive overhead
+- **Performance**: All tests benefit from Bun's superior performance
+- **Consistency**: Same runtime for development and testing
+- **Reduced Dependencies**: Fewer packages to maintain and update
+- **Faster CI/CD**: Single test command, faster execution
 
 ### Negative
 
-- **Complexity**: Managing two testing frameworks and configurations
-- **Learning Curve**: Team needs familiarity with both frameworks
-- **Dependency Overhead**: Additional packages and configurations
+- **Potential Risk**: If Bun test runner has issues, no immediate fallback
+- **Learning Investment**: Team must become proficient with Bun testing patterns
 
-### Mitigation Strategies
+### Risk Mitigation
 
-- **Clear Guidelines**: Document when to use each framework
-- **Shared Utilities**: Create common test helpers that work with both
-  frameworks
-- **CI/CD Optimization**: Run appropriate tests based on change scope
+- **Pragmatic Approach**: Only add complexity when we hit actual problems
+- **Easy Rollback**: Can always add Vitest later if specific needs arise
+- **Monitor Issues**: Track any Bun testing limitations as they appear
 
 ## Implementation Notes
 
-### Current State (Phase 1)
+### Migration Completed (December 2024)
 
-- All tests use `bun:test` import and Bun test runner
-- Vitest installed but not configured
-- 49 passing tests with 90%+ coverage using Bun test
-
-### Future Configuration (Phase 4)
-
-```javascript
-// vitest.config.js - for integration testing
-export default {
-  environment: 'node',
-  testMatch: ['tests/integration/**/*.test.ts', 'tests/e2e/**/*.test.ts'],
-  setupFiles: ['tests/integration/setup.ts'],
-};
-```
+- All tests migrated from `jest.fn()` to `mock()` for pure Bun compatibility
+- Removed `jest` imports from all test files
+- All tests use pure Bun testing primitives (`mock`, `spyOn`, etc.)
+- Simplified test setup with single framework approach
 
 ### Package.json Scripts Strategy
 
@@ -139,25 +122,32 @@ export default {
 {
   "scripts": {
     "test": "bun test",
-    "test:unit": "bun test tests/unit",
-    "test:integration": "vitest tests/integration",
-    "test:e2e": "vitest tests/e2e",
-    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e"
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage"
   }
 }
 ```
 
-## Success Criteria
+### Testing Best Practices
 
-- Unit tests execute in <1 second for rapid development feedback
-- Integration tests successfully validate all 4 GCP client libraries
-- Total test suite completes in <30 seconds for CI/CD
-- Both frameworks maintain >80% code coverage
+- Use `mock()` instead of `jest.fn()`
+- Use `spyOn()` for function spying
+- Import testing utilities from `'bun:test'`
+- Co-locate tests with source files for better discoverability
+
+## Updated Success Criteria
+
+- All tests execute in <5 seconds for rapid development feedback
+- Integration tests validate GCP client libraries using Bun runtime
+- Single test command covers all test types (unit, integration, e2e)
+- Maintain >80% code coverage with simplified tooling
 
 ## Review Date
 
-This decision should be reviewed after Phase 4 (Integration & Testing)
-completion or if significant compatibility issues arise with either framework.
+This decision should be reviewed if we encounter actual (not theoretical) issues with:
+- GCP client library compatibility in Bun runtime
+- Missing testing capabilities that block development
+- Performance problems with Bun test runner
 
 ## References
 

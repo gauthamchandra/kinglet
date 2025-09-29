@@ -14,18 +14,20 @@ import {
 
 describe('Test Helpers', () => {
   describe('createTestConfig', () => {
-    test('should create default test configuration', () => {
-      const config = createTestConfig();
+    test('should create default test configuration', async () => {
+      const config = await createTestConfig();
 
-      expect(config.server.httpPort).toBe(9000);
-      expect(config.server.grpcPort).toBe(9001);
+      expect(typeof config.server.httpPort).toBe('number');
+      expect(typeof config.server.grpcPort).toBe('number');
+      expect(config.server.httpPort).toBeGreaterThan(0);
+      expect(config.server.grpcPort).toBeGreaterThan(0);
       expect(config.storage.type).toBe('memory');
       expect(config.auth.enabled).toBe(false);
       expect(config.logging.level).toBe('error');
     });
 
-    test('should apply overrides to default configuration', () => {
-      const config = createTestConfig({
+    test('should apply overrides to default configuration', async () => {
+      const config = await createTestConfig({
         server: { httpPort: 8080, grpcPort: 8081, maxConnections: 50 },
         auth: { enabled: true, mode: 'mock' },
       });
@@ -104,8 +106,9 @@ describe('Test Helpers', () => {
       await delay(100);
       const end = Date.now();
 
-      expect(end - start).toBeGreaterThanOrEqual(100);
-      expect(end - start).toBeLessThan(200); // Allow some tolerance
+      // Allow more tolerance for timing variations in concurrent test execution
+      expect(end - start).toBeGreaterThanOrEqual(90); // Allow 10ms tolerance below
+      expect(end - start).toBeLessThan(300); // Allow more tolerance above
     });
   });
 

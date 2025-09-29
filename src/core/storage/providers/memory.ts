@@ -6,10 +6,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import {
+import { NotFoundError, TransactionError, ValidationError } from '../types.js';
+import type {
   BaseRecord,
   CacheOperations,
-  NotFoundError,
   QueryCondition,
   QueryFilter,
   QueryOptions,
@@ -18,11 +18,10 @@ import {
   StorageProvider,
   TableSchema,
   Transaction,
-  TransactionError,
   TransactionOptions,
-  ValidationError,
 } from '../types.js';
-import { LRUCache, LRUCacheConfig } from '../cache/lru-cache.js';
+import { LRUCache } from '../cache/lru-cache.js';
+import type { LRUCacheConfig } from '../cache/lru-cache.js';
 
 /**
  * In-memory table structure
@@ -81,8 +80,8 @@ class MemoryTransaction implements Transaction {
 
     try {
       // Execute rollback operations in reverse order
-      for (let i = this.rollbackOperations.length - 1; i >= 0; i--) {
-        this.rollbackOperations[i]();
+      for (const operation of this.rollbackOperations.reverse()) {
+        operation();
       }
 
       this.isActiveFlag = false;
@@ -116,7 +115,7 @@ export class MemoryStorageProvider implements StorageProvider {
     if (config.cache) {
       const cacheConfig: LRUCacheConfig = {
         maxSize: config.cache.maxSize ?? 1000,
-        defaultTTL: config.cache.ttlSeconds,
+        ...(config.cache.ttlSeconds !== undefined ? { defaultTTL: config.cache.ttlSeconds } : {}),
         maxMemoryMb: config.cache.maxMemoryMb ?? 50,
         cleanupInterval: 60, // Cleanup every minute
       };
@@ -219,20 +218,39 @@ export class MemoryStorageProvider implements StorageProvider {
 
     // Apply filter
     if (options.filter) {
-      records = records.filter(record => this.matchesFilter(record, options.filter!));
+      const filter = options.filter;
+
+      records = records.filter(record => this.matchesFilter(record, filter));
     }
 
     // Apply sorting
     if (options.sort && options.sort.length > 0) {
+      const sortOptions = options.sort;
+
       records.sort((a, b) => {
-        for (const sort of options.sort!) {
+        for (const sort of sortOptions) {
           const aValue = (a as Record<string, unknown>)[sort.field];
           const bValue = (b as Record<string, unknown>)[sort.field];
 
           let comparison = 0;
 
-          if (aValue < bValue) comparison = -1;
-          else if (aValue > bValue) comparison = 1;
+          // Type-safe comparison for unknown values
+          if (
+            aValue !== null &&
+            bValue !== null &&
+            (typeof aValue === 'string' || typeof aValue === 'number' || aValue instanceof Date) &&
+            (typeof bValue === 'string' || typeof bValue === 'number' || bValue instanceof Date)
+          ) {
+            if (aValue < bValue) comparison = -1;
+            else if (aValue > bValue) comparison = 1;
+          } else {
+            // Fallback to string comparison
+            const aStr = String(aValue);
+            const bStr = String(bValue);
+
+            if (aStr < bStr) comparison = -1;
+            else if (aStr > bStr) comparison = 1;
+          }
 
           if (comparison !== 0) {
             return sort.direction === 'desc' ? -comparison : comparison;
@@ -258,15 +276,17 @@ export class MemoryStorageProvider implements StorageProvider {
       }
     }
 
-    return {
+    const result: QueryResult<T> = {
       data: paginatedRecords,
       total,
       hasMore,
-      nextCursor:
-        hasMore && options.pagination?.limit
-          ? String((options.pagination.offset ?? 0) + options.pagination.limit)
-          : undefined,
+      ...(hasMore &&
+        options.pagination?.limit && {
+          nextCursor: String((options.pagination.offset ?? 0) + options.pagination.limit),
+        }),
     };
+
+    return result;
   }
 
   async findFirst<T extends BaseRecord>(
@@ -465,7 +485,7 @@ export class MemoryStorageProvider implements StorageProvider {
 
   private matchesCondition(record: BaseRecord, condition: QueryCondition): boolean {
     const { field, operator, value } = condition;
-    const recordValue = (record as Record<string, unknown>)[field];
+    const recordValue = (record as unknown as Record<string, unknown>)[field];
 
     switch (operator) {
       case 'eq':
@@ -473,13 +493,13 @@ export class MemoryStorageProvider implements StorageProvider {
       case 'ne':
         return recordValue !== value;
       case 'gt':
-        return recordValue > value;
+        return this.compareValues(recordValue, value) > 0;
       case 'gte':
-        return recordValue >= value;
+        return this.compareValues(recordValue, value) >= 0;
       case 'lt':
-        return recordValue < value;
+        return this.compareValues(recordValue, value) < 0;
       case 'lte':
-        return recordValue <= value;
+        return this.compareValues(recordValue, value) <= 0;
       case 'in':
         return Array.isArray(value) && value.includes(recordValue);
       case 'nin':
@@ -499,5 +519,32 @@ export class MemoryStorageProvider implements StorageProvider {
       default:
         throw new ValidationError(`Unsupported query operator: ${operator}`);
     }
+  }
+
+  private compareValues(a: unknown, b: unknown): number {
+    // Handle null/undefined cases
+    if (a === null && b === null) return 0;
+    if (a === null) return -1;
+    if (b === null) return 1;
+    if (a === undefined && b === undefined) return 0;
+    if (a === undefined) return -1;
+    if (b === undefined) return 1;
+
+    // Type-safe comparison for known comparable types
+    if (typeof a === 'number' && typeof b === 'number') {
+      return a - b;
+    }
+    if (typeof a === 'string' && typeof b === 'string') {
+      return a.localeCompare(b);
+    }
+    if (a instanceof Date && b instanceof Date) {
+      return a.getTime() - b.getTime();
+    }
+
+    // Fallback to string comparison
+    const aStr = String(a);
+    const bStr = String(b);
+
+    return aStr.localeCompare(bStr);
   }
 }

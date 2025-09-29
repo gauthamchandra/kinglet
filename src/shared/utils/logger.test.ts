@@ -70,6 +70,8 @@ describe('Logger', () => {
     );
 
     expect(timestampMatch).toBeTruthy();
-    expect(new Date(timestampMatch![1]).toISOString()).toBe(timestampMatch![1]);
+    if (!timestampMatch || !timestampMatch[1])
+      throw new Error('Log message should contain valid ISO timestamp format');
+    expect(new Date(timestampMatch[1]).toISOString()).toBe(timestampMatch[1]);
   });
 });
