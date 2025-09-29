@@ -1,0 +1,649 @@
+/**
+ * Unit tests for Message Repository
+ */
+
+import { test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { ValidationError } from '@/core/storage/types.js';
+import type { IStorageManager } from '@/core/storage/interfaces.js';
+import type { QueryResult } from '@/core/storage/types.js';
+import { MessageRepository, type CreateMessageData } from './message-repository.js';
+import type { MessageRecord } from '../models.js';
+import { createMockStorage, mockResolvedValueOnce, mockRejectedValueOnce, mockReset } from '../../../test-utils/mock-storage.js';
+
+// Mock storage manager
+const mockStorage = createMockStorage();
+
+let repository: MessageRepository;
+
+beforeEach(() => {
+  repository = new MessageRepository(mockStorage);
+
+  // Reset all mocks
+  Object.values(mockStorage).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+});
+
+afterEach(() => {
+  // Clean up after each test
+  Object.values(mockStorage).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+});
+
+test('MessageRepository - initialize should create tables', async () => {
+  await repository.initialize();
+
+  expect(mockStorage.createTable).toHaveBeenCalledTimes(2);
+  expect(mockStorage.createTable).toHaveBeenCalledWith('pubsub_messages', expect.any(Object));
+  expect(mockStorage.createTable).toHaveBeenCalledWith('pubsub_subscription_leases', expect.any(Object));
+});
+
+test('MessageRepository - create should create valid message', async () => {
+  const messageData: CreateMessageData = {
+    messageId: 'msg-123',
+    topic: 'projects/test-project/topics/test-topic',
+    data: Buffer.from('Hello, World!').toString('base64'),
+    attributes: { key: 'value' },
+    orderingKey: 'order-1',
+    size: 13
+  };
+
+  const message = await repository.create(messageData);
+
+  expect(message).toMatchObject({
+    messageId: 'msg-123',
+    topic: 'projects/test-project/topics/test-topic',
+    data: Buffer.from('Hello, World!').toString('base64'),
+    attributes: { key: 'value' },
+    orderingKey: 'order-1',
+    size: 13,
+    deliveryAttempts: 0,
+    acknowledged: false,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  });
+  expect(message.id).toBeDefined();
+  expect(message.createdAt).toBeInstanceOf(Date);
+  expect(message.updatedAt).toBeInstanceOf(Date);
+  expect(message.publishTime).toBeInstanceOf(Date);
+  expect(mockStorage.create).toHaveBeenCalledWith('pubsub_messages', expect.any(Object));
+});
+
+test('MessageRepository - create should throw error for invalid topic name', async () => {
+  const messageData: CreateMessageData = {
+    messageId: 'msg-123',
+    topic: 'invalid-topic-name',
+    size: 0
+  };
+
+  await expect(repository.create(messageData)).rejects.toThrow(ValidationError);
+  await expect(repository.create(messageData)).rejects.toThrow('Invalid topic name');
+});
+
+test('MessageRepository - create should handle minimal message data', async () => {
+  const messageData: CreateMessageData = {
+    messageId: 'msg-123',
+    topic: 'projects/test-project/topics/test-topic',
+    size: 0
+  };
+
+  const message = await repository.create(messageData);
+
+  expect(message.data).toBeUndefined();
+  expect(message.attributes).toEqual({});
+  expect(message.orderingKey).toBeUndefined();
+  expect(message.size).toBe(0);
+  expect(message.deliveryAttempts).toBe(0);
+  expect(message.acknowledged).toBe(false);
+});
+
+test('MessageRepository - findById should return message if exists', async () => {
+  const mockStorageRecord = {
+    id: 'msg-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    messageId: 'msg-456',
+    topic: 'projects/test-project/topics/test-topic',
+    data: 'SGVsbG8gV29ybGQ=', // Base64 "Hello World"
+    attributes: JSON.stringify({ key: 'value' }),
+    publishTime: '2024-01-01T00:00:00.000Z',
+    orderingKey: 'order-1',
+    size: 11,
+    deliveryAttempts: 0,
+    acknowledged: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findById, mockStorageRecord);
+
+  const message = await repository.findById('msg-123');
+
+  expect(message).toBeDefined();
+  expect(message?.id).toBe('msg-123');
+  expect(message?.messageId).toBe('msg-456');
+  expect(message?.topic).toBe('projects/test-project/topics/test-topic');
+  expect(message?.data).toBe('SGVsbG8gV29ybGQ=');
+  expect(message?.attributes).toEqual({ key: 'value' });
+  expect(message?.orderingKey).toBe('order-1');
+  expect(message?.size).toBe(11);
+  expect(message?.deliveryAttempts).toBe(0);
+  expect(message?.acknowledged).toBe(false);
+  expect(message?.projectId).toBe('test-project');
+  expect(message?.topicId).toBe('test-topic');
+});
+
+test('MessageRepository - findById should return null if not exists', async () => {
+  mockResolvedValueOnce(mockStorage.findById,null);
+
+  const message = await repository.findById('non-existent');
+
+  expect(message).toBeNull();
+});
+
+test('MessageRepository - findByMessageId should return message if exists', async () => {
+  const mockStorageRecord = {
+    id: 'msg-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    messageId: 'msg-456',
+    topic: 'projects/test-project/topics/test-topic',
+    attributes: JSON.stringify({}),
+    publishTime: '2024-01-01T00:00:00.000Z',
+    size: 0,
+    deliveryAttempts: 0,
+    acknowledged: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockStorageRecord);
+
+  const message = await repository.findByMessageId('msg-456');
+
+  expect(message).toBeDefined();
+  expect(message?.messageId).toBe('msg-456');
+  expect(mockStorage.findFirst).toHaveBeenCalledWith('pubsub_messages', {
+    where: [{ field: 'messageId', operator: 'eq', value: 'msg-456' }]
+  });
+});
+
+test('MessageRepository - find should return messages matching criteria', async () => {
+  const mockStorageResult: QueryResult<Record<string, unknown>> = {
+    items: [
+      {
+        id: 'msg-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        messageId: 'msg-1-id',
+        topic: 'projects/test-project/topics/test-topic',
+        attributes: JSON.stringify({ env: 'test' }),
+        publishTime: '2024-01-01T00:00:00.000Z',
+        size: 10,
+        deliveryAttempts: 0,
+        acknowledged: 0,
+        projectId: 'test-project',
+        topicId: 'test-topic'
+      },
+      {
+        id: 'msg-2',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        messageId: 'msg-2-id',
+        topic: 'projects/test-project/topics/test-topic',
+        attributes: JSON.stringify({ env: 'prod' }),
+        publishTime: '2024-01-01T00:00:00.000Z',
+        size: 20,
+        deliveryAttempts: 1,
+        acknowledged: 1,
+        projectId: 'test-project',
+        topicId: 'test-topic'
+      }
+    ],
+    totalCount: 2,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find,mockStorageResult);
+
+  const result = await repository.find({ topic: 'projects/test-project/topics/test-topic' });
+
+  expect(result.items).toHaveLength(2);
+  expect(result.items[0].messageId).toBe('msg-1-id');
+  expect(result.items[0].attributes).toEqual({ env: 'test' });
+  expect(result.items[0].acknowledged).toBe(false);
+  expect(result.items[1].messageId).toBe('msg-2-id');
+  expect(result.items[1].attributes).toEqual({ env: 'prod' });
+  expect(result.items[1].acknowledged).toBe(true);
+  expect(result.totalCount).toBe(2);
+  expect(result.hasMore).toBe(false);
+});
+
+test('MessageRepository - findByTopic should filter by topic', async () => {
+  const mockStorageResult: QueryResult<Record<string, unknown>> = {
+    items: [],
+    totalCount: 0,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find,mockStorageResult);
+
+  await repository.findByTopic('projects/test-project/topics/test-topic', { limit: 10 });
+
+  expect(mockStorage.find).toHaveBeenCalledWith('pubsub_messages', {
+    limit: 10,
+    topic: 'projects/test-project/topics/test-topic',
+    filter: {
+      conditions: [{ field: 'topic', operator: 'eq', value: 'projects/test-project/topics/test-topic' }],
+      operator: 'and'
+    }
+  });
+});
+
+test('MessageRepository - findUnacknowledgedByTopic should filter by topic and acknowledgment status', async () => {
+  const mockStorageResult: QueryResult<Record<string, unknown>> = {
+    items: [],
+    totalCount: 0,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find,mockStorageResult);
+
+  await repository.findUnacknowledgedByTopic('projects/test-project/topics/test-topic');
+
+  expect(mockStorage.find).toHaveBeenCalledWith('pubsub_messages', {
+    topic: 'projects/test-project/topics/test-topic',
+    acknowledged: false,
+    filter: {
+      conditions: [
+        { field: 'topic', operator: 'eq', value: 'projects/test-project/topics/test-topic' },
+        { field: 'acknowledged', operator: 'eq', value: 0 }
+      ],
+      operator: 'and'
+    }
+  });
+});
+
+test('MessageRepository - findAvailableMessages should filter by acknowledgment and expiration', async () => {
+  const mockStorageResult: QueryResult<Record<string, unknown>> = {
+    items: [],
+    totalCount: 0,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find,mockStorageResult);
+
+  await repository.findAvailableMessages({ projectId: 'test-project' });
+
+  expect(mockStorage.find).toHaveBeenCalledWith('pubsub_messages', {
+    projectId: 'test-project',
+    acknowledged: false,
+    notExpired: true,
+    filter: {
+      conditions: [
+        { field: 'projectId', operator: 'eq', value: 'test-project' },
+        { field: 'acknowledged', operator: 'eq', value: 0 }
+      ],
+      operator: 'and'
+    }
+  });
+});
+
+test('MessageRepository - updateById should update existing message', async () => {
+  const existingMessage: MessageRecord = {
+    id: 'msg-123',
+    createdAt: new Date('2024-01-01'),
+    updatedAt: new Date('2024-01-01'),
+    messageId: 'msg-456',
+    topic: 'projects/test-project/topics/test-topic',
+    attributes: {},
+    publishTime: new Date('2024-01-01'),
+    size: 0,
+    deliveryAttempts: 0,
+    acknowledged: false,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findById,{
+    id: existingMessage.id,
+    createdAt: existingMessage.createdAt.toISOString(),
+    updatedAt: existingMessage.updatedAt.toISOString(),
+    messageId: existingMessage.messageId,
+    topic: existingMessage.topic,
+    attributes: JSON.stringify(existingMessage.attributes),
+    publishTime: existingMessage.publishTime.toISOString(),
+    size: existingMessage.size,
+    deliveryAttempts: existingMessage.deliveryAttempts,
+    acknowledged: existingMessage.acknowledged ? 1 : 0,
+    projectId: existingMessage.projectId,
+    topicId: existingMessage.topicId
+  });
+
+  const updateData = {
+    deliveryAttempts: 2,
+    acknowledged: true,
+    ackId: 'ack-123',
+    acknowledgedAt: new Date()
+  };
+
+  const updatedMessage = await repository.updateById('msg-123', updateData);
+
+  expect(updatedMessage).toBeDefined();
+  expect(updatedMessage?.deliveryAttempts).toBe(2);
+  expect(updatedMessage?.acknowledged).toBe(true);
+  expect(updatedMessage?.ackId).toBe('ack-123');
+  expect(updatedMessage?.acknowledgedAt).toBeInstanceOf(Date);
+  expect(updatedMessage?.updatedAt.getTime()).toBeGreaterThan(existingMessage.updatedAt.getTime());
+  expect(mockStorage.updateById).toHaveBeenCalledWith('pubsub_messages', 'msg-123', expect.any(Object));
+});
+
+test('MessageRepository - updateById should return null for non-existent message', async () => {
+  mockResolvedValueOnce(mockStorage.findById,null);
+
+  const result = await repository.updateById('non-existent', { deliveryAttempts: 1 });
+
+  expect(result).toBeNull();
+  expect(mockStorage.updateById).not.toHaveBeenCalled();
+});
+
+test('MessageRepository - acknowledgeMessage should mark message as acknowledged', async () => {
+  const mockMessage = {
+    id: 'msg-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    messageId: 'msg-456',
+    topic: 'projects/test-project/topics/test-topic',
+    attributes: JSON.stringify({}),
+    publishTime: '2024-01-01T00:00:00.000Z',
+    size: 0,
+    deliveryAttempts: 1,
+    acknowledged: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockMessage);
+  mockResolvedValueOnce(mockStorage.findById,mockMessage);
+
+  const result = await repository.acknowledgeMessage('msg-456', 'ack-123');
+
+  expect(result).toBeDefined();
+  expect(result?.acknowledged).toBe(true);
+  expect(result?.ackId).toBe('ack-123');
+  expect(result?.acknowledgedAt).toBeInstanceOf(Date);
+});
+
+test('MessageRepository - incrementDeliveryAttempts should increment attempt count', async () => {
+  const mockMessage = {
+    id: 'msg-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    messageId: 'msg-456',
+    topic: 'projects/test-project/topics/test-topic',
+    attributes: JSON.stringify({}),
+    publishTime: '2024-01-01T00:00:00.000Z',
+    size: 0,
+    deliveryAttempts: 0,
+    acknowledged: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockMessage);
+  mockResolvedValueOnce(mockStorage.findById,mockMessage);
+
+  const result = await repository.incrementDeliveryAttempts('msg-456');
+
+  expect(result).toBeDefined();
+  expect(result?.deliveryAttempts).toBe(1);
+});
+
+test('MessageRepository - deleteById should delete message', async () => {
+  mockStorage.deleteById.mockResolvedValueOnce(true);
+
+  const result = await repository.deleteById('msg-123');
+
+  expect(result).toBe(true);
+  expect(mockStorage.deleteById).toHaveBeenCalledWith('pubsub_messages', 'msg-123');
+});
+
+test('MessageRepository - deleteByMessageId should delete message by message ID', async () => {
+  const mockMessage = {
+    id: 'msg-123',
+    messageId: 'msg-456'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockMessage);
+  mockStorage.deleteById.mockResolvedValueOnce(true);
+
+  const result = await repository.deleteByMessageId('msg-456');
+
+  expect(result).toBe(true);
+  expect(mockStorage.deleteById).toHaveBeenCalledWith('pubsub_messages', 'msg-123');
+});
+
+test('MessageRepository - deleteByMessageId should return false for non-existent message', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  const result = await repository.deleteByMessageId('non-existent');
+
+  expect(result).toBe(false);
+  expect(mockStorage.deleteById).not.toHaveBeenCalled();
+});
+
+test('MessageRepository - exists should check message existence', async () => {
+  mockStorage.exists.mockResolvedValueOnce(true);
+
+  const exists = await repository.exists('msg-123');
+
+  expect(exists).toBe(true);
+  expect(mockStorage.exists).toHaveBeenCalledWith('pubsub_messages', 'msg-123');
+});
+
+test('MessageRepository - existsByMessageId should check message existence by message ID', async () => {
+  const mockMessage = {
+    id: 'msg-123',
+    messageId: 'msg-456'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockMessage);
+
+  const exists = await repository.existsByMessageId('msg-456');
+
+  expect(exists).toBe(true);
+});
+
+test('MessageRepository - existsByMessageId should return false for non-existent message', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  const exists = await repository.existsByMessageId('non-existent');
+
+  expect(exists).toBe(false);
+});
+
+test('MessageRepository - count should return message count', async () => {
+  mockStorage.count.mockResolvedValueOnce(5);
+
+  const count = await repository.count({ topic: 'projects/test-project/topics/test-topic' });
+
+  expect(count).toBe(5);
+  expect(mockStorage.count).toHaveBeenCalledWith('pubsub_messages', {
+    filter: {
+      conditions: [{ field: 'topic', operator: 'eq', value: 'projects/test-project/topics/test-topic' }],
+      operator: 'and'
+    }
+  });
+});
+
+test('MessageRepository - createSubscriptionLease should create lease', async () => {
+  const leaseData = {
+    messageId: 'msg-456',
+    subscriptionName: 'projects/test-project/subscriptions/test-sub',
+    ackId: 'ack-123',
+    leaseDeadline: new Date(Date.now() + 60000),
+    deliveryAttempts: 1
+  };
+
+  const lease = await repository.createSubscriptionLease(leaseData);
+
+  expect(lease).toMatchObject({
+    messageId: 'msg-456',
+    subscriptionName: 'projects/test-project/subscriptions/test-sub',
+    ackId: 'ack-123',
+    deliveryAttempts: 1,
+    projectId: 'test-project',
+    subscriptionId: 'test-sub'
+  });
+  expect(lease.id).toBeDefined();
+  expect(lease.createdAt).toBeInstanceOf(Date);
+  expect(lease.updatedAt).toBeInstanceOf(Date);
+  expect(lease.leaseDeadline).toBeInstanceOf(Date);
+  expect(mockStorage.create).toHaveBeenCalledWith('pubsub_subscription_leases', expect.any(Object));
+});
+
+test('MessageRepository - createSubscriptionLease should throw error for invalid subscription name', async () => {
+  const leaseData = {
+    messageId: 'msg-456',
+    subscriptionName: 'invalid-subscription-name',
+    ackId: 'ack-123',
+    leaseDeadline: new Date()
+  };
+
+  await expect(repository.createSubscriptionLease(leaseData)).rejects.toThrow(ValidationError);
+  await expect(repository.createSubscriptionLease(leaseData)).rejects.toThrow('Invalid subscription name');
+});
+
+test('MessageRepository - findLeaseByAckId should return lease if exists', async () => {
+  const mockStorageRecord = {
+    id: 'lease-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    messageId: 'msg-456',
+    subscriptionName: 'projects/test-project/subscriptions/test-sub',
+    ackId: 'ack-123',
+    leaseDeadline: '2024-01-01T01:00:00.000Z',
+    deliveryAttempts: 1,
+    projectId: 'test-project',
+    subscriptionId: 'test-sub'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockStorageRecord);
+
+  const lease = await repository.findLeaseByAckId('ack-123');
+
+  expect(lease).toBeDefined();
+  expect(lease?.ackId).toBe('ack-123');
+  expect(lease?.messageId).toBe('msg-456');
+  expect(lease?.subscriptionName).toBe('projects/test-project/subscriptions/test-sub');
+  expect(lease?.deliveryAttempts).toBe(1);
+  expect(mockStorage.findFirst).toHaveBeenCalledWith('pubsub_subscription_leases', {
+    where: [{ field: 'ackId', operator: 'eq', value: 'ack-123' }]
+  });
+});
+
+test('MessageRepository - findLeasesBySubscription should return leases for subscription', async () => {
+  const mockStorageResult: QueryResult<Record<string, unknown>> = {
+    items: [
+      {
+        id: 'lease-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        messageId: 'msg-1',
+        subscriptionName: 'projects/test-project/subscriptions/test-sub',
+        ackId: 'ack-1',
+        leaseDeadline: '2024-01-01T01:00:00.000Z',
+        deliveryAttempts: 1,
+        projectId: 'test-project',
+        subscriptionId: 'test-sub'
+      }
+    ],
+    totalCount: 1,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find,mockStorageResult);
+
+  const leases = await repository.findLeasesBySubscription('projects/test-project/subscriptions/test-sub');
+
+  expect(leases).toHaveLength(1);
+  expect(leases[0]?.subscriptionName).toBe('projects/test-project/subscriptions/test-sub');
+  expect(mockStorage.find).toHaveBeenCalledWith('pubsub_subscription_leases', {
+    where: [{ field: 'subscriptionName', operator: 'eq', value: 'projects/test-project/subscriptions/test-sub' }]
+  });
+});
+
+test('MessageRepository - deleteLeaseByAckId should delete lease by ack ID', async () => {
+  const mockLease = {
+    id: 'lease-123',
+    ackId: 'ack-123'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockLease);
+  mockStorage.deleteById.mockResolvedValueOnce(true);
+
+  const result = await repository.deleteLeaseByAckId('ack-123');
+
+  expect(result).toBe(true);
+  expect(mockStorage.deleteById).toHaveBeenCalledWith('pubsub_subscription_leases', 'lease-123');
+});
+
+test('MessageRepository - deleteLeaseByAckId should return false for non-existent lease', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  const result = await repository.deleteLeaseByAckId('non-existent');
+
+  expect(result).toBe(false);
+  expect(mockStorage.deleteById).not.toHaveBeenCalled();
+});
+
+test('MessageRepository - should handle complex JSON serialization', async () => {
+  const messageData: CreateMessageData = {
+    messageId: 'msg-123',
+    topic: 'projects/test-project/topics/test-topic',
+    data: 'SGVsbG8gV29ybGQ=',
+    attributes: {
+      'complex-key': 'complex value with spaces',
+      'unicode': 'émojis 🚀 and special chars',
+      'number': '42'
+    },
+    orderingKey: 'order-key-with-special-chars_123',
+    size: 100,
+    expirationTime: new Date('2024-12-31T23:59:59Z')
+  };
+
+  const message = await repository.create(messageData);
+
+  // Verify the create call was made with properly serialized data
+  expect(mockStorage.create).toHaveBeenCalledWith('pubsub_messages', expect.objectContaining({
+    messageId: 'msg-123',
+    topic: 'projects/test-project/topics/test-topic',
+    data: 'SGVsbG8gV29ybGQ=',
+    attributes: JSON.stringify({
+      'complex-key': 'complex value with spaces',
+      'unicode': 'émojis 🚀 and special chars',
+      'number': '42'
+    }),
+    orderingKey: 'order-key-with-special-chars_123',
+    size: 100,
+    expirationTime: '2024-12-31T23:59:59.000Z',
+    deliveryAttempts: 0,
+    acknowledged: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  }));
+
+  // Verify the returned object has proper types
+  expect(message.attributes).toEqual({
+    'complex-key': 'complex value with spaces',
+    'unicode': 'émojis 🚀 and special chars',
+    'number': '42'
+  });
+  expect(message.expirationTime).toBeInstanceOf(Date);
+  expect(message.expirationTime?.toISOString()).toBe('2024-12-31T23:59:59.000Z');
+});

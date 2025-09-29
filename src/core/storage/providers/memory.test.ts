@@ -75,7 +75,7 @@ describe('MemoryStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
+      const created = await provider.create('test_records', data);
 
       expect(created.id).toBeDefined();
       expect(created.name).toBe(data.name);
@@ -93,7 +93,7 @@ describe('MemoryStorageProvider', () => {
         { name: 'Charlie', email: 'charlie@example.com', age: 28, active: true },
       ];
 
-      const created = await provider.createMany<TestRecord>('test_records', data);
+      const created = (await provider.createMany('test_records', data)) as TestRecord[];
 
       expect(created).toHaveLength(3);
       expect(created[0]?.name).toBe('Alice');
@@ -109,8 +109,11 @@ describe('MemoryStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
-      const found = await provider.findById<TestRecord>('test_records', created.id);
+      const created = await provider.create('test_records', data);
+      const found = (await provider.findById(
+        'test_records',
+        created.id as string
+      )) as TestRecord | null;
 
       expect(found).not.toBeNull();
       expect(found?.name).toBe(data.name);
@@ -131,17 +134,19 @@ describe('MemoryStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
-      const updated = await provider.updateById<TestRecord>('test_records', created.id, {
+      const created = await provider.create('test_records', data);
+      const updated = (await provider.updateById('test_records', created.id as string, {
         name: 'Updated Name',
         age: 45,
-      });
+      })) as TestRecord | null;
 
       expect(updated).not.toBeNull();
       expect(updated?.name).toBe('Updated Name');
       expect(updated?.age).toBe(45);
       expect(updated?.email).toBe(data.email); // Should remain unchanged
-      expect(updated?.updatedAt.getTime()).toBeGreaterThanOrEqual(created.updatedAt.getTime());
+      expect((updated?.updatedAt as Date).getTime()).toBeGreaterThanOrEqual(
+        (created.updatedAt as Date).getTime()
+      );
     });
 
     test('should delete record by ID', async () => {
@@ -152,12 +157,15 @@ describe('MemoryStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
-      const deleted = await provider.deleteById('test_records', created.id);
+      const created = await provider.create('test_records', data);
+      const deleted = await provider.deleteById('test_records', created.id as string);
 
       expect(deleted).toBe(true);
 
-      const found = await provider.findById('test_records', created.id);
+      const found = (await provider.findById(
+        'test_records',
+        created.id as string
+      )) as TestRecord | null;
 
       expect(found).toBeNull();
     });
@@ -180,11 +188,11 @@ describe('MemoryStorageProvider', () => {
         { name: 'Eve', email: 'eve@example.com', age: 22, active: false },
       ];
 
-      await provider.createMany<TestRecord>('test_records', testData);
+      await provider.createMany('test_records', testData);
     });
 
     test('should find all records without filter', async () => {
-      const result = await provider.find<TestRecord>('test_records');
+      const result = await provider.find('test_records');
 
       expect(result.data).toHaveLength(5);
       expect(result.total).toBe(5);
@@ -196,7 +204,7 @@ describe('MemoryStorageProvider', () => {
         conditions: [{ field: 'active', operator: 'eq', value: true }],
       };
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data).toHaveLength(3);
       expect(result.data.every(record => record.active)).toBe(true);
@@ -211,14 +219,18 @@ describe('MemoryStorageProvider', () => {
         operator: 'and',
       };
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data).toHaveLength(2); // Alice (25) and Charlie (28)
-      expect(result.data.every(record => record.age >= 25 && record.age <= 30)).toBe(true);
+      expect(
+        result.data.every(
+          record => (record as TestRecord).age >= 25 && (record as TestRecord).age <= 30
+        )
+      ).toBe(true);
     });
 
     test('should sort records', async () => {
-      const result = await provider.find<TestRecord>('test_records', {
+      const result = await provider.find('test_records', {
         sort: [{ field: 'age', direction: 'desc' }],
       });
 
@@ -228,7 +240,7 @@ describe('MemoryStorageProvider', () => {
     });
 
     test('should paginate results', async () => {
-      const result = await provider.find<TestRecord>('test_records', {
+      const result = await provider.find('test_records', {
         pagination: { limit: 2, offset: 1 },
         sort: [{ field: 'name', direction: 'asc' }],
       });
@@ -243,7 +255,7 @@ describe('MemoryStorageProvider', () => {
         conditions: [{ field: 'active', operator: 'eq', value: true }],
       };
 
-      const record = await provider.findFirst<TestRecord>('test_records', {
+      const record = await provider.findFirst('test_records', {
         filter,
         sort: [{ field: 'age', direction: 'asc' }],
       });
@@ -265,9 +277,9 @@ describe('MemoryStorageProvider', () => {
 
     test('should check if record exists', async () => {
       const testData = { name: 'Exists Test', email: 'exists@example.com', age: 30, active: true };
-      const created = await provider.create<TestRecord>('test_records', testData);
+      const created = await provider.create('test_records', testData);
 
-      const exists = await provider.exists('test_records', created.id);
+      const exists = await provider.exists('test_records', created.id as string);
 
       expect(exists).toBe(true);
 
@@ -285,7 +297,7 @@ describe('MemoryStorageProvider', () => {
         { name: 'User3', email: 'user3@example.com', age: 28, active: true },
       ];
 
-      await provider.createMany<TestRecord>('test_records', testData);
+      await provider.createMany('test_records', testData);
     });
 
     test('should update multiple records', async () => {
@@ -293,13 +305,13 @@ describe('MemoryStorageProvider', () => {
         conditions: [{ field: 'active', operator: 'eq', value: true }],
       };
 
-      const updated = await provider.updateMany<TestRecord>('test_records', filter, {
+      const updated = await provider.updateMany('test_records', filter, {
         age: 30,
       });
 
       expect(updated).toBe(2); // Should update 2 active records
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data.every(record => record.age === 30)).toBe(true);
     });
@@ -324,14 +336,14 @@ describe('MemoryStorageProvider', () => {
       const tx = await provider.beginTransaction();
 
       const result = await tx.execute(async txProvider => {
-        const created1 = await txProvider.create<TestRecord>('test_records', {
+        const created1 = await txProvider.create('test_records', {
           name: 'TX User 1',
           email: 'tx1@example.com',
           age: 25,
           active: true,
         });
 
-        const created2 = await txProvider.create<TestRecord>('test_records', {
+        const created2 = await txProvider.create('test_records', {
           name: 'TX User 2',
           email: 'tx2@example.com',
           age: 30,
@@ -357,7 +369,7 @@ describe('MemoryStorageProvider', () => {
 
       try {
         await tx.execute(async txProvider => {
-          await txProvider.create<TestRecord>('test_records', {
+          await txProvider.create('test_records', {
             name: 'TX User 1',
             email: 'tx1@example.com',
             age: 25,
@@ -390,10 +402,10 @@ describe('MemoryStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
+      const created = await provider.create('test_records', data);
 
       // First access - should be cached
-      const found1 = await provider.findById<TestRecord>('test_records', created.id);
+      const found1 = await provider.findById('test_records', created.id as string);
 
       expect(found1).not.toBeNull();
 
@@ -439,7 +451,7 @@ describe('MemoryStorageProvider', () => {
         { name: 'Charlie Brown', email: 'charlie@example.com', age: 28, active: true },
       ];
 
-      await provider.createMany<TestRecord>('test_records', testData);
+      await provider.createMany('test_records', testData);
     });
 
     test('should handle IN operator', async () => {
@@ -447,7 +459,7 @@ describe('MemoryStorageProvider', () => {
         conditions: [{ field: 'age', operator: 'in', value: [25, 35] }],
       };
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data).toHaveLength(2);
       expect(result.data.map(r => r.age).sort()).toEqual([25, 35]);
@@ -458,7 +470,7 @@ describe('MemoryStorageProvider', () => {
         conditions: [{ field: 'age', operator: 'nin', value: [25, 35] }],
       };
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0]?.age).toBe(28);
@@ -469,7 +481,7 @@ describe('MemoryStorageProvider', () => {
         conditions: [{ field: 'name', operator: 'like', value: 'Johnson' }],
       };
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0]?.name).toBe('Alice Johnson');
@@ -480,7 +492,7 @@ describe('MemoryStorageProvider', () => {
         conditions: [{ field: 'name', operator: 'ilike', value: 'JOHNSON' }],
       };
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0]?.name).toBe('Alice Johnson');

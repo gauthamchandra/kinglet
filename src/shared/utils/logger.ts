@@ -89,6 +89,18 @@ export class Logger {
     }
   }
 
+  trace(message: string, data?: unknown): void {
+    if (this.shouldLog('debug')) {
+      this.output(this.formatMessage('debug', message, data));
+    }
+  }
+
+  fatal(message: string, data?: unknown): void {
+    if (this.shouldLog('error')) {
+      this.output(this.formatMessage('error', message, data));
+    }
+  }
+
   /**
    * Create a child logger with additional context
    */

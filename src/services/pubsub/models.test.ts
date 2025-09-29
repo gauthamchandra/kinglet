@@ -1,0 +1,378 @@
+/**
+ * Unit tests for Pub/Sub Data Models
+ */
+
+import { test, expect } from 'bun:test';
+import {
+  PubSubResourceNames,
+  TOPICS_SCHEMA,
+  SUBSCRIPTIONS_SCHEMA,
+  MESSAGES_SCHEMA,
+  SUBSCRIPTION_LEASES_SCHEMA,
+  type TopicRecord,
+  type SubscriptionRecord,
+  type MessageRecord,
+  type SubscriptionLeaseRecord,
+} from './models.js';
+
+test('PubSubResourceNames - parseTopic should parse valid topic names', () => {
+  const result = PubSubResourceNames.parseTopic('projects/test-project/topics/test-topic');
+
+  expect(result).toEqual({
+    projectId: 'test-project',
+    topicId: 'test-topic',
+  });
+});
+
+test('PubSubResourceNames - parseTopic should handle topic names with special characters', () => {
+  const result = PubSubResourceNames.parseTopic(
+    'projects/my-project-123/topics/my-topic_test-2024'
+  );
+
+  expect(result).toEqual({
+    projectId: 'my-project-123',
+    topicId: 'my-topic_test-2024',
+  });
+});
+
+test('PubSubResourceNames - parseTopic should throw error for invalid format', () => {
+  expect(() => {
+    PubSubResourceNames.parseTopic('invalid-topic-name');
+  }).toThrow('Invalid topic name format: invalid-topic-name');
+
+  expect(() => {
+    PubSubResourceNames.parseTopic('projects/test-project/topics/');
+  }).toThrow('Invalid topic name format: projects/test-project/topics/');
+
+  expect(() => {
+    PubSubResourceNames.parseTopic('projects//topics/test-topic');
+  }).toThrow('Invalid topic name format: projects//topics/test-topic');
+});
+
+test('PubSubResourceNames - parseSubscription should parse valid subscription names', () => {
+  const result = PubSubResourceNames.parseSubscription(
+    'projects/test-project/subscriptions/test-subscription'
+  );
+
+  expect(result).toEqual({
+    projectId: 'test-project',
+    subscriptionId: 'test-subscription',
+  });
+});
+
+test('PubSubResourceNames - parseSubscription should handle subscription names with special characters', () => {
+  const result = PubSubResourceNames.parseSubscription(
+    'projects/my-project-123/subscriptions/my-sub_test-2024'
+  );
+
+  expect(result).toEqual({
+    projectId: 'my-project-123',
+    subscriptionId: 'my-sub_test-2024',
+  });
+});
+
+test('PubSubResourceNames - parseSubscription should throw error for invalid format', () => {
+  expect(() => {
+    PubSubResourceNames.parseSubscription('invalid-subscription-name');
+  }).toThrow('Invalid subscription name format: invalid-subscription-name');
+
+  expect(() => {
+    PubSubResourceNames.parseSubscription('projects/test-project/subscriptions/');
+  }).toThrow('Invalid subscription name format: projects/test-project/subscriptions/');
+});
+
+test('PubSubResourceNames - formatTopic should create valid topic names', () => {
+  const result = PubSubResourceNames.formatTopic('test-project', 'test-topic');
+
+  expect(result).toBe('projects/test-project/topics/test-topic');
+});
+
+test('PubSubResourceNames - formatSubscription should create valid subscription names', () => {
+  const result = PubSubResourceNames.formatSubscription('test-project', 'test-subscription');
+
+  expect(result).toBe('projects/test-project/subscriptions/test-subscription');
+});
+
+test('PubSubResourceNames - extractTopicId should extract topic ID from topic name', () => {
+  const result = PubSubResourceNames.extractTopicId('projects/test-project/topics/my-topic');
+
+  expect(result).toBe('my-topic');
+});
+
+test('PubSubResourceNames - extractProjectId should extract project ID from topic name', () => {
+  const result = PubSubResourceNames.extractProjectId('projects/my-project-123/topics/test-topic');
+
+  expect(result).toBe('my-project-123');
+});
+
+test('PubSubResourceNames - round trip parsing and formatting should work', () => {
+  const originalTopic = 'projects/test-project/topics/test-topic';
+  const parsed = PubSubResourceNames.parseTopic(originalTopic);
+  const formatted = PubSubResourceNames.formatTopic(parsed.projectId, parsed.topicId);
+
+  expect(formatted).toBe(originalTopic);
+
+  const originalSub = 'projects/test-project/subscriptions/test-sub';
+  const parsedSub = PubSubResourceNames.parseSubscription(originalSub);
+  const formattedSub = PubSubResourceNames.formatSubscription(
+    parsedSub.projectId,
+    parsedSub.subscriptionId
+  );
+
+  expect(formattedSub).toBe(originalSub);
+});
+
+test('TOPICS_SCHEMA should have correct table structure', () => {
+  expect(TOPICS_SCHEMA.name).toBe('pubsub_topics');
+  const idColumn = TOPICS_SCHEMA.columns.find(col => col.name === 'id');
+  const nameColumn = TOPICS_SCHEMA.columns.find(col => col.name === 'name');
+  const labelsColumn = TOPICS_SCHEMA.columns.find(col => col.name === 'labels');
+  const projectIdColumn = TOPICS_SCHEMA.columns.find(col => col.name === 'projectId');
+  const topicIdColumn = TOPICS_SCHEMA.columns.find(col => col.name === 'topicId');
+
+  expect(idColumn).toBeDefined();
+  expect(nameColumn).toBeDefined();
+  expect(labelsColumn).toBeDefined();
+  expect(projectIdColumn).toBeDefined();
+  expect(topicIdColumn).toBeDefined();
+
+  // Check required fields
+  expect(idColumn?.primaryKey).toBe(true);
+  expect(nameColumn?.unique).toBe(true);
+  expect(nameColumn?.nullable).toBe(false);
+
+  // Check indexes
+  expect(TOPICS_SCHEMA.indexes).toHaveLength(3);
+  expect(TOPICS_SCHEMA.indexes?.[0]?.name).toBe('idx_topics_name');
+  expect(TOPICS_SCHEMA.indexes?.[1]?.name).toBe('idx_topics_project');
+  expect(TOPICS_SCHEMA.indexes?.[2]?.name).toBe('idx_topics_project_topic');
+});
+
+test('SUBSCRIPTIONS_SCHEMA should have correct table structure', () => {
+  expect(SUBSCRIPTIONS_SCHEMA.name).toBe('pubsub_subscriptions');
+
+  const idColumn = SUBSCRIPTIONS_SCHEMA.columns.find(col => col.name === 'id');
+  const nameColumn = SUBSCRIPTIONS_SCHEMA.columns.find(col => col.name === 'name');
+  const topicColumn = SUBSCRIPTIONS_SCHEMA.columns.find(col => col.name === 'topic');
+  const ackDeadlineSecondsColumn = SUBSCRIPTIONS_SCHEMA.columns.find(
+    col => col.name === 'ackDeadlineSeconds'
+  );
+  const projectIdColumn = SUBSCRIPTIONS_SCHEMA.columns.find(col => col.name === 'projectId');
+  const subscriptionIdColumn = SUBSCRIPTIONS_SCHEMA.columns.find(
+    col => col.name === 'subscriptionId'
+  );
+  const stateColumn = SUBSCRIPTIONS_SCHEMA.columns.find(col => col.name === 'state');
+
+  expect(idColumn).toBeDefined();
+  expect(nameColumn).toBeDefined();
+  expect(topicColumn).toBeDefined();
+  expect(ackDeadlineSecondsColumn).toBeDefined();
+  expect(projectIdColumn).toBeDefined();
+  expect(subscriptionIdColumn).toBeDefined();
+
+  // Check required fields
+  expect(idColumn?.primaryKey).toBe(true);
+  expect(nameColumn?.unique).toBe(true);
+  expect(nameColumn?.nullable).toBe(false);
+  expect(topicColumn?.nullable).toBe(false);
+
+  // Check default values
+  expect(ackDeadlineSecondsColumn?.defaultValue).toBe(10);
+  expect(stateColumn?.defaultValue).toBe('ACTIVE');
+
+  // Check indexes
+  expect(SUBSCRIPTIONS_SCHEMA.indexes).toHaveLength(5);
+});
+
+test('MESSAGES_SCHEMA should have correct table structure', () => {
+  expect(MESSAGES_SCHEMA.name).toBe('pubsub_messages');
+
+  const idColumn = MESSAGES_SCHEMA.columns.find(col => col.name === 'id');
+  const messageIdColumn = MESSAGES_SCHEMA.columns.find(col => col.name === 'messageId');
+  const topicColumn = MESSAGES_SCHEMA.columns.find(col => col.name === 'topic');
+  const dataColumn = MESSAGES_SCHEMA.columns.find(col => col.name === 'data');
+  const attributesColumn = MESSAGES_SCHEMA.columns.find(col => col.name === 'attributes');
+  const publishTimeColumn = MESSAGES_SCHEMA.columns.find(col => col.name === 'publishTime');
+  const deliveryAttemptsColumn = MESSAGES_SCHEMA.columns.find(
+    col => col.name === 'deliveryAttempts'
+  );
+  const acknowledgedColumn = MESSAGES_SCHEMA.columns.find(col => col.name === 'acknowledged');
+
+  expect(idColumn).toBeDefined();
+  expect(messageIdColumn).toBeDefined();
+  expect(topicColumn).toBeDefined();
+  expect(dataColumn).toBeDefined();
+  expect(attributesColumn).toBeDefined();
+  expect(publishTimeColumn).toBeDefined();
+
+  // Check required fields
+  expect(idColumn?.primaryKey).toBe(true);
+  expect(messageIdColumn?.unique).toBe(true);
+  expect(messageIdColumn?.nullable).toBe(false);
+  expect(topicColumn?.nullable).toBe(false);
+
+  // Check default values
+  expect(deliveryAttemptsColumn?.defaultValue).toBe(0);
+  expect(acknowledgedColumn?.defaultValue).toBe(false);
+
+  // Check indexes
+  expect(MESSAGES_SCHEMA.indexes).toHaveLength(7);
+});
+
+test('SUBSCRIPTION_LEASES_SCHEMA should have correct table structure', () => {
+  expect(SUBSCRIPTION_LEASES_SCHEMA.name).toBe('pubsub_subscription_leases');
+
+  const idColumn = SUBSCRIPTION_LEASES_SCHEMA.columns.find(col => col.name === 'id');
+  const messageIdColumn = SUBSCRIPTION_LEASES_SCHEMA.columns.find(col => col.name === 'messageId');
+  const subscriptionNameColumn = SUBSCRIPTION_LEASES_SCHEMA.columns.find(
+    col => col.name === 'subscriptionName'
+  );
+  const ackIdColumn = SUBSCRIPTION_LEASES_SCHEMA.columns.find(col => col.name === 'ackId');
+  const leaseDeadlineColumn = SUBSCRIPTION_LEASES_SCHEMA.columns.find(
+    col => col.name === 'leaseDeadline'
+  );
+  const deliveryAttemptsColumn = SUBSCRIPTION_LEASES_SCHEMA.columns.find(
+    col => col.name === 'deliveryAttempts'
+  );
+
+  expect(idColumn).toBeDefined();
+  expect(messageIdColumn).toBeDefined();
+  expect(subscriptionNameColumn).toBeDefined();
+  expect(ackIdColumn).toBeDefined();
+  expect(leaseDeadlineColumn).toBeDefined();
+
+  // Check required fields
+  expect(idColumn?.primaryKey).toBe(true);
+  expect(ackIdColumn?.unique).toBe(true);
+  expect(messageIdColumn?.nullable).toBe(false);
+  expect(subscriptionNameColumn?.nullable).toBe(false);
+
+  // Check default values
+  expect(deliveryAttemptsColumn?.defaultValue).toBe(1);
+
+  // Check indexes
+  expect(SUBSCRIPTION_LEASES_SCHEMA.indexes).toHaveLength(5);
+});
+
+test('TopicRecord interface should extend BaseRecord', () => {
+  const topic: TopicRecord = {
+    id: 'topic-123',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    name: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    satisfiesPzs: false,
+    projectId: 'test-project',
+    topicId: 'test-topic',
+  };
+
+  // Check that all required BaseRecord fields are present
+  expect(topic.id).toBeDefined();
+  expect(topic.createdAt).toBeInstanceOf(Date);
+  expect(topic.updatedAt).toBeInstanceOf(Date);
+
+  // Check topic-specific fields
+  expect(topic.name).toBe('projects/test-project/topics/test-topic');
+  expect(topic.labels).toEqual({ env: 'test' });
+  expect(topic.satisfiesPzs).toBe(false);
+  expect(topic.projectId).toBe('test-project');
+  expect(topic.topicId).toBe('test-topic');
+});
+
+test('SubscriptionRecord interface should extend BaseRecord', () => {
+  const subscription: SubscriptionRecord = {
+    id: 'sub-123',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    name: 'projects/test-project/subscriptions/test-sub',
+    topic: 'projects/test-project/topics/test-topic',
+    ackDeadlineSeconds: 30,
+    retainAckedMessages: false,
+    labels: { env: 'test' },
+    enableMessageOrdering: false,
+    detached: false,
+    enableExactlyOnceDelivery: false,
+    state: 'ACTIVE',
+    projectId: 'test-project',
+    subscriptionId: 'test-sub',
+    topicId: 'test-topic',
+  };
+
+  // Check that all required BaseRecord fields are present
+  expect(subscription.id).toBeDefined();
+  expect(subscription.createdAt).toBeInstanceOf(Date);
+  expect(subscription.updatedAt).toBeInstanceOf(Date);
+
+  // Check subscription-specific fields
+  expect(subscription.name).toBe('projects/test-project/subscriptions/test-sub');
+  expect(subscription.topic).toBe('projects/test-project/topics/test-topic');
+  expect(subscription.ackDeadlineSeconds).toBe(30);
+  expect(subscription.state).toBe('ACTIVE');
+  expect(subscription.projectId).toBe('test-project');
+  expect(subscription.subscriptionId).toBe('test-sub');
+  expect(subscription.topicId).toBe('test-topic');
+});
+
+test('MessageRecord interface should extend BaseRecord', () => {
+  const message: MessageRecord = {
+    id: 'msg-123',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    messageId: 'msg-456',
+    topic: 'projects/test-project/topics/test-topic',
+    data: 'SGVsbG8gV29ybGQ=', // Base64 encoded "Hello World"
+    attributes: { key: 'value' },
+    publishTime: new Date(),
+    size: 11,
+    deliveryAttempts: 0,
+    acknowledged: false,
+    projectId: 'test-project',
+    topicId: 'test-topic',
+  };
+
+  // Check that all required BaseRecord fields are present
+  expect(message.id).toBeDefined();
+  expect(message.createdAt).toBeInstanceOf(Date);
+  expect(message.updatedAt).toBeInstanceOf(Date);
+
+  // Check message-specific fields
+  expect(message.messageId).toBe('msg-456');
+  expect(message.topic).toBe('projects/test-project/topics/test-topic');
+  expect(message.data).toBe('SGVsbG8gV29ybGQ=');
+  expect(message.attributes).toEqual({ key: 'value' });
+  expect(message.publishTime).toBeInstanceOf(Date);
+  expect(message.size).toBe(11);
+  expect(message.deliveryAttempts).toBe(0);
+  expect(message.acknowledged).toBe(false);
+  expect(message.projectId).toBe('test-project');
+  expect(message.topicId).toBe('test-topic');
+});
+
+test('SubscriptionLeaseRecord interface should extend BaseRecord', () => {
+  const lease: SubscriptionLeaseRecord = {
+    id: 'lease-123',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    messageId: 'msg-456',
+    subscriptionName: 'projects/test-project/subscriptions/test-sub',
+    ackId: 'ack-789',
+    leaseDeadline: new Date(Date.now() + 30000), // 30 seconds from now
+    deliveryAttempts: 1,
+    projectId: 'test-project',
+    subscriptionId: 'test-sub',
+  };
+
+  // Check that all required BaseRecord fields are present
+  expect(lease.id).toBeDefined();
+  expect(lease.createdAt).toBeInstanceOf(Date);
+  expect(lease.updatedAt).toBeInstanceOf(Date);
+
+  // Check lease-specific fields
+  expect(lease.messageId).toBe('msg-456');
+  expect(lease.subscriptionName).toBe('projects/test-project/subscriptions/test-sub');
+  expect(lease.ackId).toBe('ack-789');
+  expect(lease.leaseDeadline).toBeInstanceOf(Date);
+  expect(lease.deliveryAttempts).toBe(1);
+  expect(lease.projectId).toBe('test-project');
+  expect(lease.subscriptionId).toBe('test-sub');
+});

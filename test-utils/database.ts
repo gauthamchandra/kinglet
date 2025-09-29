@@ -134,7 +134,8 @@ export async function setupTestDatabase(
   if (withSampleData) {
     const testData = generateTestRecords(3);
     for (const record of testData) {
-      await provider.create(tableName, record);
+      const { id, created_at, updated_at, ...dataToCreate } = record;
+      await provider.create(tableName, dataToCreate);
     }
   }
 

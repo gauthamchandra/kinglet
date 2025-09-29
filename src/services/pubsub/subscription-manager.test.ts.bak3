@@ -1,0 +1,715 @@
+/**
+ * Unit tests for Subscription Manager
+ */
+
+import { test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { ValidationError } from '@/core/storage/types.js';
+import type { IStorageManager } from '@/core/storage/interfaces.js';
+import type { Logger } from '@/shared/utils/logger.js';
+import {
+  SubscriptionManager,
+  type CreateSubscriptionRequest,
+  type UpdateSubscriptionRequest,
+  type ListSubscriptionsRequest
+} from './subscription-manager.js';
+import type { SubscriptionRecord } from './models.js';
+import { createMockLogger } from '../../test-utils/mock-logger.js';
+import { createMockStorage, mockResolvedValueOnce, mockRejectedValueOnce, mockReset } from '../../test-utils/mock-storage.js';
+
+// Mock logger
+const mockLogger = createMockLogger();
+
+// Mock storage manager
+const mockStorage = createMockStorage();
+
+let subscriptionManager: SubscriptionManager;
+
+beforeEach(() => {
+  subscriptionManager = new SubscriptionManager(mockStorage, mockLogger);
+
+  // Reset all mocks
+  Object.values(mockStorage).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+  Object.values(mockLogger).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+});
+
+afterEach(() => {
+  // Clean up after each test
+  Object.values(mockStorage).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+  Object.values(mockLogger).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+});
+
+test('SubscriptionManager - initialize should initialize successfully', async () => {
+  await subscriptionManager.initialize();
+
+  expect(mockLogger.info).toHaveBeenCalledWith('Initializing Subscription Manager');
+  expect(mockLogger.info).toHaveBeenCalledWith('Subscription Manager initialized successfully');
+  expect(mockStorage.createTable).toHaveBeenCalled();
+});
+
+test('SubscriptionManager - createSubscription should create valid subscription', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    ackDeadlineSeconds: 30
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, null); // No existing subscription
+
+  const subscription = await subscriptionManager.createSubscription(request);
+
+  expect(subscription).toMatchObject({
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    ackDeadlineSeconds: 30,
+    projectId: 'test-project',
+    subscriptionId: 'test-subscription',
+    topicId: 'test-topic'
+  });
+  expect(mockLogger.info).toHaveBeenCalledWith('Creating subscription: projects/test-project/subscriptions/test-subscription');
+  expect(mockStorage.create).toHaveBeenCalled();
+});
+
+test('SubscriptionManager - createSubscription should validate subscription name', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'invalid-subscription-name',
+    topic: 'projects/test-project/topics/test-topic'
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid subscription name');
+});
+
+test('SubscriptionManager - createSubscription should validate topic name', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'invalid-topic-name'
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid topic name');
+});
+
+test('SubscriptionManager - createSubscription should require subscription name', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: '',
+    topic: 'projects/test-project/topics/test-topic'
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Subscription name is required');
+});
+
+test('SubscriptionManager - createSubscription should require topic name', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: ''
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Topic name is required');
+});
+
+test('SubscriptionManager - createSubscription should validate ack deadline', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    ackDeadlineSeconds: 5 // Too low
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid ack deadline');
+});
+
+test('SubscriptionManager - createSubscription should validate ack deadline upper bound', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    ackDeadlineSeconds: 700 // Too high
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid ack deadline');
+});
+
+test('SubscriptionManager - createSubscription should validate labels', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    labels: {
+      // Too many labels (over 64)
+      ...Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`label${i}`, `value${i}`]))
+    }
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Too many labels');
+});
+
+test('SubscriptionManager - createSubscription should validate message retention duration', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    messageRetentionDuration: 'invalid-duration'
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid message retention duration format');
+});
+
+test('SubscriptionManager - createSubscription should validate dead letter policy', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    deadLetterPolicy: {
+      deadLetterTopic: 'invalid-topic-name',
+      maxDeliveryAttempts: 10
+    }
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid topic name');
+});
+
+test('SubscriptionManager - createSubscription should validate max delivery attempts', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    deadLetterPolicy: {
+      deadLetterTopic: 'projects/test-project/topics/dead-letter',
+      maxDeliveryAttempts: 3 // Too low
+    }
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid max delivery attempts');
+});
+
+test('SubscriptionManager - createSubscription should validate retry policy', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    retryPolicy: {
+      minimumBackoff: 'invalid-duration',
+      maximumBackoff: '60s'
+    }
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid minimum backoff format');
+});
+
+test('SubscriptionManager - createSubscription should validate expiration policy', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    expirationPolicy: {
+      ttl: 'invalid-duration'
+    }
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Invalid TTL format');
+});
+
+test('SubscriptionManager - createSubscription should reject push subscription with message ordering', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    pushConfig: {
+      pushEndpoint: 'https://example.com/webhook'
+    },
+    enableMessageOrdering: true
+  };
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Message ordering is not supported for push subscriptions');
+});
+
+test('SubscriptionManager - createSubscription should accept valid configurations', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    ackDeadlineSeconds: 60,
+    retainAckedMessages: true,
+    messageRetentionDuration: '600s',
+    enableExactlyOnceDelivery: true,
+    deadLetterPolicy: {
+      deadLetterTopic: 'projects/test-project/topics/dead-letter',
+      maxDeliveryAttempts: 10
+    },
+    retryPolicy: {
+      minimumBackoff: '1s',
+      maximumBackoff: '60s'
+    },
+    expirationPolicy: {
+      ttl: '24h'
+    }
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  const subscription = await subscriptionManager.createSubscription(request);
+
+  expect(subscription.ackDeadlineSeconds).toBe(60);
+  expect(subscription.retainAckedMessages).toBe(true);
+  expect(subscription.messageRetentionDuration).toBe('600s');
+  expect(subscription.enableExactlyOnceDelivery).toBe(true);
+  expect(subscription.deadLetterPolicy).toEqual({
+    deadLetterTopic: 'projects/test-project/topics/dead-letter',
+    maxDeliveryAttempts: 10
+  });
+});
+
+test('SubscriptionManager - getSubscription should return existing subscription', async () => {
+  const mockStorageRecord = {
+    id: 'sub-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    labels: JSON.stringify({ env: 'test' }),
+    ackDeadlineSeconds: 30,
+    retainAckedMessages: 0,
+    enableMessageOrdering: 0,
+    detached: 0,
+    enableExactlyOnceDelivery: 0,
+    state: 'ACTIVE',
+    projectId: 'test-project',
+    subscriptionId: 'test-subscription',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, mockStorageRecord);
+
+  const subscription = await subscriptionManager.getSubscription('projects/test-project/subscriptions/test-subscription');
+
+  expect(subscription).toBeDefined();
+  expect(subscription?.name).toBe('projects/test-project/subscriptions/test-subscription');
+  expect(mockLogger.debug).toHaveBeenCalledWith('Getting subscription: projects/test-project/subscriptions/test-subscription');
+});
+
+test('SubscriptionManager - getSubscription should return null for non-existent subscription', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  const subscription = await subscriptionManager.getSubscription('projects/test-project/subscriptions/non-existent');
+
+  expect(subscription).toBeNull();
+  expect(mockLogger.debug).toHaveBeenCalledWith('Subscription not found: projects/test-project/subscriptions/non-existent');
+});
+
+test('SubscriptionManager - getSubscription should validate subscription name', async () => {
+  await expect(subscriptionManager.getSubscription('invalid-subscription-name')).rejects.toThrow(ValidationError);
+});
+
+test('SubscriptionManager - updateSubscription should update existing subscription', async () => {
+  const existingSubscription: SubscriptionRecord = {
+    id: 'sub-123',
+    createdAt: new Date('2024-01-01'),
+    updatedAt: new Date('2024-01-01'),
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    ackDeadlineSeconds: 10,
+    retainAckedMessages: false,
+    enableMessageOrdering: false,
+    detached: false,
+    enableExactlyOnceDelivery: false,
+    state: 'ACTIVE',
+    projectId: 'test-project',
+    subscriptionId: 'test-subscription',
+    topicId: 'test-topic'
+  };
+
+  // Mock findFirst for initial findByName call
+  mockResolvedValueOnce(mockStorage.findFirst, {
+    id: existingSubscription.id,
+    createdAt: existingSubscription.createdAt.toISOString(),
+    updatedAt: existingSubscription.updatedAt.toISOString(),
+    name: existingSubscription.name,
+    topic: existingSubscription.topic,
+    labels: JSON.stringify(existingSubscription.labels),
+    ackDeadlineSeconds: existingSubscription.ackDeadlineSeconds,
+    retainAckedMessages: 0,
+    enableMessageOrdering: 0,
+    detached: 0,
+    enableExactlyOnceDelivery: 0,
+    state: existingSubscription.state,
+    projectId: existingSubscription.projectId,
+    subscriptionId: existingSubscription.subscriptionId,
+    topicId: existingSubscription.topicId
+  });
+
+  // Mock findById for repository.updateById call
+  mockResolvedValueOnce(mockStorage.findById, {
+    id: existingSubscription.id,
+    createdAt: existingSubscription.createdAt.toISOString(),
+    updatedAt: existingSubscription.updatedAt.toISOString(),
+    name: existingSubscription.name,
+    topic: existingSubscription.topic,
+    labels: JSON.stringify(existingSubscription.labels),
+    ackDeadlineSeconds: existingSubscription.ackDeadlineSeconds,
+    retainAckedMessages: 0,
+    enableMessageOrdering: 0,
+    detached: 0,
+    enableExactlyOnceDelivery: 0,
+    state: existingSubscription.state,
+    projectId: existingSubscription.projectId,
+    subscriptionId: existingSubscription.subscriptionId,
+    topicId: existingSubscription.topicId
+  });
+
+  const request: UpdateSubscriptionRequest = {
+    labels: { env: 'prod', version: '1.0' },
+    ackDeadlineSeconds: 60,
+    retainAckedMessages: true
+  };
+
+  const updatedSubscription = await subscriptionManager.updateSubscription(
+    'projects/test-project/subscriptions/test-subscription',
+    request
+  );
+
+  expect(updatedSubscription).toBeDefined();
+  expect(updatedSubscription?.labels).toEqual({ env: 'prod', version: '1.0' });
+  expect(updatedSubscription?.ackDeadlineSeconds).toBe(60);
+  expect(updatedSubscription?.retainAckedMessages).toBe(true);
+  expect(mockLogger.info).toHaveBeenCalledWith('Updating subscription: projects/test-project/subscriptions/test-subscription');
+  expect(mockStorage.updateById).toHaveBeenCalled();
+});
+
+test('SubscriptionManager - updateSubscription should return null for non-existent subscription', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  const request: UpdateSubscriptionRequest = {
+    labels: { env: 'prod' }
+  };
+
+  const result = await subscriptionManager.updateSubscription(
+    'projects/test-project/subscriptions/non-existent',
+    request
+  );
+
+  expect(result).toBeNull();
+  expect(mockLogger.warn).toHaveBeenCalledWith('Subscription not found for update: projects/test-project/subscriptions/non-existent');
+});
+
+test('SubscriptionManager - updateSubscription should validate subscription name', async () => {
+  const request: UpdateSubscriptionRequest = {
+    labels: { env: 'prod' }
+  };
+
+  await expect(subscriptionManager.updateSubscription('invalid-subscription-name', request)).rejects.toThrow(ValidationError);
+});
+
+test('SubscriptionManager - deleteSubscription should delete existing subscription', async () => {
+  const mockSubscription = {
+    id: 'sub-123',
+    name: 'projects/test-project/subscriptions/test-subscription'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, mockSubscription);
+  mockResolvedValueOnce(mockStorage.deleteById, true);
+
+  const result = await subscriptionManager.deleteSubscription('projects/test-project/subscriptions/test-subscription');
+
+  expect(result).toBe(true);
+  expect(mockLogger.info).toHaveBeenCalledWith('Deleting subscription: projects/test-project/subscriptions/test-subscription');
+  expect(mockLogger.info).toHaveBeenCalledWith('Subscription deleted successfully: projects/test-project/subscriptions/test-subscription');
+});
+
+test('SubscriptionManager - deleteSubscription should return false for non-existent subscription', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  const result = await subscriptionManager.deleteSubscription('projects/test-project/subscriptions/non-existent');
+
+  expect(result).toBe(false);
+  expect(mockLogger.warn).toHaveBeenCalledWith('Subscription not found for deletion: projects/test-project/subscriptions/non-existent');
+});
+
+test('SubscriptionManager - deleteSubscription should validate subscription name', async () => {
+  await expect(subscriptionManager.deleteSubscription('invalid-subscription-name')).rejects.toThrow(ValidationError);
+});
+
+test('SubscriptionManager - listSubscriptions should list subscriptions with pagination', async () => {
+  const mockStorageResult = {
+    items: [
+      {
+        id: 'sub-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/subscriptions/sub-1',
+        topic: 'projects/test-project/topics/test-topic',
+        labels: JSON.stringify({ env: 'test' }),
+        ackDeadlineSeconds: 30,
+        retainAckedMessages: 0,
+        enableMessageOrdering: 0,
+        detached: 0,
+        enableExactlyOnceDelivery: 0,
+        state: 'ACTIVE',
+        projectId: 'test-project',
+        subscriptionId: 'sub-1',
+        topicId: 'test-topic'
+      },
+      {
+        id: 'sub-2',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/subscriptions/sub-2',
+        topic: 'projects/test-project/topics/test-topic',
+        labels: JSON.stringify({ env: 'prod' }),
+        ackDeadlineSeconds: 60,
+        retainAckedMessages: 1,
+        enableMessageOrdering: 1,
+        detached: 0,
+        enableExactlyOnceDelivery: 1,
+        state: 'ACTIVE',
+        projectId: 'test-project',
+        subscriptionId: 'sub-2',
+        topicId: 'test-topic'
+      }
+    ],
+    totalCount: 2,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find, mockStorageResult);
+
+  const request: ListSubscriptionsRequest = {
+    projectId: 'test-project',
+    pageSize: 10
+  };
+
+  const response = await subscriptionManager.listSubscriptions(request);
+
+  expect(response.subscriptions).toHaveLength(2);
+  expect(response.subscriptions[0]?.name).toBe('projects/test-project/subscriptions/sub-1');
+  expect(response.subscriptions[1]?.name).toBe('projects/test-project/subscriptions/sub-2');
+  expect(response.totalSize).toBe(2);
+  expect(response.nextPageToken).toBeUndefined();
+});
+
+test('SubscriptionManager - listSubscriptions should generate next page token when hasMore is true', async () => {
+  const mockStorageResult = {
+    items: [
+      {
+        id: 'sub-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/subscriptions/sub-1',
+        topic: 'projects/test-project/topics/test-topic',
+        labels: JSON.stringify({}),
+        ackDeadlineSeconds: 10,
+        retainAckedMessages: 0,
+        enableMessageOrdering: 0,
+        detached: 0,
+        enableExactlyOnceDelivery: 0,
+        state: 'ACTIVE',
+        projectId: 'test-project',
+        subscriptionId: 'sub-1',
+        topicId: 'test-topic'
+      }
+    ],
+    totalCount: 10,
+    hasMore: true
+  };
+
+  mockResolvedValueOnce(mockStorage.find, mockStorageResult);
+
+  const request: ListSubscriptionsRequest = {
+    projectId: 'test-project',
+    pageSize: 1
+  };
+
+  const response = await subscriptionManager.listSubscriptions(request);
+
+  expect(response.subscriptions).toHaveLength(1);
+  expect(response.nextPageToken).toBeDefined();
+  expect(response.totalSize).toBe(10);
+});
+
+test('SubscriptionManager - listSubscriptions should handle page token', async () => {
+  const pageToken = Buffer.from('10').toString('base64'); // Offset of 10
+
+  const mockStorageResult = {
+    items: [],
+    totalCount: 20,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find, mockStorageResult);
+
+  const request: ListSubscriptionsRequest = {
+    projectId: 'test-project',
+    pageToken
+  };
+
+  await subscriptionManager.listSubscriptions(request);
+
+  expect(mockStorage.find).toHaveBeenCalledWith('pubsub_subscriptions', expect.objectContaining({
+    offset: 10
+  }));
+});
+
+test('SubscriptionManager - listSubscriptions should validate request', async () => {
+  const request: ListSubscriptionsRequest = {
+    projectId: '', // Empty project ID
+    pageSize: 10
+  };
+
+  await expect(subscriptionManager.listSubscriptions(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.listSubscriptions(request)).rejects.toThrow('Project ID is required');
+});
+
+test('SubscriptionManager - listSubscriptions should validate page size', async () => {
+  const request: ListSubscriptionsRequest = {
+    projectId: 'test-project',
+    pageSize: 2000 // Too large
+  };
+
+  await expect(subscriptionManager.listSubscriptions(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.listSubscriptions(request)).rejects.toThrow('Page size must be between 1 and 1000');
+});
+
+test('SubscriptionManager - listTopicSubscriptions should list subscriptions for topic', async () => {
+  const mockStorageResult = {
+    items: [
+      {
+        id: 'sub-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/subscriptions/sub-1',
+        topic: 'projects/test-project/topics/test-topic',
+        labels: JSON.stringify({}),
+        ackDeadlineSeconds: 10,
+        retainAckedMessages: 0,
+        enableMessageOrdering: 0,
+        detached: 0,
+        enableExactlyOnceDelivery: 0,
+        state: 'ACTIVE',
+        projectId: 'test-project',
+        subscriptionId: 'sub-1',
+        topicId: 'test-topic'
+      }
+    ],
+    totalCount: 1,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find, mockStorageResult);
+
+  const response = await subscriptionManager.listTopicSubscriptions({
+    topic: 'projects/test-project/topics/test-topic'
+  });
+
+  expect(response.subscriptions).toHaveLength(1);
+  expect(response.subscriptions[0]?.topic).toBe('projects/test-project/topics/test-topic');
+  expect(mockStorage.find).toHaveBeenCalledWith('pubsub_subscriptions', expect.objectContaining({
+    topic: 'projects/test-project/topics/test-topic'
+  }));
+});
+
+test('SubscriptionManager - listTopicSubscriptions should validate topic name', async () => {
+  await expect(subscriptionManager.listTopicSubscriptions({
+    topic: 'invalid-topic-name'
+  })).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.listTopicSubscriptions({
+    topic: 'invalid-topic-name'
+  })).rejects.toThrow('Invalid topic name');
+});
+
+test('SubscriptionManager - subscriptionExists should check subscription existence', async () => {
+  const mockSubscription = {
+    id: 'sub-123',
+    name: 'projects/test-project/subscriptions/test-subscription'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, mockSubscription);
+
+  const exists = await subscriptionManager.subscriptionExists('projects/test-project/subscriptions/test-subscription');
+
+  expect(exists).toBe(true);
+});
+
+test('SubscriptionManager - subscriptionExists should return false for non-existent subscription', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  const exists = await subscriptionManager.subscriptionExists('projects/test-project/subscriptions/non-existent');
+
+  expect(exists).toBe(false);
+});
+
+test('SubscriptionManager - getSubscriptionCount should return subscription count', async () => {
+  mockResolvedValueOnce(mockStorage.count, 5);
+
+  const count = await subscriptionManager.getSubscriptionCount('test-project');
+
+  expect(count).toBe(5);
+});
+
+test('SubscriptionManager - getTopicSubscriptionCount should return topic subscription count', async () => {
+  mockResolvedValueOnce(mockStorage.count, 3);
+
+  const count = await subscriptionManager.getTopicSubscriptionCount('projects/test-project/topics/test-topic');
+
+  expect(count).toBe(3);
+});
+
+test('SubscriptionManager - should handle validation errors gracefully', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic',
+    filter: 'a'.repeat(1001) // Filter too long
+  };
+
+  // Validation errors are thrown before the try/catch in createSubscription,
+  // so they won't be logged as "Failed to create subscription"
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow(ValidationError);
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Filter expression too long');
+});
+
+test('SubscriptionManager - should handle database errors gracefully', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic'
+  };
+
+  mockRejectedValueOnce(mockStorage.findFirst, new Error('Database connection failed'));
+
+  await expect(subscriptionManager.createSubscription(request)).rejects.toThrow('Database connection failed');
+  expect(mockLogger.error).toHaveBeenCalledWith(
+    'Failed to create subscription projects/test-project/subscriptions/test-subscription:',
+    expect.any(Error)
+  );
+});
+
+test('SubscriptionManager - should log operations appropriately', async () => {
+  const request: CreateSubscriptionRequest = {
+    name: 'projects/test-project/subscriptions/test-subscription',
+    topic: 'projects/test-project/topics/test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  await subscriptionManager.createSubscription(request);
+
+  expect(mockLogger.info).toHaveBeenCalledWith('Creating subscription: projects/test-project/subscriptions/test-subscription');
+  expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Subscription created successfully'));
+});

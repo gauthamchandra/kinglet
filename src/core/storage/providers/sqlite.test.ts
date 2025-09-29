@@ -77,7 +77,7 @@ describe('SQLiteStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
+      const created = await provider.create('test_records', data);
 
       expect(created.id).toBeDefined();
       expect(created.name).toBe(data.name);
@@ -111,8 +111,8 @@ describe('SQLiteStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
-      const found = await provider.findById<TestRecord>('test_records', created.id);
+      const created = await provider.create('test_records', data);
+      const found = await provider.findById('test_records', created.id);
 
       expect(found).not.toBeNull();
       expect(found?.name).toBe(data.name);
@@ -133,8 +133,8 @@ describe('SQLiteStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
-      const updated = await provider.updateById<TestRecord>('test_records', created.id, {
+      const created = await provider.create('test_records', data);
+      const updated = await provider.updateById('test_records', created.id, {
         name: 'Updated Name',
         age: 45,
       });
@@ -154,7 +154,7 @@ describe('SQLiteStorageProvider', () => {
         active: true,
       };
 
-      const created = await provider.create<TestRecord>('test_records', data);
+      const created = await provider.create('test_records', data);
       const deleted = await provider.deleteById('test_records', created.id);
 
       expect(deleted).toBe(true);
@@ -186,7 +186,7 @@ describe('SQLiteStorageProvider', () => {
     });
 
     test('should find all records without filter', async () => {
-      const result = await provider.find<TestRecord>('test_records');
+      const result = await provider.find('test_records');
 
       expect(result.data).toHaveLength(5);
       expect(result.total).toBe(5);
@@ -198,7 +198,7 @@ describe('SQLiteStorageProvider', () => {
         conditions: [{ field: 'active', operator: 'eq', value: true }],
       };
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data).toHaveLength(3);
       expect(result.data.every(record => record.active)).toBe(true);
@@ -213,14 +213,20 @@ describe('SQLiteStorageProvider', () => {
         operator: 'and',
       };
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data).toHaveLength(2); // Alice (25) and Charlie (28)
-      expect(result.data.every(record => record.age >= 25 && record.age <= 30)).toBe(true);
+      expect(
+        result.data.every(
+          record =>
+            (record as unknown as { age: number }).age >= 25 &&
+            (record as unknown as { age: number }).age <= 30
+        )
+      ).toBe(true);
     });
 
     test('should sort records', async () => {
-      const result = await provider.find<TestRecord>('test_records', {
+      const result = await provider.find('test_records', {
         sort: [{ field: 'age', direction: 'desc' }],
       });
 
@@ -230,7 +236,7 @@ describe('SQLiteStorageProvider', () => {
     });
 
     test('should paginate results', async () => {
-      const result = await provider.find<TestRecord>('test_records', {
+      const result = await provider.find('test_records', {
         pagination: { limit: 2, offset: 1 },
         sort: [{ field: 'name', direction: 'asc' }],
       });
@@ -245,7 +251,7 @@ describe('SQLiteStorageProvider', () => {
         conditions: [{ field: 'active', operator: 'eq', value: true }],
       };
 
-      const record = await provider.findFirst<TestRecord>('test_records', {
+      const record = await provider.findFirst('test_records', {
         filter,
         sort: [{ field: 'age', direction: 'asc' }],
       });
@@ -284,7 +290,7 @@ describe('SQLiteStorageProvider', () => {
       });
 
       const testData = { name: 'Exists Test', email: 'exists@example.com', age: 30, active: true };
-      const created = await freshProvider.create<TestRecord>('exists_test', testData);
+      const created = await freshProvider.create('exists_test', testData);
 
       const exists = await freshProvider.exists('exists_test', created.id);
 
@@ -323,7 +329,7 @@ describe('SQLiteStorageProvider', () => {
 
       expect(updated).toBe(2); // Should update 2 active records
 
-      const result = await provider.find<TestRecord>('test_records', { filter });
+      const result = await provider.find('test_records', { filter });
 
       expect(result.data.every(record => record.age === 30)).toBe(true);
     });
@@ -348,14 +354,14 @@ describe('SQLiteStorageProvider', () => {
       const tx = await provider.beginTransaction();
 
       const result = await tx.execute(async txProvider => {
-        const created1 = await txProvider.create<TestRecord>('test_records', {
+        const created1 = await txProvider.create('test_records', {
           name: 'TX User 1',
           email: 'tx1@example.com',
           age: 25,
           active: true,
         });
 
-        const created2 = await txProvider.create<TestRecord>('test_records', {
+        const created2 = await txProvider.create('test_records', {
           name: 'TX User 2',
           email: 'tx2@example.com',
           age: 30,
@@ -381,7 +387,7 @@ describe('SQLiteStorageProvider', () => {
 
       try {
         await tx.execute(async txProvider => {
-          await txProvider.create<TestRecord>('test_records', {
+          await txProvider.create('test_records', {
             name: 'TX User 1',
             email: 'tx1@example.com',
             age: 25,
@@ -389,7 +395,7 @@ describe('SQLiteStorageProvider', () => {
           });
 
           // This should cause an error due to duplicate email
-          await txProvider.create<TestRecord>('test_records', {
+          await txProvider.create('test_records', {
             name: 'TX User 2',
             email: 'tx1@example.com', // Duplicate email
             age: 30,
@@ -409,7 +415,7 @@ describe('SQLiteStorageProvider', () => {
 
   describe('error handling', () => {
     test('should handle duplicate key constraint', async () => {
-      await provider.create<TestRecord>('test_records', {
+      await provider.create('test_records', {
         name: 'Original',
         email: 'duplicate@example.com',
         age: 25,
@@ -417,7 +423,7 @@ describe('SQLiteStorageProvider', () => {
       });
 
       await expect(
-        provider.create<TestRecord>('test_records', {
+        provider.create('test_records', {
           name: 'Duplicate',
           email: 'duplicate@example.com', // Same email
           age: 30,

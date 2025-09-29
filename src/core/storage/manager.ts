@@ -7,7 +7,6 @@
 
 import { ValidationError } from './types.js';
 import type {
-  BaseRecord,
   CacheOperations,
   QueryFilter,
   QueryOptions,
@@ -133,7 +132,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     }
   }
 
-  async create<T extends BaseRecord>(table: string, data: Omit<T, keyof BaseRecord>): Promise<T> {
+  async create(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.provider) {
       throw new ValidationError('Storage manager not initialized');
     }
@@ -141,11 +140,11 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     const startTime = Date.now();
 
     try {
-      const result = await this.provider.create<T>(table, data);
+      const result = await this.provider.create(table, data);
 
       this.emit('record:created', {
         table,
-        recordId: result.id,
+        recordId: result.id as string,
         operation: 'create',
         timestamp: new Date(),
         metadata: { data },
@@ -157,10 +156,10 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     }
   }
 
-  async createMany<T extends BaseRecord>(
+  async createMany(
     table: string,
-    data: Array<Omit<T, keyof BaseRecord>>
-  ): Promise<T[]> {
+    data: Array<Record<string, unknown>>
+  ): Promise<Array<Record<string, unknown>>> {
     if (!this.provider) {
       throw new ValidationError('Storage manager not initialized');
     }
@@ -168,7 +167,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     const startTime = Date.now();
 
     try {
-      const results = await this.provider.createMany<T>(table, data);
+      const results = await this.provider.createMany(table, data);
 
       this.emit('record:created', {
         table,
@@ -183,7 +182,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     }
   }
 
-  async findById<T extends BaseRecord>(table: string, id: string): Promise<T | null> {
+  async findById(table: string, id: string): Promise<Record<string, unknown> | null> {
     if (!this.provider) {
       throw new ValidationError('Storage manager not initialized');
     }
@@ -195,7 +194,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
       const cache = this.getCache();
 
       if (cache) {
-        const cached = await cache.get<T>(`${table}:${id}`);
+        const cached = await cache.get<Record<string, unknown>>(`${table}:${id}`);
 
         if (cached) {
           this.emit('cache:hit', {
@@ -216,7 +215,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
         });
       }
 
-      const result = await this.provider.findById<T>(table, id);
+      const result = await this.provider.findById(table, id);
 
       // Cache the result if found
       if (result && cache) {
@@ -229,7 +228,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     }
   }
 
-  async find<T extends BaseRecord>(table: string, options?: QueryOptions): Promise<QueryResult<T>> {
+  async find(table: string, options?: QueryOptions): Promise<QueryResult<Record<string, unknown>>> {
     if (!this.provider) {
       throw new ValidationError('Storage manager not initialized');
     }
@@ -237,13 +236,13 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     const startTime = Date.now();
 
     try {
-      return await this.provider.find<T>(table, options);
+      return await this.provider.find(table, options);
     } finally {
       this.updateQueryStats(Date.now() - startTime);
     }
   }
 
-  async findFirst<T extends BaseRecord>(table: string, options?: QueryOptions): Promise<T | null> {
+  async findFirst(table: string, options?: QueryOptions): Promise<Record<string, unknown> | null> {
     if (!this.provider) {
       throw new ValidationError('Storage manager not initialized');
     }
@@ -251,17 +250,17 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     const startTime = Date.now();
 
     try {
-      return await this.provider.findFirst<T>(table, options);
+      return await this.provider.findFirst(table, options);
     } finally {
       this.updateQueryStats(Date.now() - startTime);
     }
   }
 
-  async updateById<T extends BaseRecord>(
+  async updateById(
     table: string,
     id: string,
-    data: Partial<Omit<T, keyof BaseRecord>>
-  ): Promise<T | null> {
+    data: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null> {
     if (!this.provider) {
       throw new ValidationError('Storage manager not initialized');
     }
@@ -269,7 +268,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     const startTime = Date.now();
 
     try {
-      const result = await this.provider.updateById<T>(table, id, data);
+      const result = await this.provider.updateById(table, id, data);
 
       if (result) {
         // Invalidate cache
@@ -294,10 +293,10 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     }
   }
 
-  async updateMany<T extends BaseRecord>(
+  async updateMany(
     table: string,
     filter: QueryFilter,
-    data: Partial<Omit<T, keyof BaseRecord>>
+    data: Record<string, unknown>
   ): Promise<number> {
     if (!this.provider) {
       throw new ValidationError('Storage manager not initialized');
@@ -306,7 +305,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     const startTime = Date.now();
 
     try {
-      const count = await this.provider.updateMany<T>(table, filter, data);
+      const count = await this.provider.updateMany(table, filter, data);
 
       if (count > 0) {
         // Targeted cache invalidation: find affected records and invalidate only those
@@ -315,7 +314,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
         if (cache) {
           try {
             // First, find which records match the filter to get their IDs
-            const affectedRecords = await this.provider.find<T>(table, { filter });
+            const affectedRecords = await this.provider.find(table, { filter });
 
             // Invalidate cache entries only for the affected records
             for (const record of affectedRecords.data) {
@@ -388,9 +387,9 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
       if (cache) {
         try {
           // Find records that match the filter before deletion
-          const affectedRecords = await this.provider.find<BaseRecord>(table, { filter });
+          const affectedRecords = await this.provider.find(table, { filter });
 
-          affectedRecordIds = affectedRecords.data.map(record => record.id);
+          affectedRecordIds = affectedRecords.data.map(record => record.id as string);
         } catch {
           // If pre-query fails, we'll fall back to clearing all table entries later
         }
@@ -590,7 +589,7 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     const listeners = this.eventListeners.get(event);
 
     if (listeners) {
-      for (const listener of listeners) {
+      for (const listener of Array.from(listeners)) {
         try {
           const result = listener(data);
 
@@ -656,43 +655,43 @@ class TransactionalStorageManager implements IStorageManager {
   }
 
   // Delegate all operations to the provider
-  async create<T extends BaseRecord>(table: string, data: Omit<T, keyof BaseRecord>): Promise<T> {
-    return await this.provider.create<T>(table, data);
+  async create(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return await this.provider.create(table, data);
   }
 
-  async createMany<T extends BaseRecord>(
+  async createMany(
     table: string,
-    data: Array<Omit<T, keyof BaseRecord>>
-  ): Promise<T[]> {
-    return await this.provider.createMany<T>(table, data);
+    data: Array<Record<string, unknown>>
+  ): Promise<Array<Record<string, unknown>>> {
+    return await this.provider.createMany(table, data);
   }
 
-  async findById<T extends BaseRecord>(table: string, id: string): Promise<T | null> {
-    return await this.provider.findById<T>(table, id);
+  async findById(table: string, id: string): Promise<Record<string, unknown> | null> {
+    return await this.provider.findById(table, id);
   }
 
-  async find<T extends BaseRecord>(table: string, options?: QueryOptions): Promise<QueryResult<T>> {
-    return await this.provider.find<T>(table, options);
+  async find(table: string, options?: QueryOptions): Promise<QueryResult<Record<string, unknown>>> {
+    return await this.provider.find(table, options);
   }
 
-  async findFirst<T extends BaseRecord>(table: string, options?: QueryOptions): Promise<T | null> {
-    return await this.provider.findFirst<T>(table, options);
+  async findFirst(table: string, options?: QueryOptions): Promise<Record<string, unknown> | null> {
+    return await this.provider.findFirst(table, options);
   }
 
-  async updateById<T extends BaseRecord>(
+  async updateById(
     table: string,
     id: string,
-    data: Partial<Omit<T, keyof BaseRecord>>
-  ): Promise<T | null> {
-    return await this.provider.updateById<T>(table, id, data);
+    data: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null> {
+    return await this.provider.updateById(table, id, data);
   }
 
-  async updateMany<T extends BaseRecord>(
+  async updateMany(
     table: string,
     filter: QueryFilter,
-    data: Partial<Omit<T, keyof BaseRecord>>
+    data: Record<string, unknown>
   ): Promise<number> {
-    return await this.provider.updateMany<T>(table, filter, data);
+    return await this.provider.updateMany(table, filter, data);
   }
 
   async deleteById(table: string, id: string): Promise<boolean> {

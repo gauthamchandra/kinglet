@@ -84,7 +84,8 @@ describe('GrpcServer', () => {
         implementation: {},
       };
 
-      expect(() => grpcServer.registerService(invalidService)).toThrow();
+      // Should throw when trying to register invalid service
+      expect(() => grpcServer.registerService(invalidService)).toThrow(/no such file or directory/);
 
       // Should not be in registered services list
       expect(grpcServer.getRegisteredServices()).not.toContain('InvalidService');
@@ -123,7 +124,7 @@ describe('GrpcServer', () => {
       };
 
       expect(() => grpcServer.registerService(invalidService)).toThrow(
-        /Package nonexistent.package not found in proto definition/
+        /Package nonexistent\.package not found in proto definition/
       );
     });
   });

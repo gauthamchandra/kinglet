@@ -30,6 +30,20 @@ describe('Configuration Loader', () => {
 
   beforeEach(() => {
     resetConfig();
+
+    // Clean up any test files that might exist from previous runs
+    const testFiles = [
+      testConfigPath,
+      join(process.cwd(), 'invalid-test-config.json'),
+      join(process.cwd(), 'first-config.json'),
+      join(process.cwd(), 'second-config.json'),
+    ];
+
+    testFiles.forEach(filePath => {
+      if (existsSync(filePath)) {
+        unlinkSync(filePath);
+      }
+    });
   });
 
   afterEach(() => {
@@ -72,14 +86,14 @@ describe('Configuration Loader', () => {
     test('should handle invalid JSON gracefully', async () => {
       const invalidConfigPath = join(process.cwd(), 'invalid-test-config.json');
 
-      writeFileSync(invalidConfigPath, 'invalid json');
+      writeFileSync(invalidConfigPath, 'invalid');
 
       const source = new JsonConfigSource(invalidConfigPath);
       const config = await source.load();
 
       expect(config).toBeNull();
 
-      // Clean up
+      // Clean up immediately to prevent interference with other tests
       if (existsSync(invalidConfigPath)) {
         unlinkSync(invalidConfigPath);
       }

@@ -15,6 +15,8 @@ export function createMockLogger(): Logger {
   const infoMock = mock(() => {});
   const warnMock = mock(() => {});
   const errorMock = mock(() => {});
+  const traceMock = mock(() => {});
+  const fatalMock = mock(() => {});
 
   // Create a new Logger instance and override its methods
   const logger = new (class extends Logger {
@@ -25,6 +27,8 @@ export function createMockLogger(): Logger {
       (this as any).info = infoMock;
       (this as any).warn = warnMock;
       (this as any).error = errorMock;
+      (this as any).trace = traceMock;
+      (this as any).fatal = fatalMock;
     }
   })();
 

@@ -1,0 +1,523 @@
+/**
+ * Unit tests for Topic Manager
+ */
+
+import { test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { ValidationError } from '@/core/storage/types.js';
+import type { IStorageManager } from '@/core/storage/interfaces.js';
+import type { Logger } from '@/shared/utils/logger.js';
+import { TopicManager, type CreateTopicRequest, type UpdateTopicRequest, type ListTopicsRequest } from './topic-manager.js';
+import type { TopicRecord } from './models.js';
+import { createMockLogger } from '../../test-utils/mock-logger.js';
+import { createMockStorage, mockResolvedValueOnce, mockRejectedValueOnce, mockReset } from '../../test-utils/mock-storage.js';
+
+// Mock logger
+const mockLogger = createMockLogger();
+
+// Mock storage manager
+const mockStorage = createMockStorage();
+
+let topicManager: TopicManager;
+
+beforeEach(() => {
+  topicManager = new TopicManager(mockStorage, mockLogger);
+
+  // Reset all mocks
+  Object.values(mockStorage).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+  Object.values(mockLogger).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+});
+
+afterEach(() => {
+  // Clean up after each test
+  Object.values(mockStorage).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+  Object.values(mockLogger).forEach(mockFn => {
+    if (typeof mockFn === 'function' && 'mockReset' in mockFn) {
+      mockFn.mockReset();
+    }
+  });
+});
+
+test('TopicManager - initialize should initialize successfully', async () => {
+  await topicManager.initialize();
+
+  expect(mockLogger.info).toHaveBeenCalledWith('Initializing Topic Manager');
+  expect(mockLogger.info).toHaveBeenCalledWith('Topic Manager initialized successfully');
+  expect(mockStorage.createTable).toHaveBeenCalled();
+});
+
+test('TopicManager - createTopic should create valid topic', async () => {
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    satisfiesPzs: false
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,null); // No existing topic
+
+  const topic = await topicManager.createTopic(request);
+
+  expect(topic).toMatchObject({
+    name: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    satisfiesPzs: false,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  });
+  expect(mockLogger.info).toHaveBeenCalledWith('Creating topic: projects/test-project/topics/test-topic');
+  expect(mockStorage.create).toHaveBeenCalled();
+});
+
+test('TopicManager - createTopic should validate topic name', async () => {
+  const request: CreateTopicRequest = {
+    name: 'invalid-topic-name'
+  };
+
+  await expect(topicManager.createTopic(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.createTopic(request)).rejects.toThrow('Invalid topic name');
+});
+
+test('TopicManager - createTopic should require topic name', async () => {
+  const request: CreateTopicRequest = {
+    name: ''
+  };
+
+  await expect(topicManager.createTopic(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.createTopic(request)).rejects.toThrow('Topic name is required');
+});
+
+test('TopicManager - createTopic should validate labels', async () => {
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic',
+    labels: {
+      // Too many labels (over 64)
+      ...Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`label${i}`, `value${i}`]))
+    }
+  };
+
+  await expect(topicManager.createTopic(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.createTopic(request)).rejects.toThrow('Too many labels');
+});
+
+test('TopicManager - createTopic should validate label key format', async () => {
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic',
+    labels: {
+      'invalid key!': 'value' // Invalid characters
+    }
+  };
+
+  await expect(topicManager.createTopic(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.createTopic(request)).rejects.toThrow('Invalid label key format');
+});
+
+test('TopicManager - createTopic should validate label key length', async () => {
+  const longKey = 'a'.repeat(64); // Key too long (64 chars, max is 63)
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic',
+    labels: {
+      [longKey]: 'value'
+    }
+  };
+
+  await expect(topicManager.createTopic(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.createTopic(request)).rejects.toThrow('Invalid label key');
+});
+
+test('TopicManager - createTopic should validate label value length', async () => {
+  const longValue = 'a'.repeat(64); // Value too long (64 chars, max is 63)
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic',
+    labels: {
+      key: longValue
+    }
+  };
+
+  await expect(topicManager.createTopic(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.createTopic(request)).rejects.toThrow('Invalid label value');
+});
+
+test('TopicManager - createTopic should validate message retention duration', async () => {
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic',
+    messageRetentionDuration: 'invalid-duration'
+  };
+
+  await expect(topicManager.createTopic(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.createTopic(request)).rejects.toThrow('Invalid message retention duration format');
+});
+
+test('TopicManager - createTopic should accept valid message retention duration', async () => {
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic',
+    messageRetentionDuration: '600s'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  const topic = await topicManager.createTopic(request);
+
+  expect(topic.messageRetentionDuration).toBe('600s');
+});
+
+test('TopicManager - getTopic should return existing topic', async () => {
+  const mockStorageRecord = {
+    id: 'topic-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    name: 'projects/test-project/topics/test-topic',
+    labels: JSON.stringify({ env: 'test' }),
+    satisfiesPzs: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockStorageRecord);
+
+  const topic = await topicManager.getTopic('projects/test-project/topics/test-topic');
+
+  expect(topic).toBeDefined();
+  expect(topic?.name).toBe('projects/test-project/topics/test-topic');
+  expect(mockLogger.debug).toHaveBeenCalledWith('Getting topic: projects/test-project/topics/test-topic');
+});
+
+test('TopicManager - getTopic should return null for non-existent topic', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  const topic = await topicManager.getTopic('projects/test-project/topics/non-existent');
+
+  expect(topic).toBeNull();
+  expect(mockLogger.debug).toHaveBeenCalledWith('Topic not found: projects/test-project/topics/non-existent');
+});
+
+test('TopicManager - getTopic should validate topic name', async () => {
+  await expect(topicManager.getTopic('invalid-topic-name')).rejects.toThrow(ValidationError);
+});
+
+test('TopicManager - updateTopic should update existing topic', async () => {
+  const existingTopic: TopicRecord = {
+    id: 'topic-123',
+    createdAt: new Date('2024-01-01'),
+    updatedAt: new Date('2024-01-01'),
+    name: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    satisfiesPzs: false,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  // Mock findFirst for initial findByName call
+  mockResolvedValueOnce(mockStorage.findFirst,{
+    id: existingTopic.id,
+    createdAt: existingTopic.createdAt.toISOString(),
+    updatedAt: existingTopic.updatedAt.toISOString(),
+    name: existingTopic.name,
+    labels: JSON.stringify(existingTopic.labels),
+    satisfiesPzs: 0,
+    projectId: existingTopic.projectId,
+    topicId: existingTopic.topicId
+  });
+
+  // Mock findById for repository.updateById call
+  mockResolvedValueOnce(mockStorage.findById, {
+    id: existingTopic.id,
+    createdAt: existingTopic.createdAt.toISOString(),
+    updatedAt: existingTopic.updatedAt.toISOString(),
+    name: existingTopic.name,
+    labels: JSON.stringify(existingTopic.labels),
+    satisfiesPzs: 0,
+    projectId: existingTopic.projectId,
+    topicId: existingTopic.topicId
+  });
+
+  const request: UpdateTopicRequest = {
+    labels: { env: 'prod', version: '1.0' },
+    messageRetentionDuration: '3600s'
+  };
+
+  const updatedTopic = await topicManager.updateTopic('projects/test-project/topics/test-topic', request);
+
+  expect(updatedTopic).toBeDefined();
+  expect(updatedTopic?.labels).toEqual({ env: 'prod', version: '1.0' });
+  expect(updatedTopic?.messageRetentionDuration).toBe('3600s');
+  expect(mockLogger.info).toHaveBeenCalledWith('Updating topic: projects/test-project/topics/test-topic');
+  expect(mockStorage.updateById).toHaveBeenCalled();
+});
+
+test('TopicManager - updateTopic should return null for non-existent topic', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  const request: UpdateTopicRequest = {
+    labels: { env: 'prod' }
+  };
+
+  const result = await topicManager.updateTopic('projects/test-project/topics/non-existent', request);
+
+  expect(result).toBeNull();
+  expect(mockLogger.warn).toHaveBeenCalledWith('Topic not found for update: projects/test-project/topics/non-existent');
+});
+
+test('TopicManager - updateTopic should validate topic name', async () => {
+  const request: UpdateTopicRequest = {
+    labels: { env: 'prod' }
+  };
+
+  await expect(topicManager.updateTopic('invalid-topic-name', request)).rejects.toThrow(ValidationError);
+});
+
+test('TopicManager - updateTopic should validate labels in update', async () => {
+  const request: UpdateTopicRequest = {
+    labels: {
+      'invalid key!': 'value'
+    }
+  };
+
+  await expect(topicManager.updateTopic('projects/test-project/topics/test-topic', request)).rejects.toThrow(ValidationError);
+});
+
+test('TopicManager - deleteTopic should delete existing topic', async () => {
+  const mockTopic = {
+    id: 'topic-123',
+    name: 'projects/test-project/topics/test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockTopic);
+  mockResolvedValueOnce(mockStorage.deleteById, true);
+
+  const result = await topicManager.deleteTopic('projects/test-project/topics/test-topic');
+
+  expect(result).toBe(true);
+  expect(mockLogger.info).toHaveBeenCalledWith('Deleting topic: projects/test-project/topics/test-topic');
+  expect(mockLogger.info).toHaveBeenCalledWith('Topic deleted successfully: projects/test-project/topics/test-topic');
+});
+
+test('TopicManager - deleteTopic should return false for non-existent topic', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  const result = await topicManager.deleteTopic('projects/test-project/topics/non-existent');
+
+  expect(result).toBe(false);
+  expect(mockLogger.warn).toHaveBeenCalledWith('Topic not found for deletion: projects/test-project/topics/non-existent');
+});
+
+test('TopicManager - deleteTopic should validate topic name', async () => {
+  await expect(topicManager.deleteTopic('invalid-topic-name')).rejects.toThrow(ValidationError);
+});
+
+test('TopicManager - listTopics should list topics with pagination', async () => {
+  const mockStorageResult = {
+    items: [
+      {
+        id: 'topic-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/topics/topic-1',
+        labels: JSON.stringify({ env: 'test' }),
+        satisfiesPzs: 0,
+        projectId: 'test-project',
+        topicId: 'topic-1'
+      },
+      {
+        id: 'topic-2',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/topics/topic-2',
+        labels: JSON.stringify({ env: 'prod' }),
+        satisfiesPzs: 1,
+        projectId: 'test-project',
+        topicId: 'topic-2'
+      }
+    ],
+    totalCount: 2,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find,mockStorageResult);
+
+  const request: ListTopicsRequest = {
+    projectId: 'test-project',
+    pageSize: 10
+  };
+
+  const response = await topicManager.listTopics(request);
+
+  expect(response.topics).toHaveLength(2);
+  expect(response.topics[0]?.name).toBe('projects/test-project/topics/topic-1');
+  expect(response.topics[1]?.name).toBe('projects/test-project/topics/topic-2');
+  expect(response.totalSize).toBe(2);
+  expect(response.nextPageToken).toBeUndefined();
+});
+
+test('TopicManager - listTopics should generate next page token when hasMore is true', async () => {
+  const mockStorageResult = {
+    items: [
+      {
+        id: 'topic-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/topics/topic-1',
+        labels: JSON.stringify({}),
+        satisfiesPzs: 0,
+        projectId: 'test-project',
+        topicId: 'topic-1'
+      }
+    ],
+    totalCount: 10,
+    hasMore: true
+  };
+
+  mockResolvedValueOnce(mockStorage.find,mockStorageResult);
+
+  const request: ListTopicsRequest = {
+    projectId: 'test-project',
+    pageSize: 1
+  };
+
+  const response = await topicManager.listTopics(request);
+
+  expect(response.topics).toHaveLength(1);
+  expect(response.nextPageToken).toBeDefined();
+  expect(response.totalSize).toBe(10);
+});
+
+test('TopicManager - listTopics should handle page token', async () => {
+  const pageToken = Buffer.from('10').toString('base64'); // Offset of 10
+
+  const mockStorageResult = {
+    items: [],
+    totalCount: 20,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find,mockStorageResult);
+
+  const request: ListTopicsRequest = {
+    projectId: 'test-project',
+    pageToken
+  };
+
+  await topicManager.listTopics(request);
+
+  expect(mockStorage.find).toHaveBeenCalledWith('pubsub_topics', expect.objectContaining({
+    offset: 10
+  }));
+});
+
+test('TopicManager - listTopics should validate request', async () => {
+  const request: ListTopicsRequest = {
+    projectId: '', // Empty project ID
+    pageSize: 10
+  };
+
+  await expect(topicManager.listTopics(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.listTopics(request)).rejects.toThrow('Project ID is required');
+});
+
+test('TopicManager - listTopics should validate page size', async () => {
+  const request: ListTopicsRequest = {
+    projectId: 'test-project',
+    pageSize: 2000 // Too large
+  };
+
+  await expect(topicManager.listTopics(request)).rejects.toThrow(ValidationError);
+  await expect(topicManager.listTopics(request)).rejects.toThrow('Page size must be between 1 and 1000');
+});
+
+test('TopicManager - topicExists should check topic existence', async () => {
+  const mockTopic = {
+    id: 'topic-123',
+    name: 'projects/test-project/topics/test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,mockTopic);
+
+  const exists = await topicManager.topicExists('projects/test-project/topics/test-topic');
+
+  expect(exists).toBe(true);
+});
+
+test('TopicManager - topicExists should return false for non-existent topic', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  const exists = await topicManager.topicExists('projects/test-project/topics/non-existent');
+
+  expect(exists).toBe(false);
+});
+
+test('TopicManager - getTopicCount should return topic count', async () => {
+  mockResolvedValueOnce(mockStorage.count,5);
+
+  const count = await topicManager.getTopicCount('test-project');
+
+  expect(count).toBe(5);
+});
+
+test('TopicManager - should handle message retention duration formats', async () => {
+  const validDurations = ['600s', '10m', '1h', '24h', '7d'];
+
+  for (const duration of validDurations) {
+    const request: CreateTopicRequest = {
+      name: `projects/test-project/topics/test-${duration.replace(/[^a-z0-9]/g, '')}`,
+      messageRetentionDuration: duration
+    };
+
+    mockResolvedValueOnce(mockStorage.findFirst,null);
+
+    const topic = await topicManager.createTopic(request);
+    expect(topic.messageRetentionDuration).toBe(duration);
+
+    // Reset for next iteration
+    mockReset(mockStorage.findFirst);
+  }
+});
+
+test('TopicManager - should reject invalid message retention duration formats', async () => {
+  const invalidDurations = ['600', '10 minutes', '1hour', 'abc', ''];
+
+  for (const duration of invalidDurations) {
+    const request: CreateTopicRequest = {
+      name: 'projects/test-project/topics/test-topic',
+      messageRetentionDuration: duration
+    };
+
+    await expect(topicManager.createTopic(request)).rejects.toThrow(ValidationError);
+  }
+});
+
+test('TopicManager - should handle errors gracefully', async () => {
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic'
+  };
+
+  mockRejectedValueOnce(mockStorage.findFirst,new Error('Database connection failed'));
+
+  await expect(topicManager.createTopic(request)).rejects.toThrow('Database connection failed');
+  expect(mockLogger.error).toHaveBeenCalledWith(
+    'Failed to create topic projects/test-project/topics/test-topic:',
+    expect.any(Error)
+  );
+});
+
+test('TopicManager - should log operations appropriately', async () => {
+  const request: CreateTopicRequest = {
+    name: 'projects/test-project/topics/test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst,null);
+
+  await topicManager.createTopic(request);
+
+  expect(mockLogger.info).toHaveBeenCalledWith('Creating topic: projects/test-project/topics/test-topic');
+  expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Topic created successfully'));
+});

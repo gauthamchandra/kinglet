@@ -128,7 +128,8 @@ export class GrpcServer {
           return;
         }
 
-        this.server.start();
+        // Note: server.start() is no longer necessary and is deprecated
+        // The server automatically starts when bindAsync completes successfully
         this.isRunning = true;
         this.logger.info(`gRPC server started on port ${port}`);
         resolve();

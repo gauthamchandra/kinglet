@@ -132,20 +132,29 @@ export class MemoryStorageProvider implements StorageProvider {
     return this.cache;
   }
 
-  async create<T extends BaseRecord>(table: string, data: Omit<T, keyof BaseRecord>): Promise<T> {
+  async create(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
     const memoryTable = this.getTable(table);
 
-    const id = randomUUID();
+    // Use existing ID if provided and non-empty, otherwise generate a new one
+    const providedId = data.id as string;
+    const id =
+      providedId && typeof providedId === 'string' && providedId.trim() !== ''
+        ? providedId
+        : randomUUID();
     const now = new Date();
 
-    const record: T = {
+    // Prevent ID overwriting by excluding it from spread
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id: _id, ...dataWithoutId } = data;
+
+    const record: Record<string, unknown> = {
       id,
       createdAt: now,
       updatedAt: now,
-      ...data,
-    } as T;
+      ...dataWithoutId,
+    };
 
-    memoryTable.records.set(id, record);
+    memoryTable.records.set(id, record as BaseRecord);
 
     // Cache the record
     if (this.cache) {
@@ -155,24 +164,24 @@ export class MemoryStorageProvider implements StorageProvider {
     return record;
   }
 
-  async createMany<T extends BaseRecord>(
+  async createMany(
     table: string,
-    data: Array<Omit<T, keyof BaseRecord>>
-  ): Promise<T[]> {
+    data: Array<Record<string, unknown>>
+  ): Promise<Array<Record<string, unknown>>> {
     const memoryTable = this.getTable(table);
-    const records: T[] = [];
+    const records: Array<Record<string, unknown>> = [];
     const now = new Date();
 
     for (const item of data) {
       const id = randomUUID();
-      const record: T = {
+      const record: Record<string, unknown> = {
         id,
         createdAt: now,
         updatedAt: now,
         ...item,
-      } as T;
+      };
 
-      memoryTable.records.set(id, record);
+      memoryTable.records.set(id, record as BaseRecord);
       records.push(record);
 
       // Cache the record
@@ -184,10 +193,10 @@ export class MemoryStorageProvider implements StorageProvider {
     return records;
   }
 
-  async findById<T extends BaseRecord>(table: string, id: string): Promise<T | null> {
+  async findById(table: string, id: string): Promise<Record<string, unknown> | null> {
     // Check cache first
     if (this.cache) {
-      const cached = await this.cache.get<T>(`${table}:${id}`);
+      const cached = await this.cache.get<Record<string, unknown>>(`${table}:${id}`);
 
       if (cached) {
         return cached;
@@ -195,7 +204,7 @@ export class MemoryStorageProvider implements StorageProvider {
     }
 
     const memoryTable = this.getTable(table);
-    const record = memoryTable.records.get(id) as T | undefined;
+    const record = memoryTable.records.get(id) as Record<string, unknown> | undefined;
 
     if (record) {
       // Cache the record
@@ -209,18 +218,18 @@ export class MemoryStorageProvider implements StorageProvider {
     return null;
   }
 
-  async find<T extends BaseRecord>(
+  async find(
     table: string,
     options: QueryOptions = {}
-  ): Promise<QueryResult<T>> {
+  ): Promise<QueryResult<Record<string, unknown>>> {
     const memoryTable = this.getTable(table);
-    let records = Array.from(memoryTable.records.values()) as T[];
+    let records = Array.from(memoryTable.records.values()) as Array<Record<string, unknown>>;
 
     // Apply filter
     if (options.filter) {
       const filter = options.filter;
 
-      records = records.filter(record => this.matchesFilter(record, filter));
+      records = records.filter(record => this.matchesFilter(record as BaseRecord, filter));
     }
 
     // Apply sorting
@@ -276,7 +285,7 @@ export class MemoryStorageProvider implements StorageProvider {
       }
     }
 
-    const result: QueryResult<T> = {
+    const result: QueryResult<Record<string, unknown>> = {
       data: paginatedRecords,
       total,
       hasMore,
@@ -289,39 +298,39 @@ export class MemoryStorageProvider implements StorageProvider {
     return result;
   }
 
-  async findFirst<T extends BaseRecord>(
+  async findFirst(
     table: string,
     options: QueryOptions = {}
-  ): Promise<T | null> {
+  ): Promise<Record<string, unknown> | null> {
     const modifiedOptions = {
       ...options,
       pagination: { ...options.pagination, limit: 1 },
     };
 
-    const result = await this.find<T>(table, modifiedOptions);
+    const result = await this.find(table, modifiedOptions);
 
     return result.data[0] ?? null;
   }
 
-  async updateById<T extends BaseRecord>(
+  async updateById(
     table: string,
     id: string,
-    data: Partial<Omit<T, keyof BaseRecord>>
-  ): Promise<T | null> {
+    data: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null> {
     const memoryTable = this.getTable(table);
-    const existingRecord = memoryTable.records.get(id) as T | undefined;
+    const existingRecord = memoryTable.records.get(id) as Record<string, unknown> | undefined;
 
     if (!existingRecord) {
       return null;
     }
 
-    const updatedRecord: T = {
+    const updatedRecord: Record<string, unknown> = {
       ...existingRecord,
       ...data,
       updatedAt: new Date(),
     };
 
-    memoryTable.records.set(id, updatedRecord);
+    memoryTable.records.set(id, updatedRecord as BaseRecord);
 
     // Update cache
     if (this.cache) {
@@ -331,10 +340,10 @@ export class MemoryStorageProvider implements StorageProvider {
     return updatedRecord;
   }
 
-  async updateMany<T extends BaseRecord>(
+  async updateMany(
     table: string,
     filter: QueryFilter,
-    data: Partial<Omit<T, keyof BaseRecord>>
+    data: Record<string, unknown>
   ): Promise<number> {
     const memoryTable = this.getTable(table);
     let updatedCount = 0;
@@ -347,7 +356,7 @@ export class MemoryStorageProvider implements StorageProvider {
           updatedAt: new Date(),
         };
 
-        memoryTable.records.set(id, updatedRecord);
+        memoryTable.records.set(id, updatedRecord as BaseRecord);
         updatedCount++;
 
         // Update cache
@@ -475,6 +484,11 @@ export class MemoryStorageProvider implements StorageProvider {
 
   private matchesFilter(record: BaseRecord, filter: QueryFilter): boolean {
     const { conditions, operator = 'and' } = filter;
+
+    // Handle empty conditions - return true (no filtering)
+    if (!conditions || conditions.length === 0) {
+      return true;
+    }
 
     if (operator === 'and') {
       return conditions.every(condition => this.matchesCondition(record, condition));

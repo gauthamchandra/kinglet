@@ -8,7 +8,7 @@
 /**
  * Represents a database record with common fields
  */
-export interface BaseRecord {
+export interface BaseRecord extends Record<string, unknown> {
   readonly id: string;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -48,7 +48,7 @@ export type LogicalOperator = 'and' | 'or';
  */
 export interface QueryFilter {
   readonly conditions: QueryCondition[];
-  readonly operator?: LogicalOperator;
+  readonly operator?: LogicalOperator | undefined;
 }
 
 /**
@@ -72,10 +72,10 @@ export interface PaginationOptions {
  * Complete query specification
  */
 export interface QueryOptions {
-  readonly filter?: QueryFilter;
-  readonly sort?: SortOrder[];
-  readonly pagination?: PaginationOptions;
-  readonly fields?: string[]; // Field selection
+  readonly filter?: QueryFilter | undefined;
+  readonly sort?: SortOrder[] | undefined;
+  readonly pagination?: PaginationOptions | undefined;
+  readonly fields?: string[] | undefined; // Field selection
 }
 
 /**
@@ -85,7 +85,7 @@ export interface QueryResult<T> {
   readonly data: T[];
   readonly total: number;
   readonly hasMore: boolean;
-  readonly nextCursor?: string;
+  readonly nextCursor?: string | undefined;
 }
 
 /**
@@ -138,48 +138,44 @@ export interface StorageOperations {
   /**
    * Create a new record
    */
-  create<T extends BaseRecord>(table: string, data: Omit<T, keyof BaseRecord>): Promise<T>;
+  create(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>>;
 
   /**
    * Create multiple records in bulk
    */
-  createMany<T extends BaseRecord>(
+  createMany(
     table: string,
-    data: Array<Omit<T, keyof BaseRecord>>
-  ): Promise<T[]>;
+    data: Array<Record<string, unknown>>
+  ): Promise<Array<Record<string, unknown>>>;
 
   /**
    * Find a single record by ID
    */
-  findById<T extends BaseRecord>(table: string, id: string): Promise<T | null>;
+  findById(table: string, id: string): Promise<Record<string, unknown> | null>;
 
   /**
    * Find records matching query
    */
-  find<T extends BaseRecord>(table: string, options?: QueryOptions): Promise<QueryResult<T>>;
+  find(table: string, options?: QueryOptions): Promise<QueryResult<Record<string, unknown>>>;
 
   /**
    * Find first record matching query
    */
-  findFirst<T extends BaseRecord>(table: string, options?: QueryOptions): Promise<T | null>;
+  findFirst(table: string, options?: QueryOptions): Promise<Record<string, unknown> | null>;
 
   /**
    * Update a record by ID
    */
-  updateById<T extends BaseRecord>(
+  updateById(
     table: string,
     id: string,
-    data: Partial<Omit<T, keyof BaseRecord>>
-  ): Promise<T | null>;
+    data: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null>;
 
   /**
    * Update multiple records matching query
    */
-  updateMany<T extends BaseRecord>(
-    table: string,
-    filter: QueryFilter,
-    data: Partial<Omit<T, keyof BaseRecord>>
-  ): Promise<number>;
+  updateMany(table: string, filter: QueryFilter, data: Record<string, unknown>): Promise<number>;
 
   /**
    * Delete a record by ID
@@ -263,6 +259,7 @@ export interface CacheStats {
  */
 export interface StorageConfig {
   readonly type: 'sqlite' | 'memory' | 'hybrid';
+  readonly memory?: boolean;
   readonly database?: {
     readonly path?: string;
     readonly memory?: boolean;

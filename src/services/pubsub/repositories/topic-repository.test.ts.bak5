@@ -1,0 +1,465 @@
+/**
+ * Unit tests for Topic Repository
+ */
+
+import { test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { ValidationError } from '@/core/storage/types.js';
+import type { IStorageManager } from '@/core/storage/interfaces.js';
+import type { QueryResult } from '@/core/storage/types.js';
+import { TopicRepository, type CreateTopicData } from './topic-repository.js';
+import type { TopicRecord } from '../models.js';
+import { createMockStorage, mockResolvedValueOnce, mockRejectedValueOnce, mockReset } from '../../../test-utils/mock-storage.js';
+
+// Mock storage manager
+const mockStorage = createMockStorage();
+
+let repository: TopicRepository;
+
+beforeEach(() => {
+  repository = new TopicRepository(mockStorage);
+  mockStorage.resetAllMocks();
+});
+
+afterEach(() => {
+  mockStorage.resetAllMocks();
+});
+
+test('TopicRepository - initialize should create table', async () => {
+  await repository.initialize();
+
+  expect(mockStorage.createTable).toHaveBeenCalledWith('pubsub_topics', expect.any(Object));
+});
+
+test('TopicRepository - create should create valid topic', async () => {
+  const topicData: CreateTopicData = {
+    name: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    satisfiesPzs: false
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, null); // No existing topic
+
+  const topic = await repository.create(topicData);
+
+  expect(topic).toMatchObject({
+    name: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    satisfiesPzs: false,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  });
+  expect(topic.id).toBeDefined();
+  expect(topic.createdAt).toBeInstanceOf(Date);
+  expect(topic.updatedAt).toBeInstanceOf(Date);
+  expect(mockStorage.create).toHaveBeenCalledWith('pubsub_topics', expect.any(Object));
+});
+
+test('TopicRepository - create should throw error for invalid topic name', async () => {
+  const topicData: CreateTopicData = {
+    name: 'invalid-topic-name',
+    labels: {},
+    satisfiesPzs: false
+  };
+
+  await expect(repository.create(topicData)).rejects.toThrow(ValidationError);
+  await expect(repository.create(topicData)).rejects.toThrow('Invalid topic name');
+});
+
+test('TopicRepository - create should throw error for existing topic', async () => {
+  const topicData: CreateTopicData = {
+    name: 'projects/test-project/topics/existing-topic',
+    labels: {},
+    satisfiesPzs: false
+  };
+
+  const existingTopic = {
+    id: 'topic-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    name: 'projects/test-project/topics/existing-topic',
+    labels: JSON.stringify({}),
+    satisfiesPzs: 0,
+    projectId: 'test-project',
+    topicId: 'existing-topic'
+  };
+
+  // Mock findFirst to return existing topic (called by findByName in create method)
+  mockResolvedValueOnce(mockStorage.findFirst, existingTopic);
+
+  // Verify that the error is thrown
+  try {
+    await repository.create(topicData);
+    expect(false).toBe(true); // Should not reach here
+  } catch (error) {
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).message).toContain('Topic already exists');
+  }
+});
+
+test('TopicRepository - create should handle optional fields correctly', async () => {
+  const topicData: CreateTopicData = {
+    name: 'projects/test-project/topics/test-topic',
+    messageStoragePolicy: { allowedPersistenceRegions: ['us-central1'] },
+    kmsKeyName: 'projects/test-project/locations/us-central1/keyRings/test/cryptoKeys/test',
+    schemaSettings: {
+      schema: 'projects/test-project/schemas/test-schema',
+      encoding: 'JSON'
+    },
+    messageRetentionDuration: '600s'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, null); // No existing topic
+
+  const topic = await repository.create(topicData);
+
+  expect(topic.messageStoragePolicy).toEqual({ allowedPersistenceRegions: ['us-central1'] });
+  expect(topic.kmsKeyName).toBe('projects/test-project/locations/us-central1/keyRings/test/cryptoKeys/test');
+  expect(topic.schemaSettings).toEqual({
+    schema: 'projects/test-project/schemas/test-schema',
+    encoding: 'JSON'
+  });
+  expect(topic.messageRetentionDuration).toBe('600s');
+});
+
+test('TopicRepository - findById should return topic if exists', async () => {
+  const mockStorageRecord = {
+    id: 'topic-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    name: 'projects/test-project/topics/test-topic',
+    labels: JSON.stringify({ env: 'test' }),
+    satisfiesPzs: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findById, mockStorageRecord);
+
+  const topic = await repository.findById('topic-123');
+
+  expect(topic).toBeDefined();
+  expect(topic?.id).toBe('topic-123');
+  expect(topic?.name).toBe('projects/test-project/topics/test-topic');
+  expect(topic?.labels).toEqual({ env: 'test' });
+  expect(topic?.satisfiesPzs).toBe(false);
+  expect(topic?.projectId).toBe('test-project');
+  expect(topic?.topicId).toBe('test-topic');
+});
+
+test('TopicRepository - findById should return null if not exists', async () => {
+  mockResolvedValueOnce(mockStorage.findById, null);
+
+  const topic = await repository.findById('non-existent');
+
+  expect(topic).toBeNull();
+});
+
+test('TopicRepository - findByName should return topic if exists', async () => {
+  const mockStorageRecord = {
+    id: 'topic-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    name: 'projects/test-project/topics/test-topic',
+    labels: JSON.stringify({}),
+    satisfiesPzs: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, mockStorageRecord);
+
+  const topic = await repository.findByName('projects/test-project/topics/test-topic');
+
+  expect(topic).toBeDefined();
+  expect(topic?.name).toBe('projects/test-project/topics/test-topic');
+  expect(mockStorage.findFirst).toHaveBeenCalledWith('pubsub_topics', {
+    where: [{ field: 'name', operator: 'eq', value: 'projects/test-project/topics/test-topic' }]
+  });
+});
+
+test('TopicRepository - find should return topics matching criteria', async () => {
+  const mockStorageResult: QueryResult<Record<string, unknown>> = {
+    items: [
+      {
+        id: 'topic-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/topics/topic-1',
+        labels: JSON.stringify({ env: 'test' }),
+        satisfiesPzs: 0,
+        projectId: 'test-project',
+        topicId: 'topic-1'
+      },
+      {
+        id: 'topic-2',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        name: 'projects/test-project/topics/topic-2',
+        labels: JSON.stringify({ env: 'prod' }),
+        satisfiesPzs: 1,
+        projectId: 'test-project',
+        topicId: 'topic-2'
+      }
+    ],
+    totalCount: 2,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find, mockStorageResult);
+
+  const result = await repository.find({ projectId: 'test-project' });
+
+  expect(result.items).toHaveLength(2);
+  expect(result.items[0].name).toBe('projects/test-project/topics/topic-1');
+  expect(result.items[0].labels).toEqual({ env: 'test' });
+  expect(result.items[1].name).toBe('projects/test-project/topics/topic-2');
+  expect(result.items[1].labels).toEqual({ env: 'prod' });
+  expect(result.items[1].satisfiesPzs).toBe(true);
+  expect(result.totalCount).toBe(2);
+  expect(result.hasMore).toBe(false);
+});
+
+test('TopicRepository - findByProject should filter by project ID', async () => {
+  const mockStorageResult: QueryResult<Record<string, unknown>> = {
+    items: [],
+    totalCount: 0,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find, mockStorageResult);
+
+  await repository.findByProject('test-project', { limit: 10 });
+
+  expect(mockStorage.find).toHaveBeenCalledWith('pubsub_topics', {
+    limit: 10,
+    projectId: 'test-project',
+    where: [{ field: 'projectId', operator: 'eq', value: 'test-project' }]
+  });
+});
+
+test('TopicRepository - updateById should update existing topic', async () => {
+  const existingTopic: TopicRecord = {
+    id: 'topic-123',
+    createdAt: new Date('2024-01-01'),
+    updatedAt: new Date('2024-01-01'),
+    name: 'projects/test-project/topics/test-topic',
+    labels: { env: 'test' },
+    satisfiesPzs: false,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findById, {
+    id: existingTopic.id,
+    createdAt: existingTopic.createdAt.toISOString(),
+    updatedAt: existingTopic.updatedAt.toISOString(),
+    name: existingTopic.name,
+    labels: JSON.stringify(existingTopic.labels),
+    satisfiesPzs: existingTopic.satisfiesPzs ? 1 : 0,
+    projectId: existingTopic.projectId,
+    topicId: existingTopic.topicId
+  });
+
+  const updateData = {
+    labels: { env: 'prod', version: '1.0' },
+    messageRetentionDuration: '3600s'
+  };
+
+  const updatedTopic = await repository.updateById('topic-123', updateData);
+
+  expect(updatedTopic).toBeDefined();
+  expect(updatedTopic?.labels).toEqual({ env: 'prod', version: '1.0' });
+  expect(updatedTopic?.messageRetentionDuration).toBe('3600s');
+  expect(updatedTopic?.updatedAt.getTime()).toBeGreaterThan(existingTopic.updatedAt.getTime());
+  expect(mockStorage.updateById).toHaveBeenCalledWith('pubsub_topics', 'topic-123', expect.any(Object));
+});
+
+test('TopicRepository - updateById should return null for non-existent topic', async () => {
+  mockResolvedValueOnce(mockStorage.findById, null);
+
+  const result = await repository.updateById('non-existent', { labels: {} });
+
+  expect(result).toBeNull();
+  expect(mockStorage.updateById).not.toHaveBeenCalled();
+});
+
+test('TopicRepository - deleteById should delete topic', async () => {
+  mockResolvedValueOnce(mockStorage.deleteById, true);
+
+  const result = await repository.deleteById('topic-123');
+
+  expect(result).toBe(true);
+  expect(mockStorage.deleteById).toHaveBeenCalledWith('pubsub_topics', 'topic-123');
+});
+
+test('TopicRepository - deleteByName should delete topic by name', async () => {
+  const mockTopic = {
+    id: 'topic-123',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    name: 'projects/test-project/topics/test-topic',
+    labels: JSON.stringify({}),
+    satisfiesPzs: 0,
+    projectId: 'test-project',
+    topicId: 'test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, mockTopic);
+  mockResolvedValueOnce(mockStorage.deleteById, true);
+
+  const result = await repository.deleteByName('projects/test-project/topics/test-topic');
+
+  expect(result).toBe(true);
+  expect(mockStorage.deleteById).toHaveBeenCalledWith('pubsub_topics', 'topic-123');
+});
+
+test('TopicRepository - deleteByName should return false for non-existent topic', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  const result = await repository.deleteByName('projects/test-project/topics/non-existent');
+
+  expect(result).toBe(false);
+  expect(mockStorage.deleteById).not.toHaveBeenCalled();
+});
+
+test('TopicRepository - exists should check topic existence', async () => {
+  mockResolvedValueOnce(mockStorage.exists, true);
+
+  const exists = await repository.exists('topic-123');
+
+  expect(exists).toBe(true);
+  expect(mockStorage.exists).toHaveBeenCalledWith('pubsub_topics', 'topic-123');
+});
+
+test('TopicRepository - existsByName should check topic existence by name', async () => {
+  const mockTopic = {
+    id: 'topic-123',
+    name: 'projects/test-project/topics/test-topic'
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, mockTopic);
+
+  const exists = await repository.existsByName('projects/test-project/topics/test-topic');
+
+  expect(exists).toBe(true);
+});
+
+test('TopicRepository - existsByName should return false for non-existent topic', async () => {
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  const exists = await repository.existsByName('projects/test-project/topics/non-existent');
+
+  expect(exists).toBe(false);
+});
+
+test('TopicRepository - count should return topic count', async () => {
+  mockResolvedValueOnce(mockStorage.count, 5);
+
+  const count = await repository.count({ projectId: 'test-project' });
+
+  expect(count).toBe(5);
+  expect(mockStorage.count).toHaveBeenCalledWith('pubsub_topics', {
+    where: [{ field: 'projectId', operator: 'eq', value: 'test-project' }]
+  });
+});
+
+test('TopicRepository - countByProject should return project topic count', async () => {
+  mockResolvedValueOnce(mockStorage.count, 3);
+
+  const count = await repository.countByProject('test-project');
+
+  expect(count).toBe(3);
+  expect(mockStorage.count).toHaveBeenCalledWith('pubsub_topics', {
+    where: [{ field: 'projectId', operator: 'eq', value: 'test-project' }]
+  });
+});
+
+test('TopicRepository - listTopicNames should return topic names', async () => {
+  const mockStorageResult: QueryResult<Record<string, unknown>> = {
+    items: [
+      {
+        id: 'topic-1',
+        name: 'projects/test-project/topics/topic-1',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        labels: JSON.stringify({}),
+        satisfiesPzs: 0,
+        projectId: 'test-project',
+        topicId: 'topic-1'
+      },
+      {
+        id: 'topic-2',
+        name: 'projects/test-project/topics/topic-2',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        labels: JSON.stringify({}),
+        satisfiesPzs: 0,
+        projectId: 'test-project',
+        topicId: 'topic-2'
+      }
+    ],
+    totalCount: 2,
+    hasMore: false
+  };
+
+  mockResolvedValueOnce(mockStorage.find, mockStorageResult);
+
+  const names = await repository.listTopicNames('test-project');
+
+  expect(names).toEqual([
+    'projects/test-project/topics/topic-1',
+    'projects/test-project/topics/topic-2'
+  ]);
+});
+
+test('TopicRepository - should handle complex objects in storage conversion', async () => {
+  const topicData: CreateTopicData = {
+    name: 'projects/test-project/topics/complex-topic',
+    labels: { env: 'test', version: '1.0' },
+    messageStoragePolicy: {
+      allowedPersistenceRegions: ['us-central1', 'us-east1']
+    },
+    schemaSettings: {
+      schema: 'projects/test-project/schemas/test-schema',
+      encoding: 'JSON',
+      firstRevisionId: 'rev-1',
+      lastRevisionId: 'rev-2'
+    },
+    satisfiesPzs: true
+  };
+
+  mockResolvedValueOnce(mockStorage.findFirst, null);
+
+  const topic = await repository.create(topicData);
+
+  // Verify the create call was made with properly serialized data
+  expect(mockStorage.create).toHaveBeenCalledWith('pubsub_topics', expect.objectContaining({
+    name: 'projects/test-project/topics/complex-topic',
+    labels: JSON.stringify({ env: 'test', version: '1.0' }),
+    messageStoragePolicy: JSON.stringify({
+      allowedPersistenceRegions: ['us-central1', 'us-east1']
+    }),
+    schemaSettings: JSON.stringify({
+      schema: 'projects/test-project/schemas/test-schema',
+      encoding: 'JSON',
+      firstRevisionId: 'rev-1',
+      lastRevisionId: 'rev-2'
+    }),
+    satisfiesPzs: 1,
+    projectId: 'test-project',
+    topicId: 'complex-topic'
+  }));
+
+  // Verify the returned object has proper types
+  expect(topic.labels).toEqual({ env: 'test', version: '1.0' });
+  expect(topic.messageStoragePolicy).toEqual({
+    allowedPersistenceRegions: ['us-central1', 'us-east1']
+  });
+  expect(topic.schemaSettings).toEqual({
+    schema: 'projects/test-project/schemas/test-schema',
+    encoding: 'JSON',
+    firstRevisionId: 'rev-1',
+    lastRevisionId: 'rev-2'
+  });
+  expect(topic.satisfiesPzs).toBe(true);
+});

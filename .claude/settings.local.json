@@ -17,7 +17,8 @@
       "Bash(else echo \"File does not exist\")",
       "Bash(fi)",
       "Bash(lsof:*)",
-      "Read(//Users/gautham.chandra/.claude/agents/**)"
+      "Read(//Users/gautham.chandra/.claude/agents/**)",
+      "Bash(LOGGER_LEVEL=debug bun test src/services/pubsub/message-broker.integration.test.ts --test-name-pattern=\"complete publish/pull/acknowledge flow\")"
     ],
     "deny": [],
     "ask": []
