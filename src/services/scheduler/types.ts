@@ -11,7 +11,7 @@ export const SCHEDULER_JOBS_TABLE = 'scheduler_jobs';
 
 export const DEFAULT_TIMEZONE = 'UTC';
 
-export const DEFAULT_ATTEMPT_DEADLINE = '180s';
+const DEFAULT_ATTEMPT_DEADLINE = '180s';
 
 export const JobState = {
   ENABLED: 'ENABLED',
@@ -19,8 +19,6 @@ export const JobState = {
   DISABLED: 'DISABLED',
   UPDATE_FAILED: 'UPDATE_FAILED',
 } as const;
-
-export type JobStateType = (typeof JobState)[keyof typeof JobState];
 
 export const DEFAULT_RETRY_CONFIG: RetryConfig = {
   retryCount: 0,
@@ -174,7 +172,6 @@ export const UpdateJobRequestSchema = z.object({
 });
 
 export type CreateJobRequest = z.infer<typeof CreateJobRequestSchema>;
-export type UpdateJobRequest = z.infer<typeof UpdateJobRequestSchema>;
 
 // ── Helper Functions ──
 
