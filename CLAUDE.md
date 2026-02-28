@@ -124,3 +124,4 @@ Test environment is configured to use error-level logging and test NODE_ENV.
     }
 - When writing typescript code, use substring() instead of the deprecated substr() method.
 - When importing types in Typescript, they must be imported using a type-only import. So instead of `import { StorageConfig } from '../types'`, do `import type { StorageConfig } from '../types'`.
+- Prefer static imports over dynamic `await import()` for readability. Only use dynamic imports when there is a genuine need (conditional loading, circular dependency breaking, etc.).
