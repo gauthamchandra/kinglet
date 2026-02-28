@@ -1,6 +1,6 @@
 [test]
 # Test configuration for Bun
-preload = "./test-utils/setup.ts"
+preload = ["./test-utils/setup.ts"]
 coverage = true
 coverageReporter = "text"
 coverageDir = "./coverage"
