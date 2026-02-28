@@ -246,10 +246,4 @@ describe('JobRepository', () => {
       expect(dueJobs.length).toBe(0);
     });
   });
-
-  describe('close', () => {
-    test('should close without error', async () => {
-      await expect(repo.close()).resolves.toBeUndefined();
-    });
-  });
 });

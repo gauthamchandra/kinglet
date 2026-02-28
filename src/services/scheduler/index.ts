@@ -65,10 +65,6 @@ export class SchedulerService {
       await this.executionEngine.stop();
     }
 
-    if (this.repository) {
-      await this.repository.close();
-    }
-
     this.logger.info('Cloud Scheduler service stopped');
   }
 

@@ -232,6 +232,34 @@ describe('SchedulerHandlers', () => {
       expect(response?.status).toBe(200);
       expect(mockService.listJobs).toHaveBeenCalledWith('p', 'l', 10, 'abc');
     });
+
+    test('should ignore invalid pageSize values', async () => {
+      const route = handlers.getRoutes().find(r => r.id === 'scheduler.jobs.list');
+      const request = makeRouteRequest({
+        method: 'GET',
+        params: { project: 'p', location: 'l' },
+        query: { pageSize: 'notanumber' },
+      });
+
+      const response = await route?.handler(request, ctx);
+
+      expect(response?.status).toBe(200);
+      expect(mockService.listJobs).toHaveBeenCalledWith('p', 'l', undefined, undefined);
+    });
+
+    test('should ignore negative pageSize values', async () => {
+      const route = handlers.getRoutes().find(r => r.id === 'scheduler.jobs.list');
+      const request = makeRouteRequest({
+        method: 'GET',
+        params: { project: 'p', location: 'l' },
+        query: { pageSize: '-5' },
+      });
+
+      const response = await route?.handler(request, ctx);
+
+      expect(response?.status).toBe(200);
+      expect(mockService.listJobs).toHaveBeenCalledWith('p', 'l', undefined, undefined);
+    });
   });
 
   describe('deleteJob handler', () => {

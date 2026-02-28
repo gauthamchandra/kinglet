@@ -9,7 +9,8 @@
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { JobRepository } from './repository.ts';
 import type { CronEngine } from './cron-engine.ts';
-import type { HttpTarget, JobRecord } from './types.ts';
+import { parseDurationSeconds } from './types.ts';
+import type { HttpTarget, RetryConfig, JobRecord } from './types.ts';
 
 type HttpClient = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -80,10 +81,80 @@ export class ExecutionEngine {
   }
 
   async executeJob(job: JobRecord): Promise<void> {
-    const target: HttpTarget = JSON.parse(job.httpTarget);
+    let target: HttpTarget;
+
+    try {
+      target = JSON.parse(job.httpTarget) as HttpTarget;
+    } catch (err) {
+      this.logger.error(`Job ${job.name} has invalid httpTarget JSON`, err);
+
+      return;
+    }
+
+    let retryConfig: RetryConfig;
+
+    try {
+      retryConfig = JSON.parse(job.retryConfig) as RetryConfig;
+    } catch {
+      retryConfig = {
+        retryCount: 0,
+        maxRetryDuration: '0s',
+        minBackoffDuration: '5s',
+        maxBackoffDuration: '3600s',
+      };
+    }
 
     this.logger.info(`Executing job ${job.name} -> ${target.httpMethod} ${target.uri}`);
 
+    const maxAttempts = 1 + retryConfig.retryCount;
+    const minBackoffMs = parseDurationSeconds(retryConfig.minBackoffDuration) * 1000;
+    const maxBackoffMs = parseDurationSeconds(retryConfig.maxBackoffDuration) * 1000;
+    const maxRetryDurationMs = parseDurationSeconds(retryConfig.maxRetryDuration) * 1000;
+    const startTime = Date.now();
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const success = await this.executeHttpRequest(job.name, target);
+
+      if (success) {
+        break;
+      }
+
+      const isLastAttempt = attempt >= maxAttempts - 1;
+
+      if (isLastAttempt) {
+        break;
+      }
+
+      // Check if we've exceeded maxRetryDuration
+      if (maxRetryDurationMs > 0 && Date.now() - startTime >= maxRetryDurationMs) {
+        this.logger.warn(`Job ${job.name} exceeded maxRetryDuration, stopping retries`);
+        break;
+      }
+
+      // Exponential backoff: minBackoff * 2^attempt, capped at maxBackoff
+      const backoffMs = Math.min(minBackoffMs * Math.pow(2, attempt), maxBackoffMs);
+
+      this.logger.info(
+        `Job ${job.name} retrying in ${backoffMs}ms (attempt ${attempt + 2}/${maxAttempts})`
+      );
+
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
+    }
+
+    // Always update lastAttemptTime and compute next scheduleTime
+    try {
+      const nextRun = this.cronEngine.getNextRunTime(job.schedule, job.timeZone);
+
+      await this.repo.updateJob(job.name, {
+        lastAttemptTime: new Date().toISOString(),
+        scheduleTime: nextRun.toISOString(),
+      });
+    } catch (err) {
+      this.logger.error(`Failed to update job ${job.name} after execution`, err);
+    }
+  }
+
+  private async executeHttpRequest(jobName: string, target: HttpTarget): Promise<boolean> {
     try {
       const requestInit: RequestInit = {
         method: target.httpMethod,
@@ -97,24 +168,18 @@ export class ExecutionEngine {
       const response = await this.httpClient(target.uri, requestInit);
 
       if (response.ok) {
-        this.logger.info(`Job ${job.name} executed successfully (${response.status})`);
-      } else {
-        this.logger.warn(`Job ${job.name} returned non-2xx status: ${response.status}`);
+        this.logger.info(`Job ${jobName} executed successfully (${response.status})`);
+
+        return true;
       }
-    } catch (err) {
-      this.logger.error(`Job ${job.name} execution failed`, err);
-    }
 
-    // Always update lastAttemptTime and compute next scheduleTime
-    try {
-      const nextRun = this.cronEngine.getNextRunTime(job.schedule, job.timeZone);
+      this.logger.warn(`Job ${jobName} returned non-2xx status: ${response.status}`);
 
-      await this.repo.updateJob(job.name, {
-        lastAttemptTime: new Date().toISOString(),
-        scheduleTime: nextRun.toISOString(),
-      });
+      return false;
     } catch (err) {
-      this.logger.error(`Failed to update job ${job.name} after execution`, err);
+      this.logger.error(`Job ${jobName} execution failed`, err);
+
+      return false;
     }
   }
 }

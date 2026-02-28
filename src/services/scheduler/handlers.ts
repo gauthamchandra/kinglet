@@ -118,7 +118,12 @@ export class SchedulerHandlers {
   private async handleListJobs(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const { project, location } = req.params;
-      const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : undefined;
+      const pageSizeRaw = req.query.pageSize
+        ? parseInt(req.query.pageSize as string, 10)
+        : undefined;
+
+      const pageSize =
+        pageSizeRaw && !Number.isNaN(pageSizeRaw) && pageSizeRaw > 0 ? pageSizeRaw : undefined;
       const pageToken = (req.query.pageToken as string) || undefined;
 
       const result = await this.service.listJobs(

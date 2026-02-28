@@ -202,6 +202,20 @@ export function buildJobName(project: string, location: string, jobId: string): 
   return `projects/${project}/locations/${location}/jobs/${jobId}`;
 }
 
+/**
+ * Parse a GCP-style duration string (e.g., "5s", "3600s") into seconds.
+ * Cloud Scheduler durations use this format for retry config fields.
+ */
+export function parseDurationSeconds(duration: string): number {
+  const match = duration.match(/^(\d+(?:\.\d+)?)s$/);
+
+  if (!match) {
+    throw new Error(`Invalid duration format: "${duration}". Expected format like "5s" or "3600s"`);
+  }
+
+  return parseFloat(match[1] as string);
+}
+
 // ── Conversion Functions ──
 
 export function jobRecordToResponse(record: JobRecord): JobResponse {

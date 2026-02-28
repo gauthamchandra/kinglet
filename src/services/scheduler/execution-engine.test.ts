@@ -153,6 +153,111 @@ describe('ExecutionEngine', () => {
 
       expect(job?.lastAttemptTime).not.toBeNull();
     });
+
+    test('should handle malformed httpTarget JSON gracefully', async () => {
+      const created = await repo.createJob(makeJobData({ httpTarget: 'not valid json{' }));
+
+      await engine.executeJob(created);
+
+      // Should not crash, and should not call HTTP client
+      expect(mockHttpClient).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('retry logic', () => {
+    test('should not retry when retryCount is 0', async () => {
+      mockHttpClient.mockRejectedValue(new Error('Network error'));
+
+      const created = await repo.createJob(makeJobData());
+
+      await engine.executeJob(created);
+
+      expect(mockHttpClient).toHaveBeenCalledTimes(1);
+    });
+
+    test('should retry on network error up to retryCount times', async () => {
+      mockHttpClient.mockRejectedValue(new Error('Network error'));
+
+      const created = await repo.createJob(
+        makeJobData({
+          retryConfig: JSON.stringify({
+            retryCount: 2,
+            maxRetryDuration: '0s',
+            minBackoffDuration: '0s',
+            maxBackoffDuration: '0s',
+          }),
+        })
+      );
+
+      await engine.executeJob(created);
+
+      // 1 initial + 2 retries = 3 total
+      expect(mockHttpClient).toHaveBeenCalledTimes(3);
+    });
+
+    test('should retry on non-2xx response', async () => {
+      mockHttpClient.mockResolvedValue(new Response('Error', { status: 500 }));
+
+      const created = await repo.createJob(
+        makeJobData({
+          retryConfig: JSON.stringify({
+            retryCount: 1,
+            maxRetryDuration: '0s',
+            minBackoffDuration: '0s',
+            maxBackoffDuration: '0s',
+          }),
+        })
+      );
+
+      await engine.executeJob(created);
+
+      // 1 initial + 1 retry = 2 total
+      expect(mockHttpClient).toHaveBeenCalledTimes(2);
+    });
+
+    test('should stop retrying on success', async () => {
+      mockHttpClient
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockResolvedValueOnce(new Response('OK', { status: 200 }));
+
+      const created = await repo.createJob(
+        makeJobData({
+          retryConfig: JSON.stringify({
+            retryCount: 3,
+            maxRetryDuration: '0s',
+            minBackoffDuration: '0s',
+            maxBackoffDuration: '0s',
+          }),
+        })
+      );
+
+      await engine.executeJob(created);
+
+      // 1 failure + 1 success = 2 total (stopped early)
+      expect(mockHttpClient).toHaveBeenCalledTimes(2);
+    });
+
+    test('should still update lastAttemptTime and scheduleTime after retries', async () => {
+      mockHttpClient.mockRejectedValue(new Error('Network error'));
+
+      const created = await repo.createJob(
+        makeJobData({
+          retryConfig: JSON.stringify({
+            retryCount: 1,
+            maxRetryDuration: '0s',
+            minBackoffDuration: '0s',
+            maxBackoffDuration: '0s',
+          }),
+        })
+      );
+
+      await engine.executeJob(created);
+
+      const updated = await repo.getJobByName(created.name);
+
+      expect(updated?.lastAttemptTime).not.toBeNull();
+      expect(updated?.scheduleTime).not.toBeNull();
+    });
   });
 
   describe('executeJob', () => {

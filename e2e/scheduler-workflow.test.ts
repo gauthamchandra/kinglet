@@ -361,8 +361,7 @@ describe('Cloud Scheduler E2E: Client Library', () => {
   const jobId = 'client-lib-job';
   const jobName = `projects/${project}/locations/${location}/jobs/${jobId}`;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let client: any;
+  let client: InstanceType<typeof CloudSchedulerClient>;
 
   beforeAll(() => {
     // Create a fake auth that passes requests through without real GCP credentials.

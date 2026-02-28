@@ -23,6 +23,7 @@ export class JobRepository {
     await this.storage.createTable(SCHEDULER_JOBS_TABLE, schedulerJobsTableSchema);
   }
 
+  // Note: unique index on 'name' column provides database-level protection against races
   async createJob(data: Omit<JobRecord, keyof BaseRecord>): Promise<JobRecord> {
     const existing = await this.getJobByName(data.name);
 
@@ -92,14 +93,14 @@ export class JobRepository {
     return this.storage.deleteById(SCHEDULER_JOBS_TABLE, existing.id);
   }
 
-  async findDueJobs(now: Date): Promise<JobRecord[]> {
-    const nowIso = now.toISOString();
+  async findDueJobs(date: Date): Promise<JobRecord[]> {
+    const dateIso = date.toISOString();
 
     const result = await this.storage.find<JobRecord>(SCHEDULER_JOBS_TABLE, {
       filter: {
         conditions: [
           { field: 'state', operator: 'eq', value: 'ENABLED' },
-          { field: 'scheduleTime', operator: 'lte', value: nowIso },
+          { field: 'scheduleTime', operator: 'lte', value: dateIso },
           { field: 'scheduleTime', operator: 'ne', value: null },
         ],
         operator: 'and',
@@ -107,9 +108,5 @@ export class JobRepository {
     });
 
     return result.data;
-  }
-
-  async close(): Promise<void> {
-    // StorageManager lifecycle is managed externally
   }
 }

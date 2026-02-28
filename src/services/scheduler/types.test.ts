@@ -9,6 +9,7 @@ import {
   jobRecordToResponse,
   requestToJobRecord,
   normalizeHttpMethod,
+  parseDurationSeconds,
   JobState,
   DEFAULT_RETRY_CONFIG,
   DEFAULT_TIMEZONE,
@@ -424,6 +425,26 @@ describe('Cloud Scheduler Types', () => {
       const result = UpdateJobRequestSchema.safeParse(input);
 
       expect(result.success).toBe(false);
+    });
+  });
+
+  describe('parseDurationSeconds', () => {
+    test('should parse integer seconds', () => {
+      expect(parseDurationSeconds('5s')).toBe(5);
+      expect(parseDurationSeconds('3600s')).toBe(3600);
+      expect(parseDurationSeconds('0s')).toBe(0);
+    });
+
+    test('should parse fractional seconds', () => {
+      expect(parseDurationSeconds('1.5s')).toBe(1.5);
+      expect(parseDurationSeconds('0.5s')).toBe(0.5);
+    });
+
+    test('should throw on invalid format', () => {
+      expect(() => parseDurationSeconds('')).toThrow('Invalid duration format');
+      expect(() => parseDurationSeconds('5')).toThrow('Invalid duration format');
+      expect(() => parseDurationSeconds('5m')).toThrow('Invalid duration format');
+      expect(() => parseDurationSeconds('abc')).toThrow('Invalid duration format');
     });
   });
 });
