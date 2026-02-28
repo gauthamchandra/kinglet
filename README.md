@@ -12,5 +12,5 @@ To run:
 bun run index.ts
 ```
 
-This project was created using `bun init` in bun v1.2.22. [Bun](https://bun.com)
+This project was created using `bun init` in bun v1.3.4. [Bun](https://bun.com)
 is a fast all-in-one JavaScript runtime.
