@@ -522,6 +522,20 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Secrets Discovery integration
   - **Success Criteria**: Client library connects
 
+### 12.6 Clean Up Knip Configuration
+
+- [ ] **12.6 Remove Knip Ignore Clauses**
+  - Review `ignoreFiles` and `ignoreIssues` in `knip.json`
+  - Remove `ignoreFiles` for barrel `index.ts` files once they are imported
+  - Remove `ignoreIssues` for proto-types, shared types, and storage interfaces
+    once services consume them
+  - Remove `ignoreIssues` for `DEFAULT_*_CONFIG` exports once gateway wiring is
+    complete
+  - Run `bun run knip` and fix any newly surfaced legitimate issues
+  - **Deliverable**: Minimal knip.json with no unnecessary suppressions
+  - **Success Criteria**: `bun run knip` passes clean with no ignore overrides
+    for Phase 3 code
+
 ## Phase 4: Integration & Testing
 
 ### 13. Integration Testing
