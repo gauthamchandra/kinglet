@@ -624,8 +624,8 @@ export class RequestRouter {
     // First, escape special regex characters except our parameter markers
     let pattern = path.replace(/[.+?^$|[\]\\]/g, '\\$&');
 
-    // Replace parameters with regex groups
-    pattern = pattern.replace(/\{([^}]+)\}/g, (match, paramSpec) => {
+    // Replace {param} style parameters with regex groups
+    pattern = pattern.replace(/\{([^}]+)\}/g, (_match, paramSpec) => {
       let paramName: string;
       let paramPattern = '[^/]+'; // Default pattern
 
@@ -638,6 +638,13 @@ export class RequestRouter {
       paramNames.push(paramName);
 
       return `(${paramPattern})`;
+    });
+
+    // Replace :param style parameters with regex groups
+    pattern = pattern.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, (_match, paramName) => {
+      paramNames.push(paramName);
+
+      return '([^/]+)';
     });
 
     // Handle wildcards if enabled

@@ -5,8 +5,23 @@
  */
 
 import * as grpc from '@grpc/grpc-js';
-import type { HttpRequest, HttpResponse } from './http-server.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+
+/** Request shape used for gRPC-REST protocol transcoding */
+export interface TranscodingRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: unknown;
+  params?: Record<string, string>;
+}
+
+/** Response shape used for gRPC-REST protocol transcoding */
+export interface TranscodingResponse {
+  status: number;
+  headers?: Record<string, string>;
+  body?: unknown;
+}
 
 export interface GrpcMethodInfo {
   service: string;
@@ -26,8 +41,8 @@ export interface RestEndpointInfo {
 export interface TranscodingRule {
   grpcMethod: GrpcMethodInfo;
   restEndpoint: RestEndpointInfo;
-  requestTransformer: (httpRequest: HttpRequest) => unknown;
-  responseTransformer: (grpcResponse: unknown) => HttpResponse;
+  requestTransformer: (httpRequest: TranscodingRequest) => unknown;
+  responseTransformer: (grpcResponse: unknown) => TranscodingResponse;
 }
 
 export interface ServiceMetadata {
@@ -68,7 +83,7 @@ export class GrpcRestBridge {
   /**
    * Convert HTTP request to gRPC call
    */
-  async restToGrpc(httpRequest: HttpRequest): Promise<unknown> {
+  async restToGrpc(httpRequest: TranscodingRequest): Promise<unknown> {
     const rule = this.findTranscodingRule(httpRequest);
 
     if (!rule) {
@@ -100,7 +115,7 @@ export class GrpcRestBridge {
   /**
    * Convert gRPC response to HTTP response
    */
-  async grpcToRest(grpcResponse: unknown, rule: TranscodingRule): Promise<HttpResponse> {
+  async grpcToRest(grpcResponse: unknown, rule: TranscodingRule): Promise<TranscodingResponse> {
     try {
       const httpResponse = rule.responseTransformer(grpcResponse);
 
@@ -120,7 +135,7 @@ export class GrpcRestBridge {
   /**
    * Handle gRPC error and convert to HTTP error response
    */
-  grpcErrorToRest(error: grpc.ServiceError): HttpResponse {
+  grpcErrorToRest(error: grpc.ServiceError): TranscodingResponse {
     const httpStatus = this.grpcStatusToHttpStatus(error.code);
 
     const errorResponse = {
@@ -149,8 +164,8 @@ export class GrpcRestBridge {
       grpcMethod: string;
       httpMethod: string;
       httpPath: string;
-      requestTransform?: (req: HttpRequest) => unknown;
-      responseTransform?: (res: unknown) => HttpResponse;
+      requestTransform?: (req: TranscodingRequest) => unknown;
+      responseTransform?: (res: unknown) => TranscodingResponse;
     }>
   ): Map<string, TranscodingRule> {
     const transcodingRules = new Map<string, TranscodingRule>();
@@ -201,14 +216,14 @@ export class GrpcRestBridge {
   /**
    * Check if a route is handled by the bridge
    */
-  canHandle(httpRequest: HttpRequest): boolean {
+  canHandle(httpRequest: TranscodingRequest): boolean {
     return this.findTranscodingRule(httpRequest) !== null;
   }
 
   /**
    * Find transcoding rule for HTTP request
    */
-  private findTranscodingRule(httpRequest: HttpRequest): TranscodingRule | null {
+  private findTranscodingRule(httpRequest: TranscodingRequest): TranscodingRule | null {
     const url = new URL(httpRequest.url);
     const method = httpRequest.method.toUpperCase();
     const path = url.pathname;
@@ -267,7 +282,7 @@ export class GrpcRestBridge {
    * Create default request transformer
    */
   private createDefaultRequestTransformer(pathParams: string[]) {
-    return (httpRequest: HttpRequest): unknown => {
+    return (httpRequest: TranscodingRequest): unknown => {
       const url = new URL(httpRequest.url);
       const path = url.pathname;
 
@@ -330,7 +345,7 @@ export class GrpcRestBridge {
    * Create default response transformer
    */
   private createDefaultResponseTransformer() {
-    return (grpcResponse: unknown): HttpResponse => {
+    return (grpcResponse: unknown): TranscodingResponse => {
       let status = 200;
       let body = grpcResponse;
 
@@ -427,8 +442,8 @@ export function createGcpTranscodingRules(
   grpcMethod: string;
   httpMethod: string;
   httpPath: string;
-  requestTransform?: (req: HttpRequest) => unknown;
-  responseTransform?: (res: unknown) => HttpResponse;
+  requestTransform?: (req: TranscodingRequest) => unknown;
+  responseTransform?: (res: unknown) => TranscodingResponse;
 }> {
   return [
     // Create resource
@@ -450,7 +465,7 @@ export function createGcpTranscodingRules(
       grpcMethod: `List${resourceName}s`,
       httpMethod: 'GET',
       httpPath: resourcePath,
-      responseTransform: (res: unknown): HttpResponse => {
+      responseTransform: (res: unknown): TranscodingResponse => {
         const isValidResponse = (
           value: unknown
         ): value is { items?: unknown; nextPageToken?: unknown } => {
@@ -482,7 +497,7 @@ export function createGcpTranscodingRules(
       grpcMethod: `Delete${resourceName}`,
       httpMethod: 'DELETE',
       httpPath: `${resourcePath}/{name}`,
-      responseTransform: (): HttpResponse => ({
+      responseTransform: (): TranscodingResponse => ({
         status: 204,
         headers: {},
       }),
@@ -497,8 +512,8 @@ export function createPubSubTranscodingRules(): Array<{
   grpcMethod: string;
   httpMethod: string;
   httpPath: string;
-  requestTransform?: (req: HttpRequest) => unknown;
-  responseTransform?: (res: unknown) => HttpResponse;
+  requestTransform?: (req: TranscodingRequest) => unknown;
+  responseTransform?: (res: unknown) => TranscodingResponse;
 }> {
   const baseRules = [
     ...createGcpTranscodingRules('Publisher', 'Topic', '/v1/projects/{project}/topics'),
@@ -516,7 +531,7 @@ export function createPubSubTranscodingRules(): Array<{
       grpcMethod: 'Publish',
       httpMethod: 'POST',
       httpPath: '/v1/projects/{project}/topics/{topic}:publish',
-      requestTransform: (req: HttpRequest) => {
+      requestTransform: (req: TranscodingRequest) => {
         const isValidBody = (value: unknown): value is { messages?: unknown } => {
           return value !== null && typeof value === 'object';
         };
@@ -536,7 +551,7 @@ export function createPubSubTranscodingRules(): Array<{
       grpcMethod: 'Pull',
       httpMethod: 'POST',
       httpPath: '/v1/projects/{project}/subscriptions/{subscription}:pull',
-      requestTransform: (req: HttpRequest) => {
+      requestTransform: (req: TranscodingRequest) => {
         const isValidBody = (
           value: unknown
         ): value is { maxMessages?: unknown; returnImmediately?: unknown } => {
@@ -560,7 +575,7 @@ export function createPubSubTranscodingRules(): Array<{
       grpcMethod: 'Acknowledge',
       httpMethod: 'POST',
       httpPath: '/v1/projects/{project}/subscriptions/{subscription}:acknowledge',
-      requestTransform: (req: HttpRequest) => {
+      requestTransform: (req: TranscodingRequest) => {
         const isValidBody = (value: unknown): value is { ackIds?: unknown } => {
           return value !== null && typeof value === 'object';
         };
@@ -573,7 +588,7 @@ export function createPubSubTranscodingRules(): Array<{
           ackIds,
         };
       },
-      responseTransform: (): HttpResponse => ({
+      responseTransform: (): TranscodingResponse => ({
         status: 200,
         headers: { 'content-type': 'application/json' },
         body: {},

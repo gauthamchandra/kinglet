@@ -3,7 +3,7 @@
  * Provides consistent response formatting across the application
  */
 
-import type { HttpResponse } from './http-server.ts';
+import type { RouteResponse } from './request-router.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 
 export interface GcpErrorDetail {
@@ -23,20 +23,20 @@ export interface GcpErrorResponse {
 }
 
 export interface ResponseFormatter {
-  formatJson<T>(data: T, status?: number, headers?: Record<string, string>): HttpResponse;
-  formatError(error: Error | string | number, details?: unknown): HttpResponse;
+  formatJson<T>(data: T, status?: number, headers?: Record<string, string>): RouteResponse;
+  formatError(error: Error | string | number, details?: unknown): RouteResponse;
   formatGcpError(
     code: number,
     message: string,
     status: string,
     details?: GcpErrorDetail[]
-  ): HttpResponse;
-  formatEmpty(status?: number, headers?: Record<string, string>): HttpResponse;
+  ): RouteResponse;
+  formatEmpty(status?: number, headers?: Record<string, string>): RouteResponse;
   formatStream(
     data: AsyncIterable<unknown>,
     status?: number,
     headers?: Record<string, string>
-  ): HttpResponse;
+  ): RouteResponse;
 }
 
 export class StandardResponseFormatter implements ResponseFormatter {
@@ -49,7 +49,11 @@ export class StandardResponseFormatter implements ResponseFormatter {
   /**
    * Format a successful JSON response
    */
-  formatJson<T>(data: T, status: number = 200, headers: Record<string, string> = {}): HttpResponse {
+  formatJson<T>(
+    data: T,
+    status: number = 200,
+    headers: Record<string, string> = {}
+  ): RouteResponse {
     const responseHeaders = {
       'content-type': 'application/json; charset=utf-8',
       ...headers,
@@ -65,7 +69,7 @@ export class StandardResponseFormatter implements ResponseFormatter {
   /**
    * Format an error response with consistent structure
    */
-  formatError(error: Error | string | number, details?: unknown): HttpResponse {
+  formatError(error: Error | string | number, details?: unknown): RouteResponse {
     let code = 500;
     let message = 'Internal Server Error';
     let status = 'INTERNAL';
@@ -124,7 +128,7 @@ export class StandardResponseFormatter implements ResponseFormatter {
     message: string,
     status: string,
     details?: GcpErrorDetail[]
-  ): HttpResponse {
+  ): RouteResponse {
     const error: GcpError = {
       code,
       message,
@@ -151,7 +155,7 @@ export class StandardResponseFormatter implements ResponseFormatter {
   /**
    * Format an empty response (e.g., for DELETE operations)
    */
-  formatEmpty(status: number = 204, headers: Record<string, string> = {}): HttpResponse {
+  formatEmpty(status: number = 204, headers: Record<string, string> = {}): RouteResponse {
     return {
       status,
       headers: {
@@ -168,7 +172,7 @@ export class StandardResponseFormatter implements ResponseFormatter {
     data: AsyncIterable<unknown>,
     status: number = 200,
     headers: Record<string, string> = {}
-  ): HttpResponse {
+  ): RouteResponse {
     const responseHeaders = {
       'content-type': 'application/x-ndjson', // Newline-delimited JSON
       'cache-control': 'no-cache',
@@ -261,14 +265,14 @@ export class ResponseUtils {
   /**
    * Create a successful response with data
    */
-  success<T>(data: T, status: number = 200): HttpResponse {
+  success<T>(data: T, status: number = 200): RouteResponse {
     return this.formatter.formatJson(data, status);
   }
 
   /**
    * Create a successful response for resource creation
    */
-  created<T>(data: T, location?: string): HttpResponse {
+  created<T>(data: T, location?: string): RouteResponse {
     const headers = location ? { location } : {};
 
     return this.formatter.formatJson(data, 201, headers);
@@ -277,21 +281,21 @@ export class ResponseUtils {
   /**
    * Create a successful response for resource updates
    */
-  updated<T>(data: T): HttpResponse {
+  updated<T>(data: T): RouteResponse {
     return this.formatter.formatJson(data, 200);
   }
 
   /**
    * Create a successful response for resource deletion
    */
-  deleted(): HttpResponse {
+  deleted(): RouteResponse {
     return this.formatter.formatEmpty(204);
   }
 
   /**
    * Create a not found error response
    */
-  notFound(resource?: string, resourceName?: string): HttpResponse {
+  notFound(resource?: string, resourceName?: string): RouteResponse {
     const message =
       resource && resourceName ? `${resource} ${resourceName} not found` : 'Resource not found';
 
@@ -310,7 +314,7 @@ export class ResponseUtils {
   badRequest(
     message: string = 'Bad Request',
     fieldViolations?: Array<{ field: string; description: string }>
-  ): HttpResponse {
+  ): RouteResponse {
     const details: GcpErrorDetail[] = [];
 
     if (fieldViolations && fieldViolations.length > 0) {
@@ -331,7 +335,7 @@ export class ResponseUtils {
   /**
    * Create an already exists error response
    */
-  alreadyExists(resource: string, resourceName: string): HttpResponse {
+  alreadyExists(resource: string, resourceName: string): RouteResponse {
     return this.formatter.formatGcpError(
       409,
       `${resource} ${resourceName} already exists`,
@@ -349,28 +353,28 @@ export class ResponseUtils {
   /**
    * Create an unauthorized error response
    */
-  unauthorized(message: string = 'Authentication required'): HttpResponse {
+  unauthorized(message: string = 'Authentication required'): RouteResponse {
     return this.formatter.formatGcpError(401, message, 'UNAUTHENTICATED');
   }
 
   /**
    * Create a forbidden error response
    */
-  forbidden(message: string = 'Insufficient permissions'): HttpResponse {
+  forbidden(message: string = 'Insufficient permissions'): RouteResponse {
     return this.formatter.formatGcpError(403, message, 'PERMISSION_DENIED');
   }
 
   /**
    * Create a service unavailable error response
    */
-  serviceUnavailable(message: string = 'Service temporarily unavailable'): HttpResponse {
+  serviceUnavailable(message: string = 'Service temporarily unavailable'): RouteResponse {
     return this.formatter.formatGcpError(503, message, 'UNAVAILABLE');
   }
 
   /**
    * Create a rate limit exceeded error response
    */
-  rateLimitExceeded(retryAfter?: number): HttpResponse {
+  rateLimitExceeded(retryAfter?: number): RouteResponse {
     const headers = retryAfter ? { 'retry-after': retryAfter.toString() } : {};
 
     const response = this.formatter.formatGcpError(
@@ -402,7 +406,7 @@ export class ResponseUtils {
   /**
    * Create a paginated response with next page token
    */
-  paginated<T>(items: T[], nextPageToken?: string, totalSize?: number): HttpResponse {
+  paginated<T>(items: T[], nextPageToken?: string, totalSize?: number): RouteResponse {
     const response: Record<string, unknown> = { items };
 
     if (nextPageToken) {
