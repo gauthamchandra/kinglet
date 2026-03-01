@@ -29,17 +29,34 @@ jobs:
       - name: Check formatting
         run: bunx prettier --check .
 
-      - name: Run tests
-        run: bun test
+      - name: Run tests with coverage
+        run: bun test --coverage 2>&1 | tee coverage-output.txt || true
+
+      - name: Check test results and coverage threshold
+        run: |
+          # Fail if any tests failed
+          if grep -qE "^ +[1-9][0-9]* fail$" coverage-output.txt; then
+            echo "::error::Tests failed"
+            exit 1
+          fi
+
+          # Check coverage threshold
+          THRESHOLD=80
+          LINE=$(grep "All files" coverage-output.txt)
+          FUNCS=$(echo "$LINE" | awk -F'|' '{gsub(/ /, "", $2); print $2}')
+          LINES=$(echo "$LINE" | awk -F'|' '{gsub(/ /, "", $3); print $3}')
+          echo "Function coverage: ${FUNCS}%"
+          echo "Line coverage: ${LINES}%"
+          FUNCS_OK=$(awk "BEGIN {print ($FUNCS >= $THRESHOLD) ? 1 : 0}")
+          LINES_OK=$(awk "BEGIN {print ($LINES >= $THRESHOLD) ? 1 : 0}")
+          if [ "$FUNCS_OK" -eq 0 ] || [ "$LINES_OK" -eq 0 ]; then
+            echo "::error::Coverage below ${THRESHOLD}% threshold. Functions: ${FUNCS}%, Lines: ${LINES}%"
+            exit 1
+          fi
+          echo "Coverage check passed."
 
       - name: Build project
         run: bun run build
-
-      - name: Upload coverage
-        if: success()
-        run: |
-          echo "Coverage reports would be uploaded here"
-          # Could integrate with codecov or similar
 
   build-docker:
     name: Build Docker Image
