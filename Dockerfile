@@ -11,7 +11,7 @@ FROM base
 WORKDIR /app
 
 COPY --from=install /app/node_modules ./node_modules
-COPY package.json bun.lock ./
+COPY package.json bun.lock tsconfig.json ./
 COPY src/ ./src/
 
 # Default ports: 8765 (HTTP), 8766 (gRPC)
