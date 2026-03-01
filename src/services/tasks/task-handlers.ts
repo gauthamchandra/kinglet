@@ -1,0 +1,170 @@
+/**
+ * Task HTTP route handlers for Cloud Tasks
+ */
+
+import type {
+  RouteDefinition,
+  RouteRequest,
+  RouteContext,
+  RouteResponse,
+} from '@/core/gateway/request-router.ts';
+import { StandardResponseFormatter, ResponseUtils } from '@/core/gateway/response-handlers.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
+import { buildTaskName, buildQueueName } from './types.ts';
+import { TasksError } from './queue-service.ts';
+import type { TaskService } from './task-service.ts';
+
+export class TaskHandlers {
+  private service: TaskService;
+  private responseUtils: ResponseUtils;
+  private logger: Logger;
+
+  constructor(service: TaskService, logger: Logger) {
+    this.service = service;
+    this.logger = logger;
+    const formatter = new StandardResponseFormatter(logger);
+
+    this.responseUtils = new ResponseUtils(formatter);
+  }
+
+  getRoutes(): RouteDefinition[] {
+    return [
+      {
+        id: 'tasks.tasks.create',
+        method: 'POST',
+        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks',
+        handler: (req, ctx) => this.handleCreateTask(req, ctx),
+      },
+      {
+        id: 'tasks.tasks.get',
+        method: 'GET',
+        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId',
+        handler: (req, ctx) => this.handleGetTask(req, ctx),
+      },
+      {
+        id: 'tasks.tasks.list',
+        method: 'GET',
+        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks',
+        handler: (req, ctx) => this.handleListTasks(req, ctx),
+      },
+      {
+        id: 'tasks.tasks.delete',
+        method: 'DELETE',
+        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId',
+        handler: (req, ctx) => this.handleDeleteTask(req, ctx),
+      },
+      {
+        id: 'tasks.tasks.run',
+        method: 'POST',
+        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId:run',
+        handler: (req, ctx) => this.handleRunTask(req, ctx),
+      },
+    ];
+  }
+
+  private async handleCreateTask(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
+    try {
+      const { project, location, queueId } = req.params;
+
+      const result = await this.service.createTask(
+        project ?? '',
+        location ?? '',
+        queueId ?? '',
+        req.body
+      );
+
+      return this.responseUtils.success(result);
+    } catch (err) {
+      return this.handleError(err);
+    }
+  }
+
+  private async handleGetTask(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
+    try {
+      const name = this.buildTaskNameFromParams(req.params);
+      const responseView = (req.query.responseView as string) || undefined;
+      const result = await this.service.getTask(name, responseView);
+
+      return this.responseUtils.success(result);
+    } catch (err) {
+      return this.handleError(err);
+    }
+  }
+
+  private async handleListTasks(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
+    try {
+      const { project, location, queueId } = req.params;
+      const queueName = buildQueueName(project ?? '', location ?? '', queueId ?? '');
+
+      const responseView = (req.query.responseView as string) || undefined;
+      const pageSizeRaw = req.query.pageSize
+        ? parseInt(req.query.pageSize as string, 10)
+        : undefined;
+
+      const pageSize =
+        pageSizeRaw && !Number.isNaN(pageSizeRaw) && pageSizeRaw > 0 ? pageSizeRaw : undefined;
+      const pageToken = (req.query.pageToken as string) || undefined;
+
+      const result = await this.service.listTasks(queueName, responseView, pageSize, pageToken);
+
+      const responseBody: Record<string, unknown> = { tasks: result.tasks };
+
+      if (result.nextPageToken) {
+        responseBody.nextPageToken = result.nextPageToken;
+      }
+
+      return this.responseUtils.success(responseBody);
+    } catch (err) {
+      return this.handleError(err);
+    }
+  }
+
+  private async handleDeleteTask(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
+    try {
+      const name = this.buildTaskNameFromParams(req.params);
+
+      await this.service.deleteTask(name);
+
+      return this.responseUtils.success({});
+    } catch (err) {
+      return this.handleError(err);
+    }
+  }
+
+  private async handleRunTask(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
+    try {
+      const name = this.buildTaskNameFromParams(req.params);
+      const result = await this.service.runTask(name);
+
+      return this.responseUtils.success(result);
+    } catch (err) {
+      return this.handleError(err);
+    }
+  }
+
+  private buildTaskNameFromParams(params: Record<string, string>): string {
+    return buildTaskName(
+      params.project ?? '',
+      params.location ?? '',
+      params.queueId ?? '',
+      params.taskId ?? ''
+    );
+  }
+
+  private handleError(err: unknown): RouteResponse {
+    if (err instanceof TasksError) {
+      switch (err.code) {
+        case 'NOT_FOUND':
+          return this.responseUtils.notFound('Task', err.message);
+        case 'ALREADY_EXISTS':
+          return this.responseUtils.alreadyExists('Task', err.message);
+        case 'INVALID_ARGUMENT':
+          return this.responseUtils.badRequest(err.message);
+        case 'FAILED_PRECONDITION':
+          return this.responseUtils.failedPrecondition(err.message);
+      }
+    }
+
+    return this.responseUtils.badRequest(err instanceof Error ? err.message : 'Unknown error');
+  }
+}
