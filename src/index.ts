@@ -3,39 +3,128 @@
  * Entry point for the application
  */
 
+import type { Server } from 'bun';
 import { Logger } from '@/shared/utils/logger.ts';
+import { getConfig } from '@/config/loader.ts';
+import { StorageManager } from '@/core/storage/manager.ts';
+import { RequestRouter } from '@/core/gateway/request-router.ts';
+import type { RouteDefinition } from '@/core/gateway/request-router.ts';
+import { SchedulerService } from '@/services/scheduler/index.ts';
 
 const logger = new Logger('Main');
+
+let server: Server | null = null;
+let storageManager: StorageManager | null = null;
+let schedulerService: SchedulerService | null = null;
 
 async function main(): Promise<void> {
   try {
     logger.info('Starting LocalStack GCP Emulator...');
     logger.info('Bun version:', Bun.version);
-    logger.info('TypeScript runtime ready!');
 
-    // TODO: Initialize core services
-    // TODO: Start HTTP and gRPC servers
-    // TODO: Register service modules
+    // Load configuration
+    const config = await getConfig();
 
-    logger.info('LocalStack GCP Emulator started successfully');
+    logger.info('Configuration loaded', {
+      httpPort: config.server.httpPort,
+      storageType: config.storage.type,
+    });
+
+    // Initialize storage
+    storageManager = new StorageManager();
+    await storageManager.initialize(config.storage);
+    logger.info('Storage initialized');
+
+    // Create request router
+    const router = new RequestRouter(new Logger('Router'));
+
+    // Register health endpoint
+    const healthRoute: RouteDefinition = {
+      id: 'health',
+      method: 'GET',
+      path: '/health',
+      handler: () => ({
+        status: 200,
+        body: { status: 'ok' },
+      }),
+    };
+
+    router.addRoute(healthRoute);
+
+    // Initialize enabled services
+    if (config.services.scheduler.enabled) {
+      schedulerService = new SchedulerService(storageManager, new Logger('Scheduler'));
+      await schedulerService.initialize();
+
+      for (const route of schedulerService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      schedulerService.start();
+      logger.info('Cloud Scheduler service enabled and started');
+    }
+
+    if (config.services.pubsub.enabled) {
+      logger.info('Pub/Sub service enabled (stub - not yet implemented)');
+    }
+
+    if (config.services.tasks.enabled) {
+      logger.info('Cloud Tasks service enabled (stub - not yet implemented)');
+    }
+
+    if (config.services.secrets.enabled) {
+      logger.info('Secret Manager service enabled (stub - not yet implemented)');
+    }
+
+    // Start HTTP server
+    server = Bun.serve({
+      port: config.server.httpPort,
+      fetch: request => router.route(request),
+      error: error => {
+        logger.error('HTTP server error:', error);
+
+        return new Response('Internal Server Error', { status: 500 });
+      },
+    });
+
+    logger.info(`LocalStack GCP Emulator started on port ${server.port}`);
   } catch (error) {
     logger.error('Failed to start LocalStack GCP Emulator:', error);
     process.exit(1);
   }
 }
 
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-  logger.info('Received SIGINT, shutting down gracefully...');
+async function shutdown(signal: string): Promise<void> {
+  logger.info(`Received ${signal}, shutting down gracefully...`);
+
+  if (server) {
+    server.stop();
+    server = null;
+    logger.info('HTTP server stopped');
+  }
+
+  if (schedulerService) {
+    await schedulerService.stop();
+    logger.info('Scheduler service stopped');
+  }
+
+  if (storageManager) {
+    await storageManager.close();
+    logger.info('Storage manager closed');
+  }
+
+  logger.info('Shutdown complete');
   process.exit(0);
+}
+
+process.on('SIGINT', () => {
+  shutdown('SIGINT');
 });
 
 process.on('SIGTERM', () => {
-  logger.info('Received SIGTERM, shutting down gracefully...');
-  process.exit(0);
+  shutdown('SIGTERM');
 });
 
-// Start the application
 if (import.meta.main) {
   await main();
 }

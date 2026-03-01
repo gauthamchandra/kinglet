@@ -17,9 +17,11 @@ import type { JobService } from './service.ts';
 export class SchedulerHandlers {
   private service: JobService;
   private responseUtils: ResponseUtils;
+  private logger: Logger;
 
   constructor(service: JobService, logger: Logger) {
     this.service = service;
+    this.logger = logger;
     const formatter = new StandardResponseFormatter(logger);
 
     this.responseUtils = new ResponseUtils(formatter);
@@ -91,8 +93,8 @@ export class SchedulerHandlers {
           const parsed = parseJobName(body.name);
 
           jobId = parsed.jobId;
-        } catch {
-          // name was not a valid resource name, leave jobId empty
+        } catch (err) {
+          this.logger.debug(`Could not parse job name from body.name: ${body.name}`, err);
         }
       }
 
@@ -216,7 +218,7 @@ export class SchedulerHandlers {
         case 'INVALID_ARGUMENT':
           return this.responseUtils.badRequest(err.message);
         case 'FAILED_PRECONDITION':
-          return this.responseUtils.badRequest(err.message);
+          return this.responseUtils.failedPrecondition(err.message);
       }
     }
 

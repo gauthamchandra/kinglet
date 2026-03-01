@@ -11,7 +11,7 @@ import {
   type ServiceMetadata,
   type TranscodingRule,
 } from './grpc-rest-bridge.ts';
-import type { HttpRequest } from './http-server.ts';
+import type { TranscodingRequest } from './grpc-rest-bridge.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 
 describe('GrpcRestBridge', () => {
@@ -160,19 +160,19 @@ describe('GrpcRestBridge', () => {
     });
 
     test('should detect handleable requests', () => {
-      const getRequest: HttpRequest = {
+      const getRequest: TranscodingRequest = {
         method: 'GET',
         url: 'http://localhost:8765/v1/projects/test-project/topics/my-topic',
         headers: {},
       };
 
-      const postRequest: HttpRequest = {
+      const postRequest: TranscodingRequest = {
         method: 'POST',
         url: 'http://localhost:8765/v1/projects/test-project/topics',
         headers: {},
       };
 
-      const unhandledRequest: HttpRequest = {
+      const unhandledRequest: TranscodingRequest = {
         method: 'DELETE',
         url: 'http://localhost:8765/v1/projects/test-project/topics/my-topic',
         headers: {},
@@ -184,7 +184,7 @@ describe('GrpcRestBridge', () => {
     });
 
     test('should transform REST to gRPC request', async () => {
-      const httpRequest: HttpRequest = {
+      const httpRequest: TranscodingRequest = {
         method: 'GET',
         url: 'http://localhost:8765/v1/projects/test-project/topics/my-topic?pageSize=10',
         headers: {},
@@ -202,7 +202,7 @@ describe('GrpcRestBridge', () => {
     });
 
     test('should transform POST request with body', async () => {
-      const httpRequest: HttpRequest = {
+      const httpRequest: TranscodingRequest = {
         method: 'POST',
         url: 'http://localhost:8765/v1/projects/test-project/topics',
         headers: { 'content-type': 'application/json' },
@@ -222,7 +222,7 @@ describe('GrpcRestBridge', () => {
     });
 
     test('should handle JSON string body', async () => {
-      const httpRequest: HttpRequest = {
+      const httpRequest: TranscodingRequest = {
         method: 'POST',
         url: 'http://localhost:8765/v1/projects/test-project/topics',
         headers: { 'content-type': 'application/json' },
@@ -241,7 +241,7 @@ describe('GrpcRestBridge', () => {
     });
 
     test('should throw error for unhandled requests', async () => {
-      const httpRequest: HttpRequest = {
+      const httpRequest: TranscodingRequest = {
         method: 'DELETE',
         url: 'http://localhost:8765/v1/projects/test-project/topics/my-topic',
         headers: {},
@@ -464,7 +464,7 @@ describe('GrpcRestBridge', () => {
           grpcMethod: 'CustomMethod',
           httpMethod: 'POST',
           httpPath: '/v1/custom/{id}',
-          requestTransform: (req: HttpRequest) => ({
+          requestTransform: (req: TranscodingRequest) => ({
             customId: req.params?.id,
             timestamp: Date.now(),
             body: req.body,
@@ -480,7 +480,7 @@ describe('GrpcRestBridge', () => {
 
       bridge.registerService(metadata);
 
-      const httpRequest: HttpRequest = {
+      const httpRequest: TranscodingRequest = {
         method: 'POST',
         url: 'http://localhost:8765/v1/custom/test-id',
         headers: {},

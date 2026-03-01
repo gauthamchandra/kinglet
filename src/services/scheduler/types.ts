@@ -137,7 +137,7 @@ export function normalizeHttpMethod(value: string | number): HttpMethodString {
 
 // ── Zod Schemas ──
 
-const HttpTargetSchema = z.object({
+export const HttpTargetSchema = z.object({
   uri: z.string().min(1),
   httpMethod: z
     .union([z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']), z.number().int()])
@@ -146,7 +146,7 @@ const HttpTargetSchema = z.object({
   body: z.string().optional(),
 });
 
-const RetryConfigSchema = z.object({
+export const RetryConfigSchema = z.object({
   retryCount: z.number().int().min(0),
   maxRetryDuration: z.string(),
   minBackoffDuration: z.string(),

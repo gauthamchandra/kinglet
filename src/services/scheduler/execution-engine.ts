@@ -9,7 +9,12 @@
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { JobRepository } from './repository.ts';
 import type { CronEngine } from './cron-engine.ts';
-import { parseDurationSeconds } from './types.ts';
+import {
+  parseDurationSeconds,
+  HttpTargetSchema,
+  RetryConfigSchema,
+  DEFAULT_RETRY_CONFIG,
+} from './types.ts';
 import type { HttpTarget, RetryConfig, JobRecord } from './types.ts';
 
 type HttpClient = (url: string, init: RequestInit) => Promise<Response>;
@@ -84,7 +89,22 @@ export class ExecutionEngine {
     let target: HttpTarget;
 
     try {
-      target = JSON.parse(job.httpTarget) as HttpTarget;
+      const parsed = HttpTargetSchema.safeParse(JSON.parse(job.httpTarget));
+
+      if (!parsed.success) {
+        this.logger.error(`Job ${job.name} has invalid httpTarget: ${parsed.error.message}`);
+
+        return;
+      }
+
+      const data = parsed.data;
+
+      target = {
+        uri: data.uri,
+        httpMethod: data.httpMethod,
+        ...(data.headers && { headers: data.headers }),
+        ...(data.body && { body: data.body }),
+      };
     } catch (err) {
       this.logger.error(`Job ${job.name} has invalid httpTarget JSON`, err);
 
@@ -94,14 +114,11 @@ export class ExecutionEngine {
     let retryConfig: RetryConfig;
 
     try {
-      retryConfig = JSON.parse(job.retryConfig) as RetryConfig;
+      const parsed = RetryConfigSchema.safeParse(JSON.parse(job.retryConfig));
+
+      retryConfig = parsed.success ? parsed.data : DEFAULT_RETRY_CONFIG;
     } catch {
-      retryConfig = {
-        retryCount: 0,
-        maxRetryDuration: '0s',
-        minBackoffDuration: '5s',
-        maxBackoffDuration: '3600s',
-      };
+      retryConfig = DEFAULT_RETRY_CONFIG;
     }
 
     this.logger.info(`Executing job ${job.name} -> ${target.httpMethod} ${target.uri}`);
