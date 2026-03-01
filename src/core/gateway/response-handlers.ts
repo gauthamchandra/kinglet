@@ -351,6 +351,13 @@ export class ResponseUtils {
   }
 
   /**
+   * Create a failed precondition error response
+   */
+  failedPrecondition(message: string = 'Failed precondition'): RouteResponse {
+    return this.formatter.formatGcpError(400, message, 'FAILED_PRECONDITION');
+  }
+
+  /**
    * Create an unauthorized error response
    */
   unauthorized(message: string = 'Authentication required'): RouteResponse {

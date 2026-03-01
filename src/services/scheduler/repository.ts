@@ -23,8 +23,9 @@ export class JobRepository {
     await this.storage.createTable(SCHEDULER_JOBS_TABLE, schedulerJobsTableSchema);
   }
 
-  // Note: unique index on 'name' column provides database-level protection against races
   async createJob(data: Omit<JobRecord, keyof BaseRecord>): Promise<JobRecord> {
+    // Memory provider doesn't enforce unique indexes, so guard here as a safety net.
+    // The service layer also checks, but this protects against direct repository usage.
     const existing = await this.getJobByName(data.name);
 
     if (existing) {
