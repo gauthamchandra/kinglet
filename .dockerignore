@@ -44,6 +44,7 @@ eslint.config.js
 .prettierignore
 bunfig.toml
 tsconfig*.json
+!tsconfig.json
 vitest.config.*
 jest.config.*
 
