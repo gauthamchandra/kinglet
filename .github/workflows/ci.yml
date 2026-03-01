@@ -35,7 +35,7 @@ jobs:
       - name: Check test results and coverage threshold
         run: |
           # Fail if any tests failed
-          if grep -q "[1-9][0-9]* fail" coverage-output.txt; then
+          if grep -qE "^ +[1-9][0-9]* fail$" coverage-output.txt; then
             echo "::error::Tests failed"
             exit 1
           fi
