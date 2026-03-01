@@ -58,7 +58,6 @@ describe('TaskHandlers', () => {
     handlers = new TaskHandlers(taskService, new Logger('Test'));
     ctx = makeContext();
 
-    // Create a default queue
     await queueService.createQueue('p', 'l', 'q', {});
   });
 

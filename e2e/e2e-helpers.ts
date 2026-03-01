@@ -142,9 +142,7 @@ export async function waitForCallback(
 
   while (requests.length < expectedCount) {
     if (Date.now() - start > timeoutMs) {
-      throw new Error(
-        `Timeout waiting for ${expectedCount} callback(s). Got ${requests.length}.`
-      );
+      throw new Error(`Timeout waiting for ${expectedCount} callback(s). Got ${requests.length}.`);
     }
 
     await new Promise(resolve => setTimeout(resolve, 50));

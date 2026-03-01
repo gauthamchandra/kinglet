@@ -17,6 +17,8 @@ import {
 } from './types.ts';
 import type { QueueRecord, TaskRecord, TaskRetryConfig, TaskHttpRequest } from './types.ts';
 
+const DEFAULT_DISPATCH_TIMEOUT_MS = 600_000; // 10 minutes fallback
+
 type HttpClient = (url: string, init: RequestInit) => Promise<Response>;
 
 export class DispatchEngine {
@@ -124,6 +126,7 @@ export class DispatchEngine {
     const maxAttempts = retryConfig.maxAttempts === -1 ? Infinity : retryConfig.maxAttempts;
     const minBackoffSec = parseDurationSeconds(retryConfig.minBackoff);
     const maxBackoffSec = parseDurationSeconds(retryConfig.maxBackoff);
+
     const attempt = task.dispatchCount;
 
     let httpRequest: TaskHttpRequest;
@@ -136,6 +139,8 @@ export class DispatchEngine {
       return;
     }
 
+    const timeoutMs = this.getDispatchTimeoutMs(task.dispatchDeadline);
+
     await this.taskRepo.updateTask(task.name, {
       status: TaskStatus.DISPATCHING,
       dispatchCount: task.dispatchCount + 1,
@@ -143,7 +148,7 @@ export class DispatchEngine {
 
     const dispatchTime = new Date().toISOString();
 
-    const success = await this.executeHttpRequest(task.name, httpRequest);
+    const success = await this.executeHttpRequest(task.name, httpRequest, timeoutMs);
 
     const responseTime = new Date().toISOString();
 
@@ -157,7 +162,16 @@ export class DispatchEngine {
     if (success) {
       this.logger.info(`Task ${task.name} dispatched successfully`);
 
-      await this.taskRepo.deleteTask(task.name);
+      const tombstoneTtlSeconds = parseDurationSeconds(queue.tombstoneTtl);
+      const tombstoneExpiry = new Date(Date.now() + tombstoneTtlSeconds * 1000).toISOString();
+
+      await this.taskRepo.updateTask(task.name, {
+        status: TaskStatus.TOMBSTONE,
+        tombstoneExpiry,
+        responseCount: task.responseCount + 1,
+        lastAttempt: attemptRecord,
+        ...(task.firstAttempt === null ? { firstAttempt: attemptRecord } : {}),
+      });
 
       return;
     }
@@ -169,6 +183,7 @@ export class DispatchEngine {
 
       await this.taskRepo.updateTask(task.name, {
         status: TaskStatus.FAILED,
+        responseCount: task.responseCount + 1,
         lastAttempt: attemptRecord,
         ...(task.firstAttempt === null ? { firstAttempt: attemptRecord } : {}),
       });
@@ -192,6 +207,7 @@ export class DispatchEngine {
     await this.taskRepo.updateTask(task.name, {
       status: TaskStatus.PENDING,
       scheduleTime: nextScheduleTime,
+      responseCount: task.responseCount + 1,
       lastAttempt: attemptRecord,
       ...(task.firstAttempt === null ? { firstAttempt: attemptRecord } : {}),
     });
@@ -210,6 +226,10 @@ export class DispatchEngine {
     const backoff = minBackoff * Math.pow(2, exponent);
 
     return Math.min(backoff, maxBackoff);
+  }
+
+  cleanupBucket(queueName: string): void {
+    this.buckets.delete(queueName);
   }
 
   private getOrCreateBucket(queue: QueueRecord): TokenBucket {
@@ -244,14 +264,27 @@ export class DispatchEngine {
     }
   }
 
+  private getDispatchTimeoutMs(dispatchDeadline: string): number {
+    try {
+      return parseDurationSeconds(dispatchDeadline) * 1000;
+    } catch {
+      return DEFAULT_DISPATCH_TIMEOUT_MS;
+    }
+  }
+
   private async executeHttpRequest(
     taskName: string,
-    httpRequest: TaskHttpRequest
+    httpRequest: TaskHttpRequest,
+    timeoutMs: number
   ): Promise<boolean> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       const requestInit: RequestInit = {
         method: httpRequest.httpMethod,
         headers: httpRequest.headers ?? {},
+        signal: controller.signal,
       };
 
       if (httpRequest.body) {
@@ -270,9 +303,15 @@ export class DispatchEngine {
 
       return false;
     } catch (err) {
-      this.logger.error(`Task ${taskName} execution failed`, err);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        this.logger.warn(`Task ${taskName} timed out after ${timeoutMs}ms`);
+      } else {
+        this.logger.error(`Task ${taskName} execution failed`, err);
+      }
 
       return false;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 }

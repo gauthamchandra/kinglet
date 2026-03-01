@@ -138,6 +138,7 @@ export class TaskService {
     }
 
     const queue = await this.queueRepo.getQueueByName(record.queueName);
+
     const tombstoneTtlSeconds = queue ? parseDurationSeconds(queue.tombstoneTtl) : 3600;
 
     const tombstoneExpiry = new Date(Date.now() + tombstoneTtlSeconds * 1000).toISOString();

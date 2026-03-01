@@ -24,7 +24,7 @@ export class ExecutionEngine {
   private cronEngine: CronEngine;
   private logger: Logger;
   private httpClient: HttpClient;
-  private timerId: number | null = null;
+  private timerId: ReturnType<typeof setInterval> | null = null;
   private running = false;
 
   constructor(
@@ -48,7 +48,7 @@ export class ExecutionEngine {
 
     this.timerId = setInterval(() => {
       void this.tick();
-    }, pollIntervalMs) as unknown as number;
+    }, pollIntervalMs);
   }
 
   async stop(): Promise<void> {

@@ -29,7 +29,6 @@ describe('TaskService', () => {
     queueService = new QueueService(queueRepo);
     service = new TaskService(taskRepo, queueRepo);
 
-    // Create a default queue for task tests
     await queueService.createQueue('p', 'l', 'q', {});
   });
 
@@ -134,7 +133,6 @@ describe('TaskService', () => {
     });
 
     test('should throw ALREADY_EXISTS when tombstone dedup match exists', async () => {
-      // Create a task and delete it (becomes tombstone)
       await service.createTask('p', 'l', 'q', {
         task: {
           name: 'projects/p/locations/l/queues/q/tasks/dedup-test',

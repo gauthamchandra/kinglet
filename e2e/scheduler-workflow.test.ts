@@ -14,11 +14,7 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
-import {
-  buildRouter,
-  waitForCallback,
-  createFakeAuth,
-} from './e2e-helpers.ts';
+import { buildRouter, waitForCallback, createFakeAuth } from './e2e-helpers.ts';
 import type { CallbackRecord } from './e2e-helpers.ts';
 
 // ── Test Infrastructure ──
@@ -334,11 +330,8 @@ describe('Cloud Scheduler E2E: Client Library', () => {
   test('8. Delete job via client library and verify not found', async () => {
     await client.deleteJob({ name: jobName });
 
-    try {
-      await client.getJob({ name: jobName });
-      expect(true).toBe(false); // should not reach here
-    } catch (err) {
-      expect((err as Error).message.toLowerCase()).toContain('not found');
-    }
+    const promise = client.getJob({ name: jobName });
+
+    await expect(promise).rejects.toThrow(/not found/i);
   });
 });

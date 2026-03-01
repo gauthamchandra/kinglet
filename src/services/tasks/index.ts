@@ -58,6 +58,7 @@ export class CloudTasksService {
 
     this.queueService.setDeleteCallback(async queueName => {
       await taskRepoRef.deleteTasksByQueue(queueName);
+      dispatchEngineRef.cleanupBucket(queueName);
     });
 
     this.taskService.setDispatchCallback(async task => {

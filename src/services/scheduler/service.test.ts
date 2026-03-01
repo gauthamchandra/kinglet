@@ -20,8 +20,10 @@ describe('JobService', () => {
   beforeEach(async () => {
     storage = new StorageManager();
     await storage.initialize({ type: 'memory' });
+
     repo = new JobRepository(storage);
     await repo.initialize();
+
     cron = new CronEngine();
     service = new JobService(repo, cron);
   });
@@ -69,16 +71,13 @@ describe('JobService', () => {
         httpTarget: { uri: 'https://example.com', httpMethod: 'GET' },
       });
 
-      try {
-        await service.createJob('p', 'l', 'j', {
-          schedule: '* * * * *',
-          httpTarget: { uri: 'https://example.com', httpMethod: 'GET' },
-        });
-        expect(true).toBe(false); // Should not reach here
-      } catch (err) {
-        expect(err).toBeInstanceOf(SchedulerError);
-        expect((err as SchedulerError).code).toBe('ALREADY_EXISTS');
-      }
+      const promise = service.createJob('p', 'l', 'j', {
+        schedule: '* * * * *',
+        httpTarget: { uri: 'https://example.com', httpMethod: 'GET' },
+      });
+
+      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
+      await expect(promise).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
     });
 
     test('should validate request body with Zod', async () => {
@@ -103,13 +102,10 @@ describe('JobService', () => {
     });
 
     test('should throw NOT_FOUND for non-existent job', async () => {
-      try {
-        await service.getJob('projects/p/locations/l/jobs/nonexistent');
-        expect(true).toBe(false);
-      } catch (err) {
-        expect(err).toBeInstanceOf(SchedulerError);
-        expect((err as SchedulerError).code).toBe('NOT_FOUND');
-      }
+      const promise = service.getJob('projects/p/locations/l/jobs/nonexistent');
+
+      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
+      await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
     });
   });
 
@@ -177,15 +173,12 @@ describe('JobService', () => {
     });
 
     test('should throw NOT_FOUND for non-existent job', async () => {
-      try {
-        await service.updateJob('projects/p/locations/l/jobs/nonexistent', {
-          description: 'new',
-        });
-        expect(true).toBe(false);
-      } catch (err) {
-        expect(err).toBeInstanceOf(SchedulerError);
-        expect((err as SchedulerError).code).toBe('NOT_FOUND');
-      }
+      const promise = service.updateJob('projects/p/locations/l/jobs/nonexistent', {
+        description: 'new',
+      });
+
+      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
+      await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
     });
   });
 
@@ -202,13 +195,10 @@ describe('JobService', () => {
     });
 
     test('should throw NOT_FOUND for non-existent job', async () => {
-      try {
-        await service.deleteJob('projects/p/locations/l/jobs/nonexistent');
-        expect(true).toBe(false);
-      } catch (err) {
-        expect(err).toBeInstanceOf(SchedulerError);
-        expect((err as SchedulerError).code).toBe('NOT_FOUND');
-      }
+      const promise = service.deleteJob('projects/p/locations/l/jobs/nonexistent');
+
+      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
+      await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
     });
   });
 
@@ -242,13 +232,10 @@ describe('JobService', () => {
       });
       await service.pauseJob('projects/p/locations/l/jobs/j');
 
-      try {
-        await service.pauseJob('projects/p/locations/l/jobs/j');
-        expect(true).toBe(false);
-      } catch (err) {
-        expect(err).toBeInstanceOf(SchedulerError);
-        expect((err as SchedulerError).code).toBe('FAILED_PRECONDITION');
-      }
+      const promise = service.pauseJob('projects/p/locations/l/jobs/j');
+
+      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
+      await expect(promise).rejects.toHaveProperty('code', 'FAILED_PRECONDITION');
     });
   });
 
@@ -283,13 +270,10 @@ describe('JobService', () => {
         httpTarget: { uri: 'https://example.com', httpMethod: 'GET' },
       });
 
-      try {
-        await service.resumeJob('projects/p/locations/l/jobs/j');
-        expect(true).toBe(false);
-      } catch (err) {
-        expect(err).toBeInstanceOf(SchedulerError);
-        expect((err as SchedulerError).code).toBe('FAILED_PRECONDITION');
-      }
+      const promise = service.resumeJob('projects/p/locations/l/jobs/j');
+
+      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
+      await expect(promise).rejects.toHaveProperty('code', 'FAILED_PRECONDITION');
     });
   });
 
@@ -336,13 +320,10 @@ describe('JobService', () => {
     });
 
     test('should throw NOT_FOUND for non-existent job', async () => {
-      try {
-        await service.runJob('projects/p/locations/l/jobs/nonexistent');
-        expect(true).toBe(false);
-      } catch (err) {
-        expect(err).toBeInstanceOf(SchedulerError);
-        expect((err as SchedulerError).code).toBe('NOT_FOUND');
-      }
+      const promise = service.runJob('projects/p/locations/l/jobs/nonexistent');
+
+      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
+      await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
     });
   });
 });

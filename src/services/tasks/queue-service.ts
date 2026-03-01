@@ -3,6 +3,8 @@
  */
 
 import type { QueueRepository } from './queue-repository.ts';
+import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
+import type { RouteResponse } from '@/core/gateway/request-router.ts';
 import {
   buildQueueName,
   CreateQueueRequestSchema,
@@ -27,6 +29,27 @@ export class TasksError extends Error {
     this.name = 'TasksError';
     this.code = code;
   }
+}
+
+export function handleTasksError(
+  err: unknown,
+  resourceType: string,
+  responseUtils: ResponseUtils
+): RouteResponse {
+  if (err instanceof TasksError) {
+    switch (err.code) {
+      case 'NOT_FOUND':
+        return responseUtils.notFound(resourceType, err.message);
+      case 'ALREADY_EXISTS':
+        return responseUtils.alreadyExists(resourceType, err.message);
+      case 'INVALID_ARGUMENT':
+        return responseUtils.badRequest(err.message);
+      case 'FAILED_PRECONDITION':
+        return responseUtils.failedPrecondition(err.message);
+    }
+  }
+
+  return responseUtils.badRequest(err instanceof Error ? err.message : 'Unknown error');
 }
 
 export type PurgeCallback = (queueName: string) => Promise<void>;
@@ -119,6 +142,7 @@ export class QueueService {
     }
 
     const request = parsed.data;
+
     const updates: Record<string, unknown> = {};
 
     if (request.rateLimits !== undefined) {

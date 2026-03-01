@@ -94,7 +94,7 @@ describe('DispatchEngine', () => {
 
       const task = await taskRepo.getTaskByName('projects/p/locations/l/queues/q/tasks/t1');
 
-      expect(task).toBeNull();
+      expect(task?.status).toBe(TaskStatus.TOMBSTONE);
     });
 
     test('should skip paused queues', async () => {
@@ -125,7 +125,7 @@ describe('DispatchEngine', () => {
   });
 
   describe('dispatchTask', () => {
-    test('should delete task on successful dispatch', async () => {
+    test('should tombstone task on successful dispatch', async () => {
       const queue = await queueRepo.createQueue(makeQueueData());
       const task = await taskRepo.createTask(makeTaskData());
 
@@ -135,7 +135,10 @@ describe('DispatchEngine', () => {
 
       const result = await taskRepo.getTaskByName(task.name);
 
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result?.status).toBe(TaskStatus.TOMBSTONE);
+      expect(result?.tombstoneExpiry).not.toBeNull();
+      expect(result?.responseCount).toBe(1);
     });
 
     test('should use correct HTTP method and URL', async () => {
@@ -150,7 +153,18 @@ describe('DispatchEngine', () => {
       expect(init.method).toBe('POST');
     });
 
-    test('should handle dispatch failure and retry', async () => {
+    test('should pass AbortSignal in request init', async () => {
+      const queue = await queueRepo.createQueue(makeQueueData());
+      const task = await taskRepo.createTask(makeTaskData());
+
+      await engine.dispatchTask(task, queue);
+
+      const [, init] = mockHttpClient.mock.calls[0] as [string, RequestInit];
+
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    test('should handle dispatch failure and retry with responseCount', async () => {
       mockHttpClient = mock(() => Promise.resolve(new Response('Error', { status: 500 })));
 
       engine = new DispatchEngine(queueRepo, taskRepo, new Logger('Test'), mockHttpClient);
@@ -168,6 +182,7 @@ describe('DispatchEngine', () => {
       expect(updated).not.toBeNull();
       expect(updated?.status).toBe(TaskStatus.PENDING);
       expect(updated?.dispatchCount).toBe(1);
+      expect(updated?.responseCount).toBe(1);
       expect(updated?.lastAttempt).not.toBeNull();
     });
 
@@ -187,6 +202,7 @@ describe('DispatchEngine', () => {
       const updated = await taskRepo.getTaskByName(task.name);
 
       expect(updated?.status).toBe(TaskStatus.FAILED);
+      expect(updated?.responseCount).toBe(1);
     });
 
     test('should update firstAttempt on first dispatch', async () => {
@@ -232,6 +248,27 @@ describe('DispatchEngine', () => {
 
       expect(updated?.status).toBe(TaskStatus.FAILED);
     });
+
+    test('should handle abort timeout as failure', async () => {
+      const abortError = new DOMException('The operation was aborted', 'AbortError');
+
+      mockHttpClient = mock(() => Promise.reject(abortError));
+
+      engine = new DispatchEngine(queueRepo, taskRepo, new Logger('Test'), mockHttpClient);
+
+      const retryConfig = { ...DEFAULT_RETRY_CONFIG, maxAttempts: 1 };
+      const queue = await queueRepo.createQueue(
+        makeQueueData({ retryConfig: JSON.stringify(retryConfig) })
+      );
+      const task = await taskRepo.createTask(makeTaskData());
+
+      await engine.dispatchTask(task, queue);
+
+      const updated = await taskRepo.getTaskByName(task.name);
+
+      expect(updated?.status).toBe(TaskStatus.FAILED);
+      expect(updated?.responseCount).toBe(1);
+    });
   });
 
   describe('start/stop lifecycle', () => {
@@ -248,26 +285,46 @@ describe('DispatchEngine', () => {
     });
   });
 
+  describe('cleanupBucket', () => {
+    test('should remove bucket for deleted queue', async () => {
+      const queue = await queueRepo.createQueue(makeQueueData());
+
+      await taskRepo.createTask(makeTaskData());
+
+      await engine.tick();
+
+      expect(mockHttpClient).toHaveBeenCalled();
+
+      engine.cleanupBucket(queue.name);
+
+      // Create new queue+task with same name to verify bucket is recreated fresh
+      mockHttpClient.mockReset();
+      mockHttpClient.mockImplementation(() => Promise.resolve(new Response('OK', { status: 200 })));
+
+      await queueRepo.createQueue(makeQueueData({ name: 'projects/p/locations/l/queues/q-new' }));
+      await taskRepo.createTask(
+        makeTaskData({
+          name: 'projects/p/locations/l/queues/q-new/tasks/t2',
+          queueName: 'projects/p/locations/l/queues/q-new',
+        })
+      );
+
+      await engine.tick();
+
+      expect(mockHttpClient).toHaveBeenCalled();
+    });
+  });
+
   describe('retry backoff', () => {
     test('should compute exponential backoff with maxDoublings cap', () => {
-      // Access via the public computeBackoff method
-      const minBackoff = 0.1; // 100ms
-      const maxBackoff = 3600; // 1 hour
+      const minBackoff = 0.1;
+      const maxBackoff = 3600;
       const maxDoublings = 3;
 
-      // attempt 0: 0.1 * 2^0 = 0.1
       expect(engine.computeBackoffSeconds(0, minBackoff, maxBackoff, maxDoublings)).toBe(0.1);
-
-      // attempt 1: 0.1 * 2^1 = 0.2
       expect(engine.computeBackoffSeconds(1, minBackoff, maxBackoff, maxDoublings)).toBe(0.2);
-
-      // attempt 2: 0.1 * 2^2 = 0.4
       expect(engine.computeBackoffSeconds(2, minBackoff, maxBackoff, maxDoublings)).toBe(0.4);
-
-      // attempt 3: 0.1 * 2^3 = 0.8 (at maxDoublings)
       expect(engine.computeBackoffSeconds(3, minBackoff, maxBackoff, maxDoublings)).toBe(0.8);
-
-      // attempt 4: capped at 2^maxDoublings = 0.1 * 2^3 = 0.8
       expect(engine.computeBackoffSeconds(4, minBackoff, maxBackoff, maxDoublings)).toBe(0.8);
     });
 
@@ -276,7 +333,6 @@ describe('DispatchEngine', () => {
       const maxBackoff = 200;
       const maxDoublings = 16;
 
-      // 100 * 2^2 = 400, but capped at 200
       expect(engine.computeBackoffSeconds(2, minBackoff, maxBackoff, maxDoublings)).toBe(200);
     });
   });

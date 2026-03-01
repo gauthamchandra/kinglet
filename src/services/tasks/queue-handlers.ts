@@ -11,7 +11,7 @@ import type {
 import { StandardResponseFormatter, ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { buildQueueName, parseQueueName } from './types.ts';
-import { TasksError } from './queue-service.ts';
+import { handleTasksError } from './queue-service.ts';
 import type { QueueService } from './queue-service.ts';
 
 export class QueueHandlers {
@@ -85,7 +85,9 @@ export class QueueHandlers {
       const { project, location } = req.params;
       const body = req.body as Record<string, unknown> | undefined;
 
-      let queueId = (body?.queueId as string) ?? (req.query.queueId as string) ?? '';
+      let queueId =
+        (typeof body?.queueId === 'string' ? body.queueId : undefined) ??
+        String(req.query.queueId ?? '');
 
       if (!queueId && typeof body?.name === 'string') {
         try {
@@ -124,13 +126,11 @@ export class QueueHandlers {
   private async handleListQueues(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const { project, location } = req.params;
-      const pageSizeRaw = req.query.pageSize
-        ? parseInt(req.query.pageSize as string, 10)
-        : undefined;
+      const pageSizeRaw = req.query.pageSize ? parseInt(String(req.query.pageSize), 10) : undefined;
 
       const pageSize =
         pageSizeRaw && !Number.isNaN(pageSizeRaw) && pageSizeRaw > 0 ? pageSizeRaw : undefined;
-      const pageToken = (req.query.pageToken as string) || undefined;
+      const pageToken = req.query.pageToken ? String(req.query.pageToken) : undefined;
 
       const result = await this.service.listQueues(
         project ?? '',
@@ -212,19 +212,6 @@ export class QueueHandlers {
   }
 
   private handleError(err: unknown): RouteResponse {
-    if (err instanceof TasksError) {
-      switch (err.code) {
-        case 'NOT_FOUND':
-          return this.responseUtils.notFound('Queue', err.message);
-        case 'ALREADY_EXISTS':
-          return this.responseUtils.alreadyExists('Queue', err.message);
-        case 'INVALID_ARGUMENT':
-          return this.responseUtils.badRequest(err.message);
-        case 'FAILED_PRECONDITION':
-          return this.responseUtils.failedPrecondition(err.message);
-      }
-    }
-
-    return this.responseUtils.badRequest(err instanceof Error ? err.message : 'Unknown error');
+    return handleTasksError(err, 'Queue', this.responseUtils);
   }
 }
