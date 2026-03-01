@@ -74,7 +74,7 @@ This project uses Bun as the primary runtime (see docs/adrs/001-bun-runtime-choi
 
 ### TypeScript Types
 When using TypeScript with Bun runtime, avoid Node.js-specific types:
-- Use `number` for timers (not `NodeJS.Timeout`)
+- Use `ReturnType<typeof setInterval>` or `ReturnType<typeof setTimeout>` for timers (not `NodeJS.Timeout` or `number` with double casts)
 - Use standard Web API types (not Node.js equivalents)
 - Use `Bun.*` types for Bun-specific APIs
 - Prefer global JavaScript types over `NodeJS.*` namespace types
@@ -105,6 +105,27 @@ const spy = spyOn(object, 'method');
 - **Single test command** - `bun test` runs all tests (unit, integration, e2e)
 - **Co-locate tests** with source files for easier discovery
 - **Reset mocks properly** - Use `mockFunction.mockReset()` instead of `jest.clearAllMocks()`
+
+### Test Assertion Guidelines
+- **Never use `expect(true).toBe(false)` as an unreachable sentinel.** Use `rejects` for async error testing:
+```ts
+// BAD - fragile, swallows unexpected errors
+try {
+  await service.doThing();
+  expect(true).toBe(false);
+} catch (err) {
+  expect(err).toBeInstanceOf(MyError);
+  expect((err as MyError).code).toBe('NOT_FOUND');
+}
+
+// GOOD - clean, type-safe, fails clearly
+const promise = service.doThing();
+await expect(promise).rejects.toBeInstanceOf(MyError);
+await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
+```
+- **Prefer specific assertions over vague ones.** Use `toBeTypeOf('string')` instead of `toBeDefined()` when you know the expected type. Use exact value matches (`toBe`, `toEqual`) when the value is deterministic.
+- **Every test must have at least one `expect()` call** that validates observable behavior.
+- **Do not write comments that restate assertions** (e.g., `// Task should be deleted` right before `expect(task).toBeNull()`). The test name and assertion are self-documenting.
 
 Test environment is configured to use error-level logging and test NODE_ENV.
 - When implmenting a task, be sure to first read through the ADRs that exist in docs/adrs so you understand the historical decisions that have been made.

@@ -10,19 +10,20 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
+import { CloudTasksService } from '@/services/tasks/index.ts';
 
 const logger = new Logger('Main');
 
 let server: Server | null = null;
 let storageManager: StorageManager | null = null;
 let schedulerService: SchedulerService | null = null;
+let tasksService: CloudTasksService | null = null;
 
 async function main(): Promise<void> {
   try {
     logger.info('Starting LocalStack GCP Emulator...');
     logger.info('Bun version:', Bun.version);
 
-    // Load configuration
     const config = await getConfig();
 
     logger.info('Configuration loaded', {
@@ -30,15 +31,14 @@ async function main(): Promise<void> {
       storageType: config.storage.type,
     });
 
-    // Initialize storage
     storageManager = new StorageManager();
+
     await storageManager.initialize(config.storage);
+
     logger.info('Storage initialized');
 
-    // Create request router
     const router = new RequestRouter(new Logger('Router'));
 
-    // Register health endpoint
     const healthRoute: RouteDefinition = {
       id: 'health',
       method: 'GET',
@@ -51,7 +51,6 @@ async function main(): Promise<void> {
 
     router.addRoute(healthRoute);
 
-    // Initialize enabled services
     if (config.services.scheduler.enabled) {
       schedulerService = new SchedulerService(storageManager, new Logger('Scheduler'));
       await schedulerService.initialize();
@@ -69,14 +68,21 @@ async function main(): Promise<void> {
     }
 
     if (config.services.tasks.enabled) {
-      logger.info('Cloud Tasks service enabled (stub - not yet implemented)');
+      tasksService = new CloudTasksService(storageManager, new Logger('Tasks'));
+      await tasksService.initialize();
+
+      for (const route of tasksService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      tasksService.start();
+      logger.info('Cloud Tasks service enabled and started');
     }
 
     if (config.services.secrets.enabled) {
       logger.info('Secret Manager service enabled (stub - not yet implemented)');
     }
 
-    // Start HTTP server
     server = Bun.serve({
       port: config.server.httpPort,
       fetch: request => router.route(request),
@@ -106,6 +112,11 @@ async function shutdown(signal: string): Promise<void> {
   if (schedulerService) {
     await schedulerService.stop();
     logger.info('Scheduler service stopped');
+  }
+
+  if (tasksService) {
+    await tasksService.stop();
+    logger.info('Tasks service stopped');
   }
 
   if (storageManager) {

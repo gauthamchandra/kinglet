@@ -14,17 +14,10 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
-import type { RouteDefinition } from '@/core/gateway/request-router.ts';
+import { buildRouter, waitForCallback, createFakeAuth } from './e2e-helpers.ts';
+import type { CallbackRecord } from './e2e-helpers.ts';
 
 // ── Test Infrastructure ──
-
-interface CallbackRecord {
-  method: string;
-  url: string;
-  headers: Record<string, string>;
-  body: string;
-  receivedAt: number;
-}
 
 let callbackServer: Server;
 let emulatorServer: Server;
@@ -39,114 +32,6 @@ function emulatorUrl(path: string): string {
 
 function callbackUrl(path: string = '/callback'): string {
   return `http://localhost:${callbackPort}${path}`;
-}
-
-/**
- * Build a simple request router from RouteDefinition[] for use with Bun.serve
- */
-function buildRouter(routes: RouteDefinition[]) {
-  return async (request: Request): Promise<Response> => {
-    const url = new URL(request.url);
-    const method = request.method;
-    const pathname = url.pathname;
-
-    for (const route of routes) {
-      if (route.method !== method) continue;
-
-      const params = matchRoute(route.path, pathname);
-
-      if (params) {
-        const query: Record<string, string> = {};
-
-        for (const [key, value] of url.searchParams.entries()) {
-          query[key] = value;
-        }
-
-        let body: unknown;
-        const contentType = request.headers.get('content-type') ?? '';
-
-        if (contentType.includes('application/json')) {
-          try {
-            body = await request.json();
-          } catch {
-            body = undefined;
-          }
-        }
-
-        const routeRequest = {
-          method,
-          path: pathname,
-          query,
-          headers: Object.fromEntries(request.headers.entries()),
-          params,
-          body,
-          originalRequest: request,
-        };
-
-        const context = {
-          routeId: route.id,
-          startTime: Date.now(),
-          metadata: {},
-          logger: new Logger('e2e', 'error'),
-        };
-
-        const result = await route.handler(routeRequest, context);
-
-        return new Response(result.body !== undefined ? JSON.stringify(result.body) : null, {
-          status: result.status,
-          headers: {
-            'content-type': 'application/json',
-            ...(result.headers ?? {}),
-          },
-        });
-      }
-    }
-
-    return new Response(
-      JSON.stringify({ error: { code: 404, message: 'Not Found', status: 'NOT_FOUND' } }),
-      {
-        status: 404,
-        headers: { 'content-type': 'application/json' },
-      }
-    );
-  };
-}
-
-/**
- * Simple route pattern matcher: converts :param patterns to extracted values.
- * Handles GCP action suffixes like :pause, :resume, :run on the last segment.
- * E.g., pattern "/jobs/:jobId:pause" matches path "/jobs/my-job:pause"
- */
-function matchRoute(pattern: string, pathname: string): Record<string, string> | null {
-  const patternParts = pattern.split('/');
-  const pathParts = pathname.split('/');
-
-  if (patternParts.length !== pathParts.length) return null;
-
-  const params: Record<string, string> = {};
-
-  for (let i = 0; i < patternParts.length; i++) {
-    const pp = patternParts[i] ?? '';
-    const pathPart = pathParts[i] ?? '';
-
-    // Check for action suffix pattern like :jobId:pause
-    const actionMatch = pp.match(/^:([^:]+)(:[a-z]+)$/);
-
-    if (actionMatch) {
-      const paramName = actionMatch[1] as string;
-      const actionSuffix = actionMatch[2] as string;
-
-      if (!pathPart.endsWith(actionSuffix)) return null;
-
-      params[paramName] = pathPart.substring(0, pathPart.length - actionSuffix.length);
-    } else if (pp.startsWith(':')) {
-      params[pp.substring(1)] = pathPart;
-    } else if (pp !== pathPart) {
-      return null;
-    }
-  }
-
-  return params;
 }
 
 // ── Setup / Teardown ──
@@ -196,22 +81,6 @@ afterAll(async () => {
   emulatorServer.stop();
   callbackServer.stop();
 });
-
-// ── Helpers ──
-
-async function waitForCallback(expectedCount: number = 1, timeoutMs: number = 5000): Promise<void> {
-  const start = Date.now();
-
-  while (callbackRequests.length < expectedCount) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(
-        `Timeout waiting for ${expectedCount} callback(s). Got ${callbackRequests.length}.`
-      );
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-}
 
 // ── Test Path 1: Raw HTTP Fetch ──
 
@@ -283,7 +152,7 @@ describe('Cloud Scheduler E2E: Raw HTTP API', () => {
     expect(runResponse.status).toBe(200);
 
     // runJob now actually executes the HTTP target via the execution engine callback
-    await waitForCallback(1, 3000);
+    await waitForCallback(callbackRequests, 1, 3000);
 
     expect(callbackRequests.length).toBeGreaterThanOrEqual(1);
 
@@ -364,16 +233,7 @@ describe('Cloud Scheduler E2E: Client Library', () => {
   let client: InstanceType<typeof CloudSchedulerClient>;
 
   beforeAll(() => {
-    // Create a fake auth that passes requests through without real GCP credentials.
-    // google-gax's generateServiceStub calls auth.fetch() directly (not auth.getClient().fetch())
-    const fakeAuth = {
-      fetch: (url: string, opts: RequestInit) => fetch(url, opts),
-      getClient: () =>
-        Promise.resolve({
-          fetch: (url: string, opts: RequestInit) => fetch(url, opts),
-        }),
-      getProjectId: () => Promise.resolve(project),
-    };
+    const fakeAuth = createFakeAuth(project);
 
     client = new CloudSchedulerClient({
       fallback: 'rest',
@@ -432,7 +292,7 @@ describe('Cloud Scheduler E2E: Client Library', () => {
 
     expect(job.name).toBe(jobName);
 
-    await waitForCallback(1, 3000);
+    await waitForCallback(callbackRequests, 1, 3000);
 
     expect(callbackRequests.length).toBeGreaterThanOrEqual(1);
 
@@ -470,11 +330,8 @@ describe('Cloud Scheduler E2E: Client Library', () => {
   test('8. Delete job via client library and verify not found', async () => {
     await client.deleteJob({ name: jobName });
 
-    try {
-      await client.getJob({ name: jobName });
-      expect(true).toBe(false); // should not reach here
-    } catch (err) {
-      expect((err as Error).message.toLowerCase()).toContain('not found');
-    }
+    const promise = client.getJob({ name: jobName });
+
+    await expect(promise).rejects.toThrow(/not found/i);
   });
 });
