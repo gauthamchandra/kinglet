@@ -4,7 +4,7 @@ FROM oven/bun:1.3.4-slim AS base
 FROM base AS install
 WORKDIR /app
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile --production --ignore-scripts
 
 # --- Final stage: copy deps + source, run with Bun ---
 FROM base
