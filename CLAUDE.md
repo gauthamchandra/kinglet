@@ -128,7 +128,22 @@ await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
 - **Do not write comments that restate assertions** (e.g., `// Task should be deleted` right before `expect(task).toBeNull()`). The test name and assertion are self-documenting.
 
 Test environment is configured to use error-level logging and test NODE_ENV.
-- When implmenting a task, be sure to first read through the ADRs that exist in docs/adrs so you understand the historical decisions that have been made.
+
+## Architectural Decision Records
+
+When implementing a feature that introduces a **large-scale architectural change**, document the decision in `docs/adrs/` following the existing ADR format (see ADR-001 through ADR-004 for examples). An ADR is warranted when:
+
+- Adding or replacing a core framework component (storage, routing, protocol support)
+- Changing how services are structured, registered, or communicate
+- Introducing a new external dependency that affects the runtime or build
+- Modifying the persistence, caching, or data model strategy
+- Changing deployment, containerization, or CI/CD architecture
+
+Each ADR should include: Status, Context, Decision, Rationale, Alternatives Considered, and Consequences. Number sequentially (e.g., `005-descriptive-name.md`).
+
+## Guidelines
+
+- When implementing a task, be sure to first read through the ADRs that exist in docs/adrs so you understand the historical decisions that have been made.
 - Co-locate tests with source files for easier discovery
 - Try to use `bunx` over `npx` wherever possible
 - When moving code to a new location in response to feedback from the user, do not leave useless comments such as "// BEGIN is now called explicitly via begin() method".
