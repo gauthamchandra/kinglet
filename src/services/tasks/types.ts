@@ -285,13 +285,14 @@ export const CreateTaskRequestSchema = z.object({
   task: z.object({
     name: z.string().optional(),
     httpRequest: TaskHttpRequestSchema,
-    scheduleTime: z.string().optional(),
+    scheduleTime: z.string().datetime({ offset: true }).optional(),
     dispatchDeadline: z.string().optional(),
   }),
   responseView: z.enum(['BASIC', 'FULL']).optional(),
 });
 
 export type CreateQueueRequest = z.infer<typeof CreateQueueRequestSchema>;
+
 // ── Helper Functions ──
 
 export function parseQueueName(name: string): {
@@ -364,14 +365,26 @@ export function parseDurationSeconds(duration: string): number {
   return parseFloat(match[1] as string);
 }
 
+// ── Conversion Utilities ──
+
+function parseJsonField<T>(json: string, fieldName: string, recordName: string): T {
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    throw new Error(
+      `Corrupt ${fieldName} JSON in record "${recordName}": ${json.substring(0, 100)}`
+    );
+  }
+}
+
 // ── Conversion Functions ──
 
 export function queueRecordToResponse(record: QueueRecord): QueueResponse {
   const response: QueueResponse = {
     name: record.name,
     state: record.state,
-    rateLimits: JSON.parse(record.rateLimits) as RateLimits,
-    retryConfig: JSON.parse(record.retryConfig) as TaskRetryConfig,
+    rateLimits: parseJsonField<RateLimits>(record.rateLimits, 'rateLimits', record.name),
+    retryConfig: parseJsonField<TaskRetryConfig>(record.retryConfig, 'retryConfig', record.name),
     taskTtl: record.taskTtl,
     tombstoneTtl: record.tombstoneTtl,
   };
@@ -381,13 +394,19 @@ export function queueRecordToResponse(record: QueueRecord): QueueResponse {
   }
 
   if (record.stackdriverLoggingConfig) {
-    response.stackdriverLoggingConfig = JSON.parse(
-      record.stackdriverLoggingConfig
-    ) as StackdriverLoggingConfig;
+    response.stackdriverLoggingConfig = parseJsonField<StackdriverLoggingConfig>(
+      record.stackdriverLoggingConfig,
+      'stackdriverLoggingConfig',
+      record.name
+    );
   }
 
   if (record.httpTarget) {
-    response.httpTarget = JSON.parse(record.httpTarget) as QueueHttpTarget;
+    response.httpTarget = parseJsonField<QueueHttpTarget>(
+      record.httpTarget,
+      'httpTarget',
+      record.name
+    );
   }
 
   return response;
@@ -415,7 +434,11 @@ export function requestToQueueRecord(
 export function taskRecordToResponse(record: TaskRecord, view?: string): TaskResponse {
   const isBasic = view === 'BASIC';
 
-  const httpRequest = JSON.parse(record.httpRequest) as TaskHttpRequest;
+  const httpRequest = parseJsonField<TaskHttpRequest>(
+    record.httpRequest,
+    'httpRequest',
+    record.name
+  );
 
   if (isBasic) {
     delete httpRequest.body;
@@ -433,11 +456,15 @@ export function taskRecordToResponse(record: TaskRecord, view?: string): TaskRes
   };
 
   if (!isBasic && record.firstAttempt) {
-    response.firstAttempt = JSON.parse(record.firstAttempt) as Attempt;
+    response.firstAttempt = parseJsonField<Attempt>(
+      record.firstAttempt,
+      'firstAttempt',
+      record.name
+    );
   }
 
   if (!isBasic && record.lastAttempt) {
-    response.lastAttempt = JSON.parse(record.lastAttempt) as Attempt;
+    response.lastAttempt = parseJsonField<Attempt>(record.lastAttempt, 'lastAttempt', record.name);
   }
 
   return response;
@@ -458,7 +485,9 @@ export function requestToTaskRecord(
   },
   defaults: { taskTtl: string; tombstoneTtl: string }
 ): Omit<TaskRecord, keyof BaseRecord> {
-  void defaults; // reserved for future task TTL enforcement
+  // TODO(task-ttl): Use defaults.taskTtl and defaults.tombstoneTtl to enforce
+  // per-task TTL expiration. See TASKS.md task 11.6 for tracking.
+  void defaults;
 
   return {
     name,

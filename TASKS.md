@@ -477,6 +477,13 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Tasks Discovery integration
   - **Success Criteria**: Client library connects
 
+- [ ] **11.6 Implement Task TTL Enforcement**
+  - Use queue-level `taskTtl` and `tombstoneTtl` defaults in `requestToTaskRecord`
+  - Auto-expire tasks that exceed their TTL via the dispatch engine's periodic maintenance
+  - Remove the `void defaults` workaround in `types.ts:requestToTaskRecord`
+  - **Deliverable**: Tasks respect TTL configuration
+  - **Success Criteria**: Tasks are automatically cleaned up when TTL expires
+
 ### 12. Secrets Manager Service
 
 - [ ] **12.1 Create Secrets Data Models**

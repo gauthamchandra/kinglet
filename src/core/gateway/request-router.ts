@@ -177,8 +177,8 @@ export class RequestRouter {
 
     this.logger.debug(`Route registered: ${route.method} ${normalizedPath}`, {
       routeId: route.id,
-      hasMiddleware: (route.middleware?.length || 0) > 0,
-      hasParameters: (route.parameters?.length || 0) > 0,
+      hasMiddleware: (route.middleware?.length ?? 0) > 0,
+      hasParameters: (route.parameters?.length ?? 0) > 0,
     });
 
     if (this.config.enableMetrics) {
@@ -464,6 +464,11 @@ export class RequestRouter {
       normalized = normalized.replace(/\/([^/{}]+)/g, (match, segment) => {
         // Don't lowercase segments that are parameter values (this is for route templates)
         if (segment.includes('{') || segment.includes('}')) {
+          return match;
+        }
+
+        // Preserve :paramName style parameter names from case normalization
+        if (segment.startsWith(':')) {
           return match;
         }
 

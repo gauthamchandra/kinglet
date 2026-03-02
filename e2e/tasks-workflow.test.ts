@@ -323,6 +323,53 @@ describe('Cloud Tasks E2E: Raw HTTP API', () => {
 
     expect(getResponse.status).toBe(404);
   });
+
+  test('14. CamelCase queue ID with GCP-style query params round-trips correctly', async () => {
+    const camelQueueId = 'myTestPaymentQueue';
+    const camelQueueName = `projects/${project}/locations/${location}/queues/${camelQueueId}`;
+
+    // Create queue with camelCase ID
+    const createQueueResponse = await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: camelQueueName }),
+    });
+
+    expect(createQueueResponse.status).toBe(200);
+
+    const queue = await createQueueResponse.json();
+
+    expect(queue.name).toBe(camelQueueName);
+
+    // Create a task using the $alt query param the GCP client library sends
+    const tasksPath = `${queuesBasePath}/${camelQueueId}/tasks`;
+
+    const createTaskResponse = await fetch(
+      emulatorUrl(`${tasksPath}?$alt=json%3Benum-encoding%3Dint`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task: {
+            httpRequest: {
+              url: callbackUrl('/camel-case-test'),
+              httpMethod: 'POST',
+            },
+          },
+        }),
+      }
+    );
+
+    expect(createTaskResponse.status).toBe(200);
+
+    const task = await createTaskResponse.json();
+
+    expect(task.name).toContain(camelQueueName);
+    expect(task.httpRequest.url).toBe(callbackUrl('/camel-case-test'));
+
+    // Clean up
+    await fetch(emulatorUrl(`${queuesBasePath}/${camelQueueId}`), { method: 'DELETE' });
+  });
 });
 
 // ── Test Path 2: Official @google-cloud/tasks Client Library ──
@@ -460,30 +507,16 @@ describe('Cloud Tasks E2E: Client Library', () => {
 
     await client.deleteTask({ name: freshTaskName });
 
-    let caught = false;
+    const getDeletedTask = client.getTask({ name: freshTaskName });
 
-    try {
-      await client.getTask({ name: freshTaskName });
-    } catch (err: unknown) {
-      caught = true;
-      expect((err as Error).message.toLowerCase()).toContain('not found');
-    }
-
-    expect(caught).toBe(true);
+    await expect(getDeletedTask).rejects.toThrow(/not found/i);
   });
 
   test('11. Delete queue and verify not found', async () => {
     await client.deleteQueue({ name: queueName });
 
-    let caught = false;
+    const getDeletedQueue = client.getQueue({ name: queueName });
 
-    try {
-      await client.getQueue({ name: queueName });
-    } catch (err: unknown) {
-      caught = true;
-      expect((err as Error).message.toLowerCase()).toContain('not found');
-    }
-
-    expect(caught).toBe(true);
+    await expect(getDeletedQueue).rejects.toThrow(/not found/i);
   });
 });
