@@ -162,6 +162,27 @@ describe('RequestRouter', () => {
 
       expect(retrievedRoute?.path).toBe('/test/path');
     });
+
+    test('should preserve colon-style camelCase parameter names during normalization', () => {
+      const routerWithNormalization = new RequestRouter(mockLogger, {
+        enablePathNormalization: true,
+        caseSensitive: false,
+      });
+
+      const route = createRoute.get(
+        '/v2/projects/:project/locations/:location/queues/:queueId/tasks',
+        paramHandler,
+        { id: 'camel-params' }
+      );
+
+      routerWithNormalization.addRoute(route);
+
+      const retrievedRoute = routerWithNormalization.getRoute('camel-params');
+
+      expect(retrievedRoute?.path).toBe(
+        '/v2/projects/:project/locations/:location/queues/:queueId/tasks'
+      );
+    });
   });
 
   describe('Route Removal', () => {
@@ -258,6 +279,35 @@ describe('RequestRouter', () => {
       expect(body.params.projectId).toBe('projects/my-project');
     });
 
+    test('should extract camelCase colon-style params with query string containing semicolons', async () => {
+      router.addRoute(
+        createRoute.post(
+          '/v2/projects/:project/locations/:location/queues/:queueId/tasks',
+          paramHandler,
+          { id: 'create-task' }
+        )
+      );
+
+      const request = createMockRequest(
+        'POST',
+        '/v2/projects/mortgage-test/locations/us-central1/queues/test-loan-payment-events-queue/tasks',
+        {
+          query: { $alt: 'json;enum-encoding=int' },
+          body: { httpRequest: { url: 'https://example.com' } },
+        }
+      );
+
+      const response = await router.route(request);
+
+      expect(response.status).toBe(200);
+
+      const body = await response.json();
+
+      expect(body.params.project).toBe('mortgage-test');
+      expect(body.params.location).toBe('us-central1');
+      expect(body.params.queueId).toBe('test-loan-payment-events-queue');
+    });
+
     test('should return 404 for unmatched paths', async () => {
       const request = createMockRequest('GET', '/nonexistent');
 
@@ -285,7 +335,7 @@ describe('RequestRouter', () => {
   });
 
   describe('Wildcard Support', () => {
-    test('should support single wildcard matching', () => {
+    test('should support single wildcard matching', async () => {
       const routerWithWildcards = new RequestRouter(mockLogger, {
         enableWildcards: true,
       });
@@ -297,17 +347,28 @@ describe('RequestRouter', () => {
         handler: paramHandler,
       });
 
-      // Note: This is a simplified test - actual wildcard implementation
-      // would require more complex regex handling
+      const request = createMockRequest('GET', '/files/readme.txt');
+      const response = await routerWithWildcards.route(request);
+
+      expect(response.status).toBe(200);
     });
 
-    test('should disable wildcards when configured', () => {
+    test('should disable wildcards when configured', async () => {
       const routerNoWildcards = new RequestRouter(mockLogger, {
         enableWildcards: false,
       });
 
-      // Should treat * as literal character when wildcards are disabled
-      expect(routerNoWildcards).toBeInstanceOf(RequestRouter);
+      routerNoWildcards.addRoute({
+        id: 'literal-star',
+        method: 'GET',
+        path: '/files/*',
+        handler: simpleHandler,
+      });
+
+      const request = createMockRequest('GET', '/files/readme.txt');
+      const response = await routerNoWildcards.route(request);
+
+      expect(response.status).toBe(404);
     });
   });
 

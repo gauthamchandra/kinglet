@@ -69,6 +69,16 @@ export class DispatchEngine {
     this.logger.info('Dispatch engine stopped');
   }
 
+  /**
+   * Execute one dispatch cycle. Polls all RUNNING queues for dispatchable tasks.
+   *
+   * The `running` flag guard is not atomic, so there is a theoretical race window
+   * between the check and the set. This is acceptable because: (1) setInterval
+   * callbacks are serialized on the event loop in single-threaded Bun/Node, so
+   * concurrent entry only occurs if tick() is called manually while a previous
+   * tick is still awaiting; (2) even if two ticks overlap, the worst outcome is
+   * a duplicate dispatch attempt which HTTP targets should handle idempotently.
+   */
   async tick(): Promise<void> {
     if (this.running) {
       return;

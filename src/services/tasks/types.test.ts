@@ -464,6 +464,74 @@ describe('Cloud Tasks Types', () => {
 
       expect(result.success).toBe(false);
     });
+
+    test('should accept valid RFC 3339 scheduleTime with UTC', () => {
+      const input = {
+        task: {
+          httpRequest: { url: 'https://example.com', httpMethod: 'POST' },
+          scheduleTime: '2024-01-15T10:30:00Z',
+        },
+      };
+
+      const result = CreateTaskRequestSchema.safeParse(input);
+
+      expect(result.success).toBe(true);
+    });
+
+    test('should accept valid RFC 3339 scheduleTime with timezone offset', () => {
+      const input = {
+        task: {
+          httpRequest: { url: 'https://example.com', httpMethod: 'POST' },
+          scheduleTime: '2024-01-15T10:30:00+05:30',
+        },
+      };
+
+      const result = CreateTaskRequestSchema.safeParse(input);
+
+      expect(result.success).toBe(true);
+    });
+
+    test('should accept past scheduleTime (dispatches immediately per GCP behavior)', () => {
+      const input = {
+        task: {
+          httpRequest: { url: 'https://example.com', httpMethod: 'POST' },
+          scheduleTime: '2020-01-01T00:00:00Z',
+        },
+      };
+
+      const result = CreateTaskRequestSchema.safeParse(input);
+
+      expect(result.success).toBe(true);
+    });
+
+    test('should reject invalid scheduleTime strings', () => {
+      const invalidTimes = ['not-a-date', 'tomorrow', '2024-13-01T00:00:00Z', '1234567890'];
+
+      for (const scheduleTime of invalidTimes) {
+        const input = {
+          task: {
+            httpRequest: { url: 'https://example.com', httpMethod: 'POST' },
+            scheduleTime,
+          },
+        };
+
+        const result = CreateTaskRequestSchema.safeParse(input);
+
+        expect(result.success).toBe(false);
+      }
+    });
+
+    test('should accept missing scheduleTime (defaults to now)', () => {
+      const input = {
+        task: {
+          httpRequest: { url: 'https://example.com', httpMethod: 'POST' },
+        },
+      };
+
+      const result = CreateTaskRequestSchema.safeParse(input);
+
+      expect(result.success).toBe(true);
+    });
   });
 
   describe('queueRecordToResponse', () => {
@@ -512,6 +580,46 @@ describe('Cloud Tasks Types', () => {
       const response = queueRecordToResponse(record);
 
       expect(response.purgeTime).toBe('2024-06-15T12:00:00Z');
+    });
+
+    test('should throw descriptive error for corrupt rateLimits JSON', () => {
+      const record: QueueRecord = {
+        id: 'id',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        name: 'projects/p/locations/l/queues/q',
+        state: 'RUNNING',
+        rateLimits: '{not valid json',
+        retryConfig: JSON.stringify(DEFAULT_RETRY_CONFIG),
+        purgeTime: null,
+        taskTtl: DEFAULT_TASK_TTL,
+        tombstoneTtl: DEFAULT_TOMBSTONE_TTL,
+        stackdriverLoggingConfig: null,
+        httpTarget: null,
+      };
+
+      expect(() => queueRecordToResponse(record)).toThrow(
+        /Corrupt rateLimits JSON in record "projects\/p\/locations\/l\/queues\/q"/
+      );
+    });
+
+    test('should throw descriptive error for corrupt retryConfig JSON', () => {
+      const record: QueueRecord = {
+        id: 'id',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        name: 'projects/p/locations/l/queues/q',
+        state: 'RUNNING',
+        rateLimits: JSON.stringify(DEFAULT_RATE_LIMITS),
+        retryConfig: 'corrupt',
+        purgeTime: null,
+        taskTtl: DEFAULT_TASK_TTL,
+        tombstoneTtl: DEFAULT_TOMBSTONE_TTL,
+        stackdriverLoggingConfig: null,
+        httpTarget: null,
+      };
+
+      expect(() => queueRecordToResponse(record)).toThrow(/Corrupt retryConfig JSON in record/);
     });
   });
 
@@ -632,6 +740,26 @@ describe('Cloud Tasks Types', () => {
       expect(response.firstAttempt).toBeTypeOf('object');
       expect(response.lastAttempt).toBeTypeOf('object');
       expect(response.lastAttempt?.responseStatus).toBe(200);
+    });
+
+    test('should throw descriptive error for corrupt httpRequest JSON', () => {
+      const record = makeTaskRecord();
+
+      record.httpRequest = '{broken';
+
+      expect(() => taskRecordToResponse(record)).toThrow(
+        /Corrupt httpRequest JSON in record "projects\/p\/locations\/l\/queues\/q\/tasks\/t"/
+      );
+    });
+
+    test('should throw descriptive error for corrupt firstAttempt JSON', () => {
+      const record = makeTaskRecord();
+
+      record.firstAttempt = 'not-json';
+
+      expect(() => taskRecordToResponse(record, 'FULL')).toThrow(
+        /Corrupt firstAttempt JSON in record/
+      );
     });
   });
 
