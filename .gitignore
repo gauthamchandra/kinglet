@@ -62,3 +62,7 @@ temp/
 
 # Data directory (for local development)
 data/
+
+# Compatibility audit reports (generated)
+.compatibility-reports/*
+!.compatibility-reports/.gitkeep
