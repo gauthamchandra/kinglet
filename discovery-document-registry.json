@@ -1,0 +1,32 @@
+{
+  "services": [
+    {
+      "name": "cloud-tasks",
+      "displayName": "Cloud Tasks",
+      "discoveryUrl": "https://cloudtasks.googleapis.com/$discovery/rest?version=v2",
+      "version": "v2",
+      "implementationPath": "src/services/tasks/"
+    },
+    {
+      "name": "cloud-scheduler",
+      "displayName": "Cloud Scheduler",
+      "discoveryUrl": "https://cloudscheduler.googleapis.com/$discovery/rest?version=v1",
+      "version": "v1",
+      "implementationPath": "src/services/scheduler/"
+    },
+    {
+      "name": "secret-manager",
+      "displayName": "Secret Manager",
+      "discoveryUrl": "https://secretmanager.googleapis.com/$discovery/rest?version=v1",
+      "version": "v1",
+      "implementationPath": "src/services/secrets/"
+    },
+    {
+      "name": "pubsub",
+      "displayName": "Cloud Pub/Sub",
+      "discoveryUrl": "https://pubsub.googleapis.com/$discovery/rest?version=v1",
+      "version": "v1",
+      "implementationPath": "src/services/pubsub/"
+    }
+  ]
+}

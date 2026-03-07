@@ -81,7 +81,7 @@ tasks that build incrementally toward a fully functional system.
   - Add @types/bun
   - Add typescript
   - Add @types/node for compatibility
-  - Add vitest for additional testing
+  - ~~Add vitest for additional testing~~ (not used; Bun's built-in test runner is used exclusively per ADR-002)
   - Add docker for container building
   - **Deliverable**: Complete dev environment
   - **Success Criteria**: TypeScript types work correctly
@@ -387,15 +387,18 @@ tasks that build incrementally toward a fully functional system.
 
 ### 10. Cloud Scheduler Service
 
-- [ ] **10.1 Create Scheduler Data Models**
+- [x] **10.1 Create Scheduler Data Models**
   - Define Job interface
   - Create schedule representation
   - Add retry configuration
   - Create database schema
   - **Deliverable**: Scheduler data layer
   - **Success Criteria**: Models match GCP spec
+  - **Status**: ✅ Complete - Full job data models with DB schema and conversion utilities
+  - **Implementation**: src/services/scheduler/types.ts with JobRecord, HttpTarget, RetryConfig interfaces
+  - **Tests**: src/services/scheduler/types.test.ts (100% passing)
 
-- [ ] **10.2 Implement Job Management**
+- [x] **10.2 Implement Job Management**
   - Create job CRUD operations
   - Add job validation
   - Implement job listing
@@ -403,8 +406,11 @@ tasks that build incrementally toward a fully functional system.
   - Write comprehensive unit tests co-located with job implementation
   - **Deliverable**: Job management API with co-located tests
   - **Success Criteria**: Jobs can be created/modified and all tests pass
+  - **Status**: ✅ Complete - Full CRUD with pagination, state management, and duplicate detection
+  - **Implementation**: src/services/scheduler/repository.ts, service.ts, handlers.ts
+  - **Tests**: repository.test.ts, service.test.ts, handlers.test.ts (all passing)
 
-- [ ] **10.3 Build Cron Engine**
+- [x] **10.3 Build Cron Engine**
   - Integrate cron-parser
   - Create schedule calculator
   - Add timezone support
@@ -412,16 +418,23 @@ tasks that build incrementally toward a fully functional system.
   - Write comprehensive unit tests co-located with cron engine implementation
   - **Deliverable**: Cron scheduling engine with co-located tests
   - **Success Criteria**: Accurate schedule calculation and all tests pass
+  - **Status**: ✅ Complete - cron-parser integration with timezone support and next-run computation
+  - **Implementation**: src/services/scheduler/cron-engine.ts
+  - **Tests**: src/services/scheduler/cron-engine.test.ts (100% passing)
 
-- [ ] **10.4 Create Execution Engine**
+- [x] **10.4 Create Execution Engine**
   - Build job queue processor
   - Implement HTTP target invocation
-  - Add Pub/Sub target support
+  - ~~Add Pub/Sub target support~~ (deferred until Pub/Sub service is implemented)
   - Create retry mechanism
   - Add execution logging
   - Write integration tests co-located with execution engine implementation
   - **Deliverable**: Job execution system with co-located tests
   - **Success Criteria**: Jobs execute on schedule and all tests pass
+  - **Status**: ✅ Complete - Timer-based execution with HTTP targets, exponential backoff retry
+  - **Implementation**: src/services/scheduler/execution-engine.ts
+  - **Tests**: src/services/scheduler/execution-engine.test.ts (100% passing)
+  - **Note**: Pub/Sub and App Engine target support deferred (TODO in code)
 
 - [ ] **10.5 Add Scheduler Discovery Document**
   - Generate Discovery Document
@@ -433,15 +446,18 @@ tasks that build incrementally toward a fully functional system.
 
 ### 11. Cloud Tasks Service
 
-- [ ] **11.1 Create Tasks Data Models**
+- [x] **11.1 Create Tasks Data Models**
   - Define Queue interface
   - Define Task interface
   - Add rate limit configuration
   - Create database schema
   - **Deliverable**: Tasks data layer
   - **Success Criteria**: Models match GCP spec
+  - **Status**: ✅ Complete - Full Queue/Task interfaces, state enums, DB schema, conversion utilities
+  - **Implementation**: src/services/tasks/types.ts with QueueRecord, TaskRecord, rate limit configs
+  - **Tests**: src/services/tasks/types.test.ts (100% passing)
 
-- [ ] **11.2 Implement Queue Management**
+- [x] **11.2 Implement Queue Management**
   - Create queue CRUD operations
   - Add queue state control
   - Implement rate limiting
@@ -449,8 +465,11 @@ tasks that build incrementally toward a fully functional system.
   - Write comprehensive unit tests co-located with queue implementation
   - **Deliverable**: Queue management API with co-located tests
   - **Success Criteria**: Queues can be managed and all tests pass
+  - **Status**: ✅ Complete - Full CRUD with state control, rate limiting, purge support
+  - **Implementation**: src/services/tasks/queue-repository.ts, queue-service.ts, queue-handlers.ts
+  - **Tests**: queue-repository.test.ts, queue-service.test.ts, queue-handlers.test.ts (all passing)
 
-- [ ] **11.3 Build Task Management**
+- [x] **11.3 Build Task Management**
   - Create task creation API
   - Add task scheduling
   - Implement deduplication
@@ -458,8 +477,11 @@ tasks that build incrementally toward a fully functional system.
   - Write comprehensive unit tests co-located with task implementation
   - **Deliverable**: Task management system with co-located tests
   - **Success Criteria**: Tasks can be created/scheduled and all tests pass
+  - **Status**: ✅ Complete - Full task CRUD with scheduling, dedup, bulk operations
+  - **Implementation**: src/services/tasks/task-repository.ts, task-service.ts, task-handlers.ts
+  - **Tests**: task-repository.test.ts, task-service.test.ts, task-handlers.test.ts (all passing)
 
-- [ ] **11.4 Create Dispatch Engine**
+- [x] **11.4 Create Dispatch Engine**
   - Build token bucket rate limiter
   - Implement task selection
   - Add HTTP request execution
@@ -468,6 +490,9 @@ tasks that build incrementally toward a fully functional system.
   - Write integration tests co-located with dispatch engine implementation
   - **Deliverable**: Task dispatch system with co-located tests
   - **Success Criteria**: Tasks execute with rate limits and all tests pass
+  - **Status**: ✅ Complete - Token bucket rate limiting, HTTP execution, retry with backoff, tombstoning
+  - **Implementation**: src/services/tasks/dispatch-engine.ts, token-bucket.ts
+  - **Tests**: dispatch-engine.test.ts, token-bucket.test.ts (all passing)
 
 - [ ] **11.5 Add Tasks Discovery Document**
   - Generate Discovery Document
@@ -616,21 +641,26 @@ tasks that build incrementally toward a fully functional system.
 
 ### 15. Docker Containerization
 
-- [ ] **15.1 Create Multi-Stage Dockerfile**
+- [x] **15.1 Create Multi-Stage Dockerfile**
   - Set up builder stage
   - Create production stage
   - Optimize image size
   - Add security hardening
   - **Deliverable**: Optimized Dockerfile
   - **Success Criteria**: Image under 100MB
+  - **Status**: ✅ Complete - 3-stage build (base → install → final) with oven/bun:1.3.4-slim
+  - **Implementation**: Dockerfile with production-only deps, health check, SQLite persistence
+  - **Features**: Multi-arch support (amd64/arm64) via CI workflow
 
-- [ ] **15.2 Configure Container Settings**
+- [x] **15.2 Configure Container Settings**
   - Set up environment variables
   - Configure volumes
   - Add health checks
   - Create startup script
   - **Deliverable**: Production-ready container
   - **Success Criteria**: Container self-sufficient
+  - **Status**: ✅ Complete - Environment config via Zod schema, health check via healthcheck.ts, /app/data persistence
+  - **Implementation**: Dockerfile HEALTHCHECK directive, src/healthcheck.ts, config system for env vars
 
 - [ ] **15.3 Create Docker Compose Configuration**
   - Define service configuration
@@ -676,21 +706,27 @@ tasks that build incrementally toward a fully functional system.
 
 ### 17. Release Preparation
 
-- [ ] **17.1 Create CI/CD Pipeline**
+- [x] **17.1 Create CI/CD Pipeline**
   - Set up automated testing
   - Add Docker image building
   - Configure release automation
   - Add security scanning
   - **Deliverable**: Automated pipeline
   - **Success Criteria**: Releases are automated
+  - **Status**: ✅ Complete - Full CI/CD with automated testing, Docker builds, and release automation
+  - **Implementation**: .github/workflows/ci.yml (lint, format, test, build, Docker), .github/workflows/release.yml (release-please, GHCR)
+  - **Features**: 80% coverage enforcement, multi-arch Docker builds, semantic versioning
 
-- [ ] **17.2 Prepare Release Artifacts**
+- [x] **17.2 Prepare Release Artifacts**
   - Tag version in Git
   - Build release binaries
   - Create release notes
   - Generate changelog
   - **Deliverable**: Release artifacts
   - **Success Criteria**: Ready for distribution
+  - **Status**: ✅ Complete - release-please handles versioning, tagging, changelog, and release notes
+  - **Implementation**: release-please-config.json, .release-please-manifest.json
+  - **Features**: Conventional commit parsing, automated changelog, semantic version tags
 
 - [ ] **17.3 Set Up Distribution**
   - Publish to Docker Hub
@@ -819,9 +855,10 @@ Each task is considered complete when:
 
 ### Status
 
-- **Current Phase**: Planning Complete
-- **Next Action**: Begin Phase 1 Implementation
-- **Dependencies**: Approved REQUIREMENTS.md and DESIGN.md
+- **Current Phase**: Phase 3 (Service Implementation) — In Progress
+- **Completed**: Phase 1 (Foundation), Phase 1.5 (Test Migration), Phase 2 (Core Framework), Scheduler (10.1-10.4), Tasks (11.1-11.4), Dockerfile (15.1-15.2), CI/CD (17.1-17.2)
+- **Next Action**: Implement Pub/Sub service (9.1-9.5), then Secrets Manager (12.1-12.5)
+- **Remaining**: Pub/Sub, Secrets Manager, Discovery Documents (10.5, 11.5), Task TTL (11.6), Knip cleanup (12.6), Integration/E2E tests, Docker Compose, Documentation, Distribution
 
 ### References
 
