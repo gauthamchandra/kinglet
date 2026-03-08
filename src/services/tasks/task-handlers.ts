@@ -52,18 +52,37 @@ export class TaskHandlers {
         handler: (req, ctx) => this.handleDeleteTask(req, ctx),
       },
       {
-        id: 'tasks.tasks.run',
+        id: 'tasks.tasks.action',
         method: 'POST',
-        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId:run',
-        handler: (req, ctx) => this.handleRunTask(req, ctx),
-      },
-      {
-        id: 'tasks.tasks.buffer',
-        method: 'POST',
-        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId:buffer',
-        handler: (req, ctx) => this.handleBufferTask(req, ctx),
+        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskAction',
+        handler: (req, ctx) => this.routeTaskAction(req, ctx),
       },
     ];
+  }
+
+  private routeTaskAction(
+    req: RouteRequest,
+    ctx: RouteContext
+  ): RouteResponse | Promise<RouteResponse> {
+    const { taskAction } = req.params;
+    const colonIdx = taskAction?.lastIndexOf(':') ?? -1;
+
+    if (colonIdx > 0 && taskAction) {
+      const taskId = taskAction.substring(0, colonIdx);
+      const verb = taskAction.substring(colonIdx + 1);
+
+      req.params.taskId = taskId;
+
+      if (verb === 'run') {
+        return this.handleRunTask(req, ctx);
+      }
+
+      if (verb === 'buffer') {
+        return this.handleBufferTask(req, ctx);
+      }
+    }
+
+    return this.responseUtils.badRequest(`Unknown task action: ${taskAction}`);
   }
 
   private async handleCreateTask(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {

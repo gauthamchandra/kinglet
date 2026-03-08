@@ -62,10 +62,10 @@ describe('TaskHandlers', () => {
   });
 
   describe('getRoutes', () => {
-    test('should return 6 route definitions', () => {
+    test('should return 5 route definitions', () => {
       const routes = handlers.getRoutes();
 
-      expect(routes.length).toBe(6);
+      expect(routes.length).toBe(5);
     });
 
     test('should use /v2/ prefix for all routes', () => {
@@ -84,8 +84,7 @@ describe('TaskHandlers', () => {
       expect(ids).toContain('tasks.tasks.get');
       expect(ids).toContain('tasks.tasks.list');
       expect(ids).toContain('tasks.tasks.delete');
-      expect(ids).toContain('tasks.tasks.run');
-      expect(ids).toContain('tasks.tasks.buffer');
+      expect(ids).toContain('tasks.tasks.action');
     });
   });
 
@@ -280,10 +279,10 @@ describe('TaskHandlers', () => {
       });
 
       const routes = handlers.getRoutes();
-      const runRoute = routes.find(r => r.id === 'tasks.tasks.run');
+      const runRoute = routes.find(r => r.id === 'tasks.tasks.action');
 
       const req = makeRouteRequest({
-        params: { project: 'p', location: 'l', queueId: 'q', taskId: 't1' },
+        params: { project: 'p', location: 'l', queueId: 'q', taskAction: 't1:run' },
       });
 
       const res = await runRoute?.handler(req, ctx);
