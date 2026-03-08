@@ -4,8 +4,8 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { tasksQueuesTableSchema, TASKS_QUEUES_TABLE, QueueState } from './types.ts';
 import type { QueueRecord } from './types.ts';
+import { QueueState, TASKS_QUEUES_TABLE, tasksQueuesTableSchema } from './types.ts';
 
 export interface ListQueuesResult {
   queues: QueueRecord[];

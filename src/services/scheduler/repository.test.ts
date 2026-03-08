@@ -2,12 +2,12 @@
  * Tests for JobRepository
  */
 
-import { test, expect, describe, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
-import { JobRepository } from './repository.ts';
-import { DEFAULT_RETRY_CONFIG, JobState } from './types.ts';
-import type { JobRecord } from './types.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { JobRepository } from './repository.ts';
+import type { JobRecord } from './types.ts';
+import { DEFAULT_RETRY_CONFIG, JobState } from './types.ts';
 
 function makeJobData(
   overrides: Partial<Omit<JobRecord, keyof BaseRecord>> = {}

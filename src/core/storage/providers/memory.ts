@@ -6,7 +6,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { NotFoundError, TransactionError, ValidationError } from '../types.js';
+import type { LRUCacheConfig } from '../cache/lru-cache.js';
+import { LRUCache } from '../cache/lru-cache.js';
 import type {
   BaseRecord,
   CacheOperations,
@@ -20,8 +21,7 @@ import type {
   Transaction,
   TransactionOptions,
 } from '../types.js';
-import { LRUCache } from '../cache/lru-cache.js';
-import type { LRUCacheConfig } from '../cache/lru-cache.js';
+import { NotFoundError, TransactionError, ValidationError } from '../types.js';
 
 /**
  * In-memory table structure
@@ -36,12 +36,11 @@ interface MemoryTable {
  */
 class MemoryTransaction implements Transaction {
   private isActiveFlag = true;
-  private operations: Array<() => void> = [];
   private rollbackOperations: Array<() => void> = [];
 
   constructor(
     private provider: MemoryStorageProvider,
-    private options: TransactionOptions = {}
+    _options: TransactionOptions = {}
   ) {}
 
   async execute<T>(fn: (tx: MemoryStorageProvider) => Promise<T>): Promise<T> {
@@ -106,11 +105,8 @@ class MemoryTransaction implements Transaction {
 export class MemoryStorageProvider implements StorageProvider {
   private tables = new Map<string, MemoryTable>();
   private cache: LRUCache | null = null;
-  private config: StorageConfig | null = null;
 
   async initialize(config: StorageConfig): Promise<void> {
-    this.config = config;
-
     // Initialize cache if configured
     if (config.cache) {
       const cacheConfig: LRUCacheConfig = {

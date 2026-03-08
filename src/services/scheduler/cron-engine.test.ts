@@ -2,7 +2,7 @@
  * Tests for CronEngine
  */
 
-import { test, expect, describe } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { CronEngine } from './cron-engine.ts';
 
 describe('CronEngine', () => {

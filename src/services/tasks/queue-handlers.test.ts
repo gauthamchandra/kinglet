@@ -2,13 +2,13 @@
  * Tests for QueueHandlers
  */
 
-import { test, expect, describe, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
+import type { RouteContext, RouteRequest } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { Logger } from '@/shared/utils/logger.ts';
+import { QueueHandlers } from './queue-handlers.ts';
 import { QueueRepository } from './queue-repository.ts';
 import { QueueService } from './queue-service.ts';
-import { QueueHandlers } from './queue-handlers.ts';
-import { Logger } from '@/shared/utils/logger.ts';
-import type { RouteRequest, RouteContext } from '@/core/gateway/request-router.ts';
 
 function makeRouteRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
   return {

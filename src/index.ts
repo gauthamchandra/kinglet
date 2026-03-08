@@ -4,13 +4,13 @@
  */
 
 import type { Server } from 'bun';
-import { Logger } from '@/shared/utils/logger.ts';
 import { getConfig } from '@/config/loader.ts';
-import { StorageManager } from '@/core/storage/manager.ts';
-import { RequestRouter } from '@/core/gateway/request-router.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
+import { RequestRouter } from '@/core/gateway/request-router.ts';
+import { StorageManager } from '@/core/storage/manager.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
+import { Logger } from '@/shared/utils/logger.ts';
 
 const logger = new Logger('Main');
 

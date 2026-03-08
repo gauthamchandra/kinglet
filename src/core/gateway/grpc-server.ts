@@ -5,8 +5,8 @@
 
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import type { Logger } from '@/shared/utils/logger.ts';
 import type { Config } from '@/config/schema.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 
 export interface GrpcServiceDefinition {
   name: string;
@@ -187,7 +187,7 @@ export class GrpcServer {
    */
   private setupHealthCheckService(): void {
     const _healthService: HealthCheckService = {
-      check: (call, callback) => {
+      check: (_call, callback) => {
         // Simple health check - always return SERVING
         const response = {
           status: 'SERVING', // or 'NOT_SERVING', 'UNKNOWN', 'SERVICE_UNKNOWN'

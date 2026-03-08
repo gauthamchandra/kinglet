@@ -2,18 +2,18 @@
  * Tests for configuration loader
  */
 
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
-import { writeFileSync, unlinkSync, existsSync } from 'fs';
-import { join } from 'path';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   ConfigLoader,
-  EnvConfigSource,
-  JsonConfigSource,
   createStandardLoader,
+  EnvConfigSource,
   getConfig,
-  resetConfig,
-  loadConfigFromFile,
+  JsonConfigSource,
   loadConfigFromEnv,
+  loadConfigFromFile,
+  resetConfig,
 } from '@/config/loader.ts';
 
 describe('Configuration Loader', () => {

@@ -4,8 +4,8 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { schedulerJobsTableSchema, SCHEDULER_JOBS_TABLE } from './types.ts';
 import type { JobRecord } from './types.ts';
+import { SCHEDULER_JOBS_TABLE, schedulerJobsTableSchema } from './types.ts';
 
 export interface ListJobsResult {
   jobs: JobRecord[];

@@ -7,15 +7,15 @@
  */
 
 import type { Logger } from '@/shared/utils/logger.ts';
-import type { JobRepository } from './repository.ts';
 import type { CronEngine } from './cron-engine.ts';
+import type { JobRepository } from './repository.ts';
+import type { HttpTarget, JobRecord, RetryConfig } from './types.ts';
 import {
-  parseDurationSeconds,
-  HttpTargetSchema,
-  RetryConfigSchema,
   DEFAULT_RETRY_CONFIG,
+  HttpTargetSchema,
+  parseDurationSeconds,
+  RetryConfigSchema,
 } from './types.ts';
-import type { HttpTarget, RetryConfig, JobRecord } from './types.ts';
 
 type HttpClient = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -149,7 +149,7 @@ export class ExecutionEngine {
       }
 
       // Exponential backoff: minBackoff * 2^attempt, capped at maxBackoff
-      const backoffMs = Math.min(minBackoffMs * Math.pow(2, attempt), maxBackoffMs);
+      const backoffMs = Math.min(minBackoffMs * 2 ** attempt, maxBackoffMs);
 
       this.logger.info(
         `Job ${job.name} retrying in ${backoffMs}ms (attempt ${attempt + 2}/${maxAttempts})`

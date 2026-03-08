@@ -5,7 +5,16 @@
  * for storage operations and supports hybrid storage (SQLite + Cache) strategies.
  */
 
-import { ValidationError } from './types.js';
+import type {
+  IStorageEventEmitter,
+  IStorageManager,
+  StorageEvent,
+  StorageEventData,
+  StorageEventListener,
+  StorageStats,
+} from './interfaces.js';
+import { MemoryStorageProvider } from './providers/memory.js';
+import { SQLiteStorageProvider } from './providers/sqlite.js';
 import type {
   BaseRecord,
   CacheOperations,
@@ -18,15 +27,7 @@ import type {
   TableSchema,
   TransactionOptions,
 } from './types.js';
-import type { IStorageManager, StorageStats } from './interfaces.js';
-import type {
-  IStorageEventEmitter,
-  StorageEvent,
-  StorageEventData,
-  StorageEventListener,
-} from './interfaces.js';
-import { SQLiteStorageProvider } from './providers/sqlite.js';
-import { MemoryStorageProvider } from './providers/memory.js';
+import { ValidationError } from './types.js';
 
 /**
  * Storage Manager - Main implementation

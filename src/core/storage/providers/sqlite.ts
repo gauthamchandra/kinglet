@@ -4,16 +4,9 @@
  * This module provides a SQLite-based storage implementation using Bun's native SQLite support.
  */
 
-import { Database } from 'bun:sqlite';
 import type { SQLQueryBindings } from 'bun:sqlite';
+import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
-import {
-  ConnectionError,
-  ConflictError,
-  StorageError,
-  TransactionError,
-  ValidationError,
-} from '../types.js';
 import type {
   BaseRecord,
   CacheOperations,
@@ -28,18 +21,24 @@ import type {
   Transaction,
   TransactionOptions,
 } from '../types.js';
+import {
+  ConflictError,
+  ConnectionError,
+  StorageError,
+  TransactionError,
+  ValidationError,
+} from '../types.js';
 
 /**
  * SQLite-specific transaction implementation
  */
 class SQLiteTransaction implements Transaction {
   private isActiveFlag = false;
-  private operations: Array<() => void> = [];
 
   constructor(
     private db: Database,
     private provider: SQLiteStorageProvider,
-    private options: TransactionOptions = {}
+    _options: TransactionOptions = {}
   ) {}
 
   begin(): void {
@@ -101,11 +100,8 @@ class SQLiteTransaction implements Transaction {
  */
 export class SQLiteStorageProvider implements StorageProvider {
   private db: Database | null = null;
-  private config: StorageConfig | null = null;
 
   async initialize(config: StorageConfig): Promise<void> {
-    this.config = config;
-
     try {
       // Initialize SQLite database
       const dbPath = config.database?.path ?? ':memory:';

@@ -7,14 +7,14 @@
 
 import { z } from 'zod';
 import type { Logger } from '@/shared/utils/logger.ts';
-import {
+import type {
   DiscoveryDocumentGenerator,
-  type ServiceInfo,
-  type ServiceMethod,
-  type ServiceSchema,
-  type ServiceResource,
+  ServiceInfo,
+  ServiceMethod,
+  ServiceResource,
+  ServiceSchema,
 } from './discovery-document-generator.ts';
-import { ServiceRegistry } from './service-registry.ts';
+import type { ServiceRegistry } from './service-registry.ts';
 
 // Discovery API request/response schemas
 export const DiscoveryQuerySchema = z.object({
@@ -590,7 +590,7 @@ export class DiscoveryEndpoints {
             }
           }
         }
-      } else if (Object.prototype.hasOwnProperty.call(data, field)) {
+      } else if (Object.hasOwn(data, field)) {
         result[field] = data[field];
       }
     }
