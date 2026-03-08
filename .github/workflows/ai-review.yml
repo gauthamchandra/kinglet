@@ -43,6 +43,7 @@ jobs:
         with:
           model: 'mistral-ai/Codestral-2501'
           prompt-file: '.github/prompts/router.prompt.yml'
+          max-tokens: 256
           file_input: |
             diff: /tmp/pr-diff-router.txt
           token: ${{ github.token }}
@@ -84,6 +85,7 @@ jobs:
           prompt-file: '.github/prompts/security-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
+          max-tokens: 4096
           toolsets: 'repos'
           token: ${{ github.token }}
 
@@ -129,6 +131,7 @@ jobs:
           prompt-file: '.github/prompts/bun-compliance-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
+          max-tokens: 4096
           toolsets: 'repos'
           token: ${{ github.token }}
 
@@ -174,6 +177,7 @@ jobs:
           prompt-file: '.github/prompts/architecture-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
+          max-tokens: 4096
           toolsets: 'repos'
           token: ${{ github.token }}
 
@@ -219,6 +223,7 @@ jobs:
           prompt-file: '.github/prompts/test-quality-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
+          max-tokens: 4096
           toolsets: 'repos'
           token: ${{ github.token }}
 
@@ -263,6 +268,7 @@ jobs:
           prompt-file: '.github/prompts/general-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
+          max-tokens: 4096
           toolsets: 'repos'
           token: ${{ github.token }}
 
@@ -346,6 +352,7 @@ jobs:
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
             findings: /tmp/aggregated-findings.json
+          max-tokens: 4096
           toolsets: 'repos'
           token: ${{ github.token }}
 
