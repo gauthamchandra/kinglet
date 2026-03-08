@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "PR number to review (for manual testing)"
+        description: 'PR number to review (for manual testing)'
         required: true
         type: number
 
@@ -34,8 +34,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
-      - name: Annotate diff with line numbers
-        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+      - name: Truncate diff for router
+        run: head -200 /tmp/pr-diff.txt > /tmp/pr-diff-router.txt
 
       - name: Classify diff with LLM router
         id: classify
@@ -44,7 +44,7 @@ jobs:
           model: 'deepseek/DeepSeek-R1-0528'
           prompt-file: '.github/prompts/router.prompt.yml'
           file_input: |
-            diff: /tmp/pr-diff-annotated.txt
+            diff: /tmp/pr-diff-router.txt
           token: ${{ github.token }}
 
       - name: Parse router output
