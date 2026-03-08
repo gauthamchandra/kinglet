@@ -2,7 +2,13 @@ name: AI Code Review
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to review (for manual testing)"
+        required: true
+        type: number
 
 permissions:
   contents: read
@@ -12,7 +18,7 @@ permissions:
 jobs:
   route:
     name: Route prompt experts
-    if: ${{ github.event.sender.type != 'Bot' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.sender.type != 'Bot' }}
     runs-on: ubuntu-latest
     outputs:
       security: ${{ steps.router.outputs.security }}
@@ -26,7 +32,7 @@ jobs:
       - name: Get PR diff
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+        run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
       - name: Annotate diff with line numbers
         run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
@@ -61,7 +67,7 @@ jobs:
       - name: Get PR diff
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+        run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
       - name: Annotate diff with line numbers
         run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
@@ -102,7 +108,7 @@ jobs:
       - name: Get PR diff
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+        run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
       - name: Annotate diff with line numbers
         run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
@@ -143,7 +149,7 @@ jobs:
       - name: Get PR diff
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+        run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
       - name: Annotate diff with line numbers
         run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
@@ -184,7 +190,7 @@ jobs:
       - name: Get PR diff
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+        run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
       - name: Annotate diff with line numbers
         run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
@@ -224,7 +230,7 @@ jobs:
       - name: Get PR diff
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+        run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
       - name: Annotate diff with line numbers
         run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
@@ -296,7 +302,7 @@ jobs:
       - name: Get PR diff
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+        run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
       - name: Annotate diff with line numbers
         run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
@@ -371,12 +377,12 @@ jobs:
             /tmp/review.md \
             /tmp/executive-summary.md \
             "${{ github.repository }}" \
-            "${{ github.event.pull_request.head.sha }}"
+            "${{ github.event.pull_request.head.sha || '' }}"
 
       - name: Post PR comment
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr comment ${{ github.event.pull_request.number }} \
+          gh pr comment ${{ github.event.pull_request.number || github.event.inputs.pr_number }} \
             --repo "${{ github.repository }}" \
             --body-file /tmp/review.md
