@@ -641,8 +641,16 @@ export class SQLiteStorageProvider implements StorageProvider {
 
     switch (operator) {
       case 'eq':
+        if (value === null || value === undefined) {
+          return { clause: `${field} IS NULL` };
+        }
+
         return { clause: `${field} = ?`, param: this.serializeValue(value) };
       case 'ne':
+        if (value === null || value === undefined) {
+          return { clause: `${field} IS NOT NULL` };
+        }
+
         return { clause: `${field} != ?`, param: this.serializeValue(value) };
       case 'gt':
         return { clause: `${field} > ?`, param: this.serializeValue(value) };

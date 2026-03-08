@@ -4,7 +4,7 @@
 
 This document provides a comprehensive task breakdown for implementing the
 LocalStack GCP emulator based on the approved REQUIREMENTS.md and DESIGN.md
-documents. The implementation is organized into 5 phases with discrete, testable
+documents. The implementation is organized into 6 phases with discrete, testable
 tasks that build incrementally toward a fully functional system.
 
 ## Implementation Phases
@@ -640,9 +640,9 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Cloud Storage Discovery integration
   - **Success Criteria**: Client library connects and basic operations work unmodified
 
-### 12.6 Clean Up Knip Configuration
+### 12.6 Knip Configuration Cleanup
 
-- [ ] **12.6 Remove Knip Ignore Clauses**
+- [ ] **12.6 Clean Up Knip Configuration**
   - Review `ignoreFiles` and `ignoreIssues` in `knip.json`
   - Remove `ignoreFiles` for barrel `index.ts` files once they are imported
   - Remove `ignoreIssues` for proto-types, shared types, and storage interfaces
@@ -653,6 +653,112 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Minimal knip.json with no unnecessary suppressions
   - **Success Criteria**: `bun run knip` passes clean with no ignore overrides
     for Phase 3 code
+
+### 13. Cloud Workflows Service
+
+- [ ] **13.1 Create Workflows Data Models & Types**
+  - Define TypeScript types: `Workflow`, `StateError`, `Operation`,
+    `OperationMetadata`, `Status`
+  - Define response types: `ListWorkflowsResponse`,
+    `ListWorkflowRevisionsResponse`, `ListOperationsResponse`
+  - Define Zod validation schemas for create/update requests
+  - Add resource name helpers (`buildWorkflowName`, `parseWorkflowName`)
+  - Add `revisionId` generation logic (format: `000001-a4d` — zero-padded
+    ordinal + hyphen + 3 hex chars)
+  - Write co-located unit tests for types, schemas, and helpers
+  - **Deliverable**: Workflows type system with validation
+  - **Success Criteria**: Types match GCP Workflows v1 spec, all schemas
+    validate correctly
+  - **Pattern**: Follow `src/services/scheduler/types.ts` and
+    `src/services/tasks/types.ts`
+
+- [ ] **13.2 Implement Workflows Storage & Repository**
+  - Create SQLite schema for workflows with revision tracking (store full
+    snapshots per revision, not overwrite)
+  - Implement `WorkflowRepository` with CRUD operations
+  - Support querying by resource name, project/location, and revisionId
+  - Implement pagination in list queries (pageSize/pageToken)
+  - Write co-located unit tests for repository operations
+  - **Deliverable**: Persistent workflow storage with revision history
+  - **Success Criteria**: All CRUD operations work, revisions are preserved,
+    pagination returns correct pages
+  - **Pattern**: Follow `src/services/scheduler/repository.ts`
+
+- [ ] **13.3 Implement Long-Running Operations (LRO) Support**
+  - Create an operations store within the workflows service to track
+    create/delete/patch operations
+  - Operations complete synchronously for local emulation but return proper
+    `Operation` response envelopes with `done: true`
+  - Store operations with `OperationMetadata` (createTime, endTime, target,
+    verb, apiVersion)
+  - Support list, get, and delete for stored operations
+  - Write co-located unit tests for LRO store
+  - **Deliverable**: Operation tracking for async-style API responses
+  - **Success Criteria**: Create/delete/patch return valid Operation objects,
+    operations can be queried after creation
+  - **Note**: Build as a service-local module. Extract to `src/core/` later if
+    other services need LRO
+
+- [ ] **13.4 Implement Workflow CRUD Handlers**
+  - `POST v1/{+parent}/workflows` — create workflow, return Operation
+  - `GET v1/{+name}` — get workflow (with optional `revisionId` query param)
+  - `GET v1/{+parent}/workflows` — list workflows (pagination, filter, orderBy)
+  - `DELETE v1/{+name}` — delete workflow and all revisions, return Operation
+  - `PATCH v1/{+name}` — update workflow (with `updateMask`), create new
+    revision when `sourceContents` or `serviceAccount` change, return Operation
+  - Create `WorkflowService` class with business logic
+  - Create `WorkflowHandlers` class with `getRoutes()` returning
+    `RouteDefinition[]`
+  - Write co-located unit tests for service and handlers
+  - **Deliverable**: Core Workflows API (5 endpoints)
+  - **Success Criteria**: All CRUD operations work end-to-end with correct
+    GCP-compatible responses
+  - **Pattern**: Follow `src/services/scheduler/handlers.ts` and
+    `src/services/scheduler/service.ts`
+  - **Depends on**: 13.1, 13.2, 13.3
+
+- [ ] **13.5 Implement Workflow Revisions**
+  - `GET v1/{+name}:listRevisions` — list revisions in reverse chronological
+    order with pagination
+  - Ensure `patch` creates new revisions when `sourceContents` or
+    `serviceAccount` change
+  - Each revision stores full Workflow snapshot with unique `revisionId` and
+    `revisionCreateTime`
+  - Write co-located unit tests for revision listing and creation
+  - **Deliverable**: Workflow revision history endpoint
+  - **Success Criteria**: Revisions are created on relevant updates, listed in
+    reverse chronological order with correct pagination
+  - **Depends on**: 13.2, 13.4
+
+- [ ] **13.6 Implement Operations Endpoints**
+  - `GET v1/{+name}/operations` — list operations (pagination, filter)
+  - `GET v1/{+name}` — get single operation by name
+  - `DELETE v1/{+name}` — delete operation record
+  - Write co-located unit tests for operations endpoints
+  - **Deliverable**: Operations management API (3 endpoints)
+  - **Success Criteria**: Operations created by CRUD handlers are queryable and
+    deletable
+  - **Depends on**: 13.3
+
+- [ ] **13.7 Implement Location Endpoints**
+  - `GET v1/{+name}/locations` — list locations (hardcoded GCP locations,
+    pagination)
+  - `GET v1/{+name}` — get single location
+  - Check if shared location handling exists in `src/core/` first; if not,
+    implement within the workflows service
+  - Write co-located unit tests for location endpoints
+  - **Deliverable**: Location discovery API (2 endpoints)
+  - **Success Criteria**: Returns valid GCP location data
+  - **Lowest priority** — standard infrastructure endpoints
+
+- [ ] **13.8 Add Workflows Discovery Document**
+  - Generate Discovery Document for Cloud Workflows v1
+  - Register with Discovery API via service registry
+  - Validate against GCP spec
+  - Test with client library
+  - **Deliverable**: Workflows Discovery integration
+  - **Success Criteria**: Client library connects and recognizes API
+  - **Pattern**: Follow existing Discovery integration pattern
 
 ## Phase 4: Integration & Testing
 
@@ -832,9 +938,9 @@ tasks that build incrementally toward a fully functional system.
 1. Complete all Phase 1 tasks before moving to Phase 1.5
 2. Complete test structure migration (Phase 1.5) before Phase 2
 3. Core Framework (Phase 2) must be complete before services
-4. Implement services in order: Pub/Sub → Scheduler → Tasks → Secrets → Cloud Storage
+4. Implement services in order: Pub/Sub → Scheduler → Tasks → Secrets → Cloud Storage → Workflows
 5. Co-located testing should be implemented alongside each component
-6. E2E testing (Phase 5) is comprehensive validation after all services complete
+6. E2E testing (Phase 4) is comprehensive validation after all services complete
 7. Documentation can be written in parallel with development
 
 ### Task Dependencies
@@ -951,8 +1057,8 @@ Each task is considered complete when:
 
 - **Current Phase**: Phase 3 (Service Implementation) — In Progress
 - **Completed**: Phase 1 (Foundation), Phase 1.5 (Test Migration), Phase 2 (Core Framework), Scheduler (10.1-10.4), Tasks (11.1-11.4), Dockerfile (16.1-16.2), CI/CD (18.1-18.2)
-- **Next Action**: Implement Pub/Sub service (9.1-9.5), then Secrets Manager (12.1-12.5), then Cloud Storage (13.1-13.9)
-- **Remaining**: Pub/Sub, Secrets Manager, Cloud Storage (13.1-13.9), Discovery Documents (10.5, 11.5), Task TTL (11.6), Knip cleanup (12.6), Integration/E2E tests, Docker Compose, Documentation, Distribution
+- **Next Action**: Implement Pub/Sub service (9.1-9.5), then Secrets Manager (12.1-12.5), then Cloud Storage (13.1-13.9), then Cloud Workflows
+- **Remaining**: Pub/Sub, Secrets Manager, Cloud Storage (13.1-13.9), Cloud Workflows, Discovery Documents (10.5, 11.5), Task TTL (11.6), Knip cleanup (12.6), Integration/E2E tests, Docker Compose, Documentation, Distribution
 
 ### References
 

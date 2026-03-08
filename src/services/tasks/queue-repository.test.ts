@@ -28,6 +28,7 @@ function makeQueueData(
     tombstoneTtl: DEFAULT_TOMBSTONE_TTL,
     stackdriverLoggingConfig: null,
     httpTarget: null,
+    appEngineRoutingOverride: null,
     ...overrides,
   };
 }

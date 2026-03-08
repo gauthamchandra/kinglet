@@ -18,6 +18,7 @@
         "@google-cloud/scheduler": "^5.3.1",
         "@google-cloud/storage": "^7.19.0",
         "@google-cloud/tasks": "^6.2.1",
+        "@google-cloud/workflows": "4.3.0",
         "@types/bun": "latest",
         "@types/node": "^24.5.2",
         "husky": "^9.1.7",
@@ -103,6 +104,8 @@
     "@google-cloud/storage": ["@google-cloud/storage@7.19.0", "", { "dependencies": { "@google-cloud/paginator": "^5.0.0", "@google-cloud/projectify": "^4.0.0", "@google-cloud/promisify": "<4.1.0", "abort-controller": "^3.0.0", "async-retry": "^1.3.3", "duplexify": "^4.1.3", "fast-xml-parser": "^5.3.4", "gaxios": "^6.0.2", "google-auth-library": "^9.6.3", "html-entities": "^2.5.2", "mime": "^3.0.0", "p-limit": "^3.0.1", "retry-request": "^7.0.0", "teeny-request": "^9.0.0", "uuid": "^8.0.0" } }, "sha512-n2FjE7NAOYyshogdc7KQOl/VZb4sneqPjWouSyia9CMDdMhRX5+RIbqalNmC7LOLzuLAN89VlF2HvG8na9G+zQ=="],
 
     "@google-cloud/tasks": ["@google-cloud/tasks@6.2.1", "", { "dependencies": { "google-gax": "^5.0.0" } }, "sha512-Y21jNAdaUwZvYQijJSE9E27NA87c/Wl9fZxNDGx6WsWFFGEBmJmc1zg2fXLXTW0kPvKIxHQC+IcKa9SNgvIEsQ=="],
+
+    "@google-cloud/workflows": ["@google-cloud/workflows@4.3.0", "", { "dependencies": { "google-gax": "^5.0.1-rc.0" } }, "sha512-cRJgMafu0VGyU3NXxfwm9fBU/bjWaRgdTsEyP5i7wU7uiPBwUHwZAnrhrZBpfPmV+DLLz4rlzgwUqMsZ4LcHAA=="],
 
     "@grpc/grpc-js": ["@grpc/grpc-js@1.14.0", "", { "dependencies": { "@grpc/proto-loader": "^0.8.0", "@js-sdsl/ordered-map": "^4.4.2" } }, "sha512-N8Jx6PaYzcTRNzirReJCtADVoq4z7+1KQ4E70jTg/koQiMoUSN1kbNjPOqpPbhMFhfU1/l7ixspPl8dNY+FoUg=="],
 

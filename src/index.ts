@@ -11,6 +11,7 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
+import { CloudWorkflowsService } from '@/services/workflows/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 
 const logger = new Logger('Main');
@@ -20,6 +21,7 @@ let storageManager: StorageManager | null = null;
 let schedulerService: SchedulerService | null = null;
 let tasksService: CloudTasksService | null = null;
 let cloudStorageService: CloudStorageService | null = null;
+let workflowsService: CloudWorkflowsService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -97,6 +99,17 @@ async function main(): Promise<void> {
       logger.info('Cloud Storage service enabled and started');
     }
 
+    if (config.services.workflows.enabled) {
+      workflowsService = new CloudWorkflowsService(storageManager, new Logger('Workflows'));
+      await workflowsService.initialize();
+
+      for (const route of workflowsService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      logger.info('Cloud Workflows service enabled');
+    }
+
     server = Bun.serve({
       port: config.server.httpPort,
       fetch: request => router.route(request),
@@ -136,6 +149,11 @@ async function shutdown(signal: string): Promise<void> {
   if (cloudStorageService) {
     await cloudStorageService.stop();
     logger.info('Cloud Storage service stopped');
+  }
+
+  if (workflowsService) {
+    await workflowsService.stop();
+    logger.info('Workflows service stopped');
   }
 
   if (storageManager) {

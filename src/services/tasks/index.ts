@@ -9,6 +9,7 @@ import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { DispatchEngine } from './dispatch-engine.ts';
+import { LocationHandlers } from './location-handlers.ts';
 import { QueueHandlers } from './queue-handlers.ts';
 import { QueueRepository } from './queue-repository.ts';
 import { QueueService } from './queue-service.ts';
@@ -25,6 +26,7 @@ export class CloudTasksService {
   private taskService: TaskService | null = null;
   private queueHandlers: QueueHandlers | null = null;
   private taskHandlers: TaskHandlers | null = null;
+  private locationHandlers: LocationHandlers | null = null;
   private dispatchEngine: DispatchEngine | null = null;
 
   constructor(storage: StorageManager, logger: Logger) {
@@ -71,16 +73,21 @@ export class CloudTasksService {
 
     this.queueHandlers = new QueueHandlers(this.queueService, this.logger);
     this.taskHandlers = new TaskHandlers(this.taskService, this.logger);
+    this.locationHandlers = new LocationHandlers(this.logger);
 
     this.logger.info('Cloud Tasks service initialized');
   }
 
   getRoutes(): RouteDefinition[] {
-    if (!this.queueHandlers || !this.taskHandlers) {
+    if (!this.queueHandlers || !this.taskHandlers || !this.locationHandlers) {
       throw new Error('CloudTasksService not initialized. Call initialize() first.');
     }
 
-    return [...this.queueHandlers.getRoutes(), ...this.taskHandlers.getRoutes()];
+    return [
+      ...this.locationHandlers.getRoutes(),
+      ...this.queueHandlers.getRoutes(),
+      ...this.taskHandlers.getRoutes(),
+    ];
   }
 
   start(pollIntervalMs?: number): void {

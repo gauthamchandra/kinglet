@@ -24,6 +24,7 @@ describe('Configuration Schema', () => {
           tasks: {},
           secrets: {},
           storage: {},
+          workflows: {},
         },
         logging: {},
       });
@@ -62,6 +63,7 @@ describe('Configuration Schema', () => {
           tasks: { enabled: true },
           secrets: { enabled: false },
           storage: { enabled: true },
+          workflows: { enabled: true },
         },
         logging: {
           level: 'debug',
@@ -207,6 +209,7 @@ describe('Configuration Schema', () => {
           tasks: { enabled: true },
           secrets: { enabled: true },
           storage: { enabled: true },
+          workflows: { enabled: true },
         },
         logging: { level: 'debug' },
       };
