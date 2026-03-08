@@ -2,10 +2,10 @@
  * Unit tests for gRPC Server implementation
  */
 
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as grpc from '@grpc/grpc-js';
-import { GrpcServer, type GrpcServiceDefinition } from './grpc-server.ts';
 import { Logger } from '@/shared/utils/logger.ts';
+import { GrpcServer, type GrpcServiceDefinition } from './grpc-server.ts';
 
 describe('GrpcServer', () => {
   let grpcServer: GrpcServer;

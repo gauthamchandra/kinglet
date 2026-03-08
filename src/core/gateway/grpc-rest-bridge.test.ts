@@ -2,17 +2,17 @@
  * Unit tests for gRPC-REST Transcoding Bridge
  */
 
-import { test, expect, describe, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import * as grpc from '@grpc/grpc-js';
+import { Logger } from '@/shared/utils/logger.ts';
+import type { TranscodingRequest } from './grpc-rest-bridge.ts';
 import {
-  GrpcRestBridge,
   createGcpTranscodingRules,
   createPubSubTranscodingRules,
+  GrpcRestBridge,
   type ServiceMetadata,
   type TranscodingRule,
 } from './grpc-rest-bridge.ts';
-import type { TranscodingRequest } from './grpc-rest-bridge.ts';
-import { Logger } from '@/shared/utils/logger.ts';
 
 describe('GrpcRestBridge', () => {
   let bridge: GrpcRestBridge;

@@ -2,7 +2,7 @@
  * Tests for the Logger utility
  */
 
-import { test, expect, describe } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { Logger } from '@/shared/utils/logger.ts';
 
 describe('Logger', () => {

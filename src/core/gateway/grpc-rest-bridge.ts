@@ -435,7 +435,7 @@ export class GrpcRestBridge {
  * Factory function to create common transcoding rules for GCP-like APIs
  */
 export function createGcpTranscodingRules(
-  serviceName: string,
+  _serviceName: string,
   resourceName: string,
   resourcePath: string
 ): Array<{

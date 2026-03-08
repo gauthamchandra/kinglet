@@ -2,7 +2,7 @@
  * Tests for QueueService
  */
 
-import { test, expect, describe, beforeEach, mock } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { QueueRepository } from './queue-repository.ts';
 import { QueueService, TasksError } from './queue-service.ts';

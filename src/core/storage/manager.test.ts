@@ -2,9 +2,9 @@
  * Storage Manager Tests
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from './manager';
-import type { StorageConfig, BaseRecord, QueryFilter } from './types';
+import type { BaseRecord, QueryFilter, StorageConfig } from './types';
 
 interface TestRecord extends BaseRecord {
   name: string;

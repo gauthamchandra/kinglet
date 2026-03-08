@@ -2,12 +2,12 @@
  * Service Registry Tests
  */
 
-import { describe, expect, test, beforeEach, afterEach, afterAll, mock } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createMockLogger } from '../../../test-utils/mock-logger.ts';
 import {
-  ServiceRegistry,
-  type ServiceDefinition,
   type RegistryConfig,
+  type ServiceDefinition,
+  ServiceRegistry,
 } from './service-registry.ts';
 
 // Mock logger

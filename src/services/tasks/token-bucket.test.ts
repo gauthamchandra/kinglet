@@ -2,9 +2,9 @@
  * Tests for TokenBucket rate limiter
  */
 
-import { test, expect, describe } from 'bun:test';
-import { TokenBucket } from './token-bucket.ts';
+import { describe, expect, test } from 'bun:test';
 import type { TokenBucketConfig } from './token-bucket.ts';
+import { TokenBucket } from './token-bucket.ts';
 
 describe('TokenBucket', () => {
   const defaultConfig: TokenBucketConfig = {

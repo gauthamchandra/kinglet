@@ -2,15 +2,15 @@
  * Request Router Tests
  */
 
-import { describe, expect, test, beforeEach, mock } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Logger } from '@/shared/utils/logger.ts';
 import {
-  RequestRouter,
   createRoute,
+  RequestRouter,
+  type RouteContext,
   type RouteDefinition,
   type RouteRequest,
   type RouteResponse,
-  type RouteContext,
 } from './request-router.ts';
 
 // Create a mock logger instance
@@ -109,11 +109,13 @@ describe('RequestRouter', () => {
         createRoute.patch('/test', simpleHandler, { id: 'patch-route' }),
       ];
 
-      routes.forEach(route => router.addRoute(route));
+      for (const route of routes) {
+        router.addRoute(route);
+      }
 
-      routes.forEach(route => {
+      for (const route of routes) {
         expect(router.getRoute(route.id)).toEqual(route);
-      });
+      }
     });
 
     test('should reject route with duplicate ID', () => {
@@ -209,7 +211,9 @@ describe('RequestRouter', () => {
         createRoute.get('/test2', simpleHandler, { id: 'route2' }),
       ];
 
-      routes.forEach(route => router.addRoute(route));
+      for (const route of routes) {
+        router.addRoute(route);
+      }
 
       router.clear();
 
@@ -680,7 +684,9 @@ describe('RequestRouter', () => {
         createRoute.post('/route2', simpleHandler, { id: 'route2' }),
       ];
 
-      routes.forEach(route => router.addRoute(route));
+      for (const route of routes) {
+        router.addRoute(route);
+      }
 
       const allRoutes = router.getAllRoutes();
 

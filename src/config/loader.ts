@@ -2,9 +2,9 @@
  * Configuration loader with multiple source support
  */
 
-import { existsSync } from 'fs';
-import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Config } from './schema.ts';
 import { mapEnvToConfig, validateConfig, validateEnv } from './schema.ts';
 

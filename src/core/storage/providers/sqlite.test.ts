@@ -2,9 +2,9 @@
  * SQLite Storage Provider Tests
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { BaseRecord, QueryFilter, QueryOperator, StorageConfig } from '../types';
 import { SQLiteStorageProvider } from './sqlite';
-import type { StorageConfig, BaseRecord, QueryFilter, QueryOperator } from '../types';
 
 interface TestRecord extends BaseRecord {
   name: string;

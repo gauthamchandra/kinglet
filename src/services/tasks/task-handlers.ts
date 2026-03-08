@@ -3,25 +3,23 @@
  */
 
 import type {
+  RouteContext,
   RouteDefinition,
   RouteRequest,
-  RouteContext,
   RouteResponse,
 } from '@/core/gateway/request-router.ts';
-import { StandardResponseFormatter, ResponseUtils } from '@/core/gateway/response-handlers.ts';
+import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
-import { buildTaskName, buildQueueName } from './types.ts';
 import { handleTasksError } from './queue-service.ts';
 import type { TaskService } from './task-service.ts';
+import { buildQueueName, buildTaskName } from './types.ts';
 
 export class TaskHandlers {
   private service: TaskService;
   private responseUtils: ResponseUtils;
-  private logger: Logger;
 
   constructor(service: TaskService, logger: Logger) {
     this.service = service;
-    this.logger = logger;
     const formatter = new StandardResponseFormatter(logger);
 
     this.responseUtils = new ResponseUtils(formatter);

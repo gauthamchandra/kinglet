@@ -2,18 +2,18 @@
  * Tests for QueueRepository
  */
 
-import { test, expect, describe, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { BaseRecord } from '@/core/storage/types.ts';
 import { QueueRepository } from './queue-repository.ts';
+import type { QueueRecord } from './types.ts';
 import {
-  QueueState,
   DEFAULT_RATE_LIMITS,
   DEFAULT_RETRY_CONFIG,
   DEFAULT_TASK_TTL,
   DEFAULT_TOMBSTONE_TTL,
+  QueueState,
 } from './types.ts';
-import type { QueueRecord } from './types.ts';
-import type { BaseRecord } from '@/core/storage/types.ts';
 
 function makeQueueData(
   overrides: Partial<Omit<QueueRecord, keyof BaseRecord>> = {}

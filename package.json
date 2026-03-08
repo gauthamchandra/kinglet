@@ -14,10 +14,10 @@
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
     "test:e2e": "cd e2e && bun test",
-    "lint": "bunx tsc --noEmit && eslint \"src/**/*.ts\" && knip",
-    "lint:fix": "bunx tsc --noEmit && eslint \"src/**/*.ts\" --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "lint": "bunx tsc --noEmit && biome check src/ && knip",
+    "lint:fix": "bunx tsc --noEmit && biome check --write src/",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
     "healthcheck": "bun run src/healthcheck.ts",
     "knip": "knip",
     "prepare": "husky"
@@ -36,20 +36,15 @@
   "author": "LocalStack Team",
   "license": "MIT",
   "devDependencies": {
+    "@biomejs/biome": "^2.4.6",
     "@commitlint/cli": "^20.0.0",
     "@commitlint/config-conventional": "^20.0.0",
     "@google-cloud/scheduler": "^5.3.1",
     "@google-cloud/tasks": "^6.2.1",
     "@types/bun": "latest",
     "@types/node": "^24.5.2",
-    "@typescript-eslint/eslint-plugin": "^8.44.1",
-    "@typescript-eslint/parser": "^8.44.1",
-    "eslint": "^9.36.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.4",
     "husky": "^9.1.7",
     "knip": "^5.85.0",
-    "prettier": "^3.6.2",
     "typescript": "^5.4.0"
   },
   "peerDependencies": {
@@ -60,7 +55,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@eslint/js": "^9.36.0",
     "@grpc/grpc-js": "^1.14.0",
     "@grpc/proto-loader": "^0.8.0",
     "cron-parser": "4.9.0",

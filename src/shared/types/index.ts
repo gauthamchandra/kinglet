@@ -36,9 +36,7 @@ export interface Router {
   delete(path: string, handler: RequestHandler): void;
 }
 
-export interface RequestHandler {
-  (request: Request, context: RequestContext): Promise<Response>;
-}
+export type RequestHandler = (request: Request, context: RequestContext) => Promise<Response>;
 
 export interface RequestContext {
   params: Record<string, string>;
