@@ -549,10 +549,9 @@ describe('Cloud Storage E2E: Error Cases', () => {
       body: JSON.stringify({ name: bucketName }),
     });
 
-    const response = await fetch(
-      emulatorUrl(`/storage/v1/b/${bucketName}/o/nonexistent.txt`),
-      { method: 'DELETE' }
-    );
+    const response = await fetch(emulatorUrl(`/storage/v1/b/${bucketName}/o/nonexistent.txt`), {
+      method: 'DELETE',
+    });
 
     expect(response.status).toBe(404);
 
