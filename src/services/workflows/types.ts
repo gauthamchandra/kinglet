@@ -296,20 +296,16 @@ export function generateRevisionId(ordinal: number): string {
 
 // ── Conversion Functions ──
 
-export function workflowRecordToResponse(record: WorkflowRecord): WorkflowResponse {
-  const response: WorkflowResponse = {
-    name: record.name,
-    description: record.description,
-    state: record.state,
-    revisionId: record.revisionId,
-    createTime: record.createdAt.toISOString(),
-    updateTime: record.updatedAt.toISOString(),
-    revisionCreateTime: record.revisionCreateTime,
-    labels: JSON.parse(record.labels) as Record<string, string>,
-    serviceAccount: record.serviceAccount,
-    sourceContents: record.sourceContents,
-  };
+interface OptionalFieldsSource {
+  cryptoKeyName: string | null;
+  stateError: string | null;
+  callLogLevel: string;
+  userEnvVars: string | null;
+  executionHistoryLevel: string;
+  tags: string | null;
+}
 
+function applyOptionalFields(response: WorkflowResponse, record: OptionalFieldsSource): void {
   if (record.cryptoKeyName) {
     response.cryptoKeyName = record.cryptoKeyName;
     response.allKmsKeys = [record.cryptoKeyName];
@@ -340,6 +336,23 @@ export function workflowRecordToResponse(record: WorkflowRecord): WorkflowRespon
 
   response.allKmsKeysVersions = [];
   response.cryptoKeyVersion = '';
+}
+
+export function workflowRecordToResponse(record: WorkflowRecord): WorkflowResponse {
+  const response: WorkflowResponse = {
+    name: record.name,
+    description: record.description,
+    state: record.state,
+    revisionId: record.revisionId,
+    createTime: record.createdAt.toISOString(),
+    updateTime: record.updatedAt.toISOString(),
+    revisionCreateTime: record.revisionCreateTime,
+    labels: JSON.parse(record.labels) as Record<string, string>,
+    serviceAccount: record.serviceAccount,
+    sourceContents: record.sourceContents,
+  };
+
+  applyOptionalFields(response, record);
 
   return response;
 }
@@ -361,36 +374,7 @@ export function revisionRecordToResponse(
     sourceContents: record.sourceContents,
   };
 
-  if (record.cryptoKeyName) {
-    response.cryptoKeyName = record.cryptoKeyName;
-    response.allKmsKeys = [record.cryptoKeyName];
-  }
-
-  if (record.stateError) {
-    response.stateError = JSON.parse(record.stateError) as StateError;
-  }
-
-  if (record.callLogLevel && record.callLogLevel !== CallLogLevel.CALL_LOG_LEVEL_UNSPECIFIED) {
-    response.callLogLevel = record.callLogLevel;
-  }
-
-  if (record.userEnvVars) {
-    response.userEnvVars = JSON.parse(record.userEnvVars) as Record<string, string>;
-  }
-
-  if (
-    record.executionHistoryLevel &&
-    record.executionHistoryLevel !== ExecutionHistoryLevel.EXECUTION_HISTORY_LEVEL_UNSPECIFIED
-  ) {
-    response.executionHistoryLevel = record.executionHistoryLevel;
-  }
-
-  if (record.tags) {
-    response.tags = JSON.parse(record.tags) as Record<string, string>;
-  }
-
-  response.allKmsKeysVersions = [];
-  response.cryptoKeyVersion = '';
+  applyOptionalFields(response, record);
 
   return response;
 }
