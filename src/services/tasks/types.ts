@@ -44,6 +44,24 @@ export interface StackdriverLoggingConfig {
   samplingRatio: number;
 }
 
+export interface AppEngineHttpRequest {
+  httpMethod?: string;
+  relativeUri?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  appEngineRouting?: {
+    service?: string;
+    version?: string;
+    instance?: string;
+  };
+}
+
+export interface AppEngineRoutingOverride {
+  service?: string;
+  version?: string;
+  instance?: string;
+}
+
 export interface QueueHttpTarget {
   uriOverride?: {
     host?: string;
@@ -51,9 +69,12 @@ export interface QueueHttpTarget {
     pathOverride?: { path?: string };
     queryOverride?: { queryParams?: string };
     scheme?: string;
+    uriOverrideEnforceMode?: string;
   };
   httpMethod?: string;
   headerOverrides?: Array<{ header: { key: string; value: string } }>;
+  oauthToken?: { serviceAccountEmail?: string; scope?: string };
+  oidcToken?: { serviceAccountEmail?: string; audience?: string };
 }
 
 export interface TaskHttpRequest {
@@ -69,7 +90,7 @@ export interface Attempt {
   scheduleTime?: string;
   dispatchTime?: string;
   responseTime?: string;
-  responseStatus?: number;
+  responseStatus?: { code: number; message: string };
 }
 
 export const DEFAULT_RATE_LIMITS: RateLimits = {
@@ -102,11 +123,13 @@ export interface QueueResponse {
   purgeTime?: string;
   stackdriverLoggingConfig?: StackdriverLoggingConfig;
   httpTarget?: QueueHttpTarget;
+  appEngineRoutingOverride?: AppEngineRoutingOverride;
 }
 
 export interface TaskResponse {
   name: string;
-  httpRequest: TaskHttpRequest;
+  httpRequest?: TaskHttpRequest;
+  appEngineHttpRequest?: AppEngineHttpRequest;
   scheduleTime: string;
   createTime: string;
   dispatchDeadline: string;
@@ -129,12 +152,14 @@ export interface QueueRecord extends BaseRecord {
   tombstoneTtl: string;
   stackdriverLoggingConfig: string | null; // JSON-serialized
   httpTarget: string | null; // JSON-serialized
+  appEngineRoutingOverride: string | null; // JSON-serialized
 }
 
 export interface TaskRecord extends BaseRecord {
   name: string;
   queueName: string;
-  httpRequest: string; // JSON-serialized TaskHttpRequest
+  httpRequest: string | null; // JSON-serialized TaskHttpRequest
+  appEngineHttpRequest: string | null; // JSON-serialized AppEngineHttpRequest
   scheduleTime: string;
   dispatchDeadline: string;
   dispatchCount: number;
@@ -159,6 +184,7 @@ export const tasksQueuesTableSchema: TableSchema = {
     { name: 'tombstoneTtl', type: 'string' },
     { name: 'stackdriverLoggingConfig', type: 'json', nullable: true },
     { name: 'httpTarget', type: 'json', nullable: true },
+    { name: 'appEngineRoutingOverride', type: 'json', nullable: true },
   ],
   indexes: [
     { name: 'idx_tasks_queues_name', columns: ['name'], unique: true },
@@ -172,7 +198,8 @@ export const tasksTableSchema: TableSchema = {
   columns: [
     { name: 'name', type: 'string', unique: true },
     { name: 'queueName', type: 'string' },
-    { name: 'httpRequest', type: 'json' },
+    { name: 'httpRequest', type: 'json', nullable: true },
+    { name: 'appEngineHttpRequest', type: 'json', nullable: true },
     { name: 'scheduleTime', type: 'string' },
     { name: 'dispatchDeadline', type: 'string' },
     { name: 'dispatchCount', type: 'number' },
@@ -269,25 +296,91 @@ export const TaskHttpRequestSchema = z.object({
     .optional(),
 });
 
+const UriOverrideSchema = z.object({
+  host: z.string().optional(),
+  port: z.number().int().optional(),
+  pathOverride: z.object({ path: z.string().optional() }).optional(),
+  queryOverride: z.object({ queryParams: z.string().optional() }).optional(),
+  scheme: z.string().optional(),
+  uriOverrideEnforceMode: z.string().optional(),
+});
+
+const HeaderOverrideSchema = z.object({
+  header: z.object({ key: z.string(), value: z.string() }),
+});
+
+const AppEngineHttpRequestSchema = z.object({
+  httpMethod: z
+    .union([z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']), z.number().int()])
+    .transform(val => normalizeHttpMethod(val))
+    .optional(),
+  relativeUri: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  body: z.string().optional(),
+  appEngineRouting: z
+    .object({
+      service: z.string().optional(),
+      version: z.string().optional(),
+      instance: z.string().optional(),
+    })
+    .optional(),
+});
+
+const AppEngineRoutingOverrideSchema = z.object({
+  service: z.string().optional(),
+  version: z.string().optional(),
+  instance: z.string().optional(),
+});
+
+const QueueHttpTargetSchema = z.object({
+  uriOverride: UriOverrideSchema.optional(),
+  httpMethod: z
+    .union([z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']), z.number().int()])
+    .transform(val => normalizeHttpMethod(val))
+    .optional(),
+  headerOverrides: z.array(HeaderOverrideSchema).optional(),
+  oauthToken: z
+    .object({
+      serviceAccountEmail: z.string().optional(),
+      scope: z.string().optional(),
+    })
+    .optional(),
+  oidcToken: z
+    .object({
+      serviceAccountEmail: z.string().optional(),
+      audience: z.string().optional(),
+    })
+    .optional(),
+});
+
 export const CreateQueueRequestSchema = z.object({
   rateLimits: RateLimitsSchema.optional(),
   retryConfig: TaskRetryConfigSchema.optional(),
   stackdriverLoggingConfig: StackdriverLoggingConfigSchema.optional(),
+  httpTarget: QueueHttpTargetSchema.optional(),
+  appEngineRoutingOverride: AppEngineRoutingOverrideSchema.optional(),
 });
 
 export const UpdateQueueRequestSchema = z.object({
   rateLimits: RateLimitsSchema.optional(),
   retryConfig: TaskRetryConfigSchema.optional(),
   stackdriverLoggingConfig: StackdriverLoggingConfigSchema.optional(),
+  httpTarget: QueueHttpTargetSchema.optional(),
+  appEngineRoutingOverride: AppEngineRoutingOverrideSchema.optional(),
 });
 
 export const CreateTaskRequestSchema = z.object({
-  task: z.object({
-    name: z.string().optional(),
-    httpRequest: TaskHttpRequestSchema,
-    scheduleTime: z.string().datetime({ offset: true }).optional(),
-    dispatchDeadline: z.string().optional(),
-  }),
+  task: z
+    .object({
+      name: z.string().optional(),
+      httpRequest: TaskHttpRequestSchema.optional(),
+      appEngineHttpRequest: AppEngineHttpRequestSchema.optional(),
+      scheduleTime: z.string().datetime({ offset: true }).optional(),
+      dispatchDeadline: z.string().optional(),
+    })
+    .refine(data => data.httpRequest || data.appEngineHttpRequest, {
+      message: 'Either httpRequest or appEngineHttpRequest must be provided',
+    }),
   responseView: z.enum(['BASIC', 'FULL']).optional(),
 });
 
@@ -409,6 +502,14 @@ export function queueRecordToResponse(record: QueueRecord): QueueResponse {
     );
   }
 
+  if (record.appEngineRoutingOverride) {
+    response.appEngineRoutingOverride = parseJsonField<AppEngineRoutingOverride>(
+      record.appEngineRoutingOverride,
+      'appEngineRoutingOverride',
+      record.name
+    );
+  }
+
   return response;
 }
 
@@ -427,26 +528,18 @@ export function requestToQueueRecord(
     stackdriverLoggingConfig: body.stackdriverLoggingConfig
       ? JSON.stringify(body.stackdriverLoggingConfig)
       : null,
-    httpTarget: null,
+    httpTarget: body.httpTarget ? JSON.stringify(body.httpTarget) : null,
+    appEngineRoutingOverride: body.appEngineRoutingOverride
+      ? JSON.stringify(body.appEngineRoutingOverride)
+      : null,
   };
 }
 
 export function taskRecordToResponse(record: TaskRecord, view?: string): TaskResponse {
   const isBasic = view === 'BASIC';
 
-  const httpRequest = parseJsonField<TaskHttpRequest>(
-    record.httpRequest,
-    'httpRequest',
-    record.name
-  );
-
-  if (isBasic) {
-    delete httpRequest.body;
-  }
-
   const response: TaskResponse = {
     name: record.name,
-    httpRequest,
     scheduleTime: record.scheduleTime,
     createTime: record.createdAt.toISOString(),
     dispatchDeadline: record.dispatchDeadline,
@@ -454,6 +547,28 @@ export function taskRecordToResponse(record: TaskRecord, view?: string): TaskRes
     responseCount: record.responseCount,
     view: view ?? 'FULL',
   };
+
+  if (record.httpRequest) {
+    const httpRequest = parseJsonField<TaskHttpRequest>(
+      record.httpRequest,
+      'httpRequest',
+      record.name
+    );
+
+    if (isBasic) {
+      delete httpRequest.body;
+    }
+
+    response.httpRequest = httpRequest;
+  }
+
+  if (record.appEngineHttpRequest) {
+    response.appEngineHttpRequest = parseJsonField<AppEngineHttpRequest>(
+      record.appEngineHttpRequest,
+      'appEngineHttpRequest',
+      record.name
+    );
+  }
 
   if (!isBasic && record.firstAttempt) {
     response.firstAttempt = parseJsonField<Attempt>(
@@ -474,12 +589,13 @@ export function requestToTaskRecord(
   name: string,
   queueName: string,
   taskData: {
-    httpRequest: {
+    httpRequest?: {
       url: string;
       httpMethod: string;
       headers?: Record<string, string> | undefined;
       body?: string | undefined;
     };
+    appEngineHttpRequest?: AppEngineHttpRequest;
     scheduleTime?: string | undefined;
     dispatchDeadline?: string | undefined;
   },
@@ -492,7 +608,10 @@ export function requestToTaskRecord(
   return {
     name,
     queueName,
-    httpRequest: JSON.stringify(taskData.httpRequest),
+    httpRequest: taskData.httpRequest ? JSON.stringify(taskData.httpRequest) : null,
+    appEngineHttpRequest: taskData.appEngineHttpRequest
+      ? JSON.stringify(taskData.appEngineHttpRequest)
+      : null,
     scheduleTime: taskData.scheduleTime ?? new Date().toISOString(),
     dispatchDeadline: taskData.dispatchDeadline ?? DEFAULT_DISPATCH_DEADLINE,
     dispatchCount: 0,

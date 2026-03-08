@@ -118,9 +118,10 @@ export class QueueService {
     project: string,
     location: string,
     pageSize?: number,
-    pageToken?: string
+    pageToken?: string,
+    filter?: string
   ): Promise<ListQueuesResponse> {
-    const result = await this.repo.listQueues(project, location, pageSize, pageToken);
+    const result = await this.repo.listQueues(project, location, pageSize, pageToken, filter);
 
     return {
       queues: result.queues.map(queueRecordToResponse),
@@ -128,7 +129,7 @@ export class QueueService {
     };
   }
 
-  async updateQueue(name: string, body: unknown): Promise<QueueResponse> {
+  async updateQueue(name: string, body: unknown, updateMask?: string): Promise<QueueResponse> {
     const parsed = UpdateQueueRequestSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -142,19 +143,43 @@ export class QueueService {
     }
 
     const request = parsed.data;
+    const allowedFields = updateMask ? updateMask.split(',').map(f => f.trim()) : undefined;
 
     const updates: Record<string, unknown> = {};
 
-    if (request.rateLimits !== undefined) {
+    if (
+      request.rateLimits !== undefined &&
+      (!allowedFields || allowedFields.includes('rateLimits'))
+    ) {
       updates.rateLimits = JSON.stringify(request.rateLimits);
     }
 
-    if (request.retryConfig !== undefined) {
+    if (
+      request.retryConfig !== undefined &&
+      (!allowedFields || allowedFields.includes('retryConfig'))
+    ) {
       updates.retryConfig = JSON.stringify(request.retryConfig);
     }
 
-    if (request.stackdriverLoggingConfig !== undefined) {
+    if (
+      request.stackdriverLoggingConfig !== undefined &&
+      (!allowedFields || allowedFields.includes('stackdriverLoggingConfig'))
+    ) {
       updates.stackdriverLoggingConfig = JSON.stringify(request.stackdriverLoggingConfig);
+    }
+
+    if (
+      request.httpTarget !== undefined &&
+      (!allowedFields || allowedFields.includes('httpTarget'))
+    ) {
+      updates.httpTarget = JSON.stringify(request.httpTarget);
+    }
+
+    if (
+      request.appEngineRoutingOverride !== undefined &&
+      (!allowedFields || allowedFields.includes('appEngineRoutingOverride'))
+    ) {
+      updates.appEngineRoutingOverride = JSON.stringify(request.appEngineRoutingOverride);
     }
 
     const updated = await this.repo.updateQueue(name, updates);

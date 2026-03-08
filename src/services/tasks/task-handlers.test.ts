@@ -62,10 +62,10 @@ describe('TaskHandlers', () => {
   });
 
   describe('getRoutes', () => {
-    test('should return 5 route definitions', () => {
+    test('should return 6 route definitions', () => {
       const routes = handlers.getRoutes();
 
-      expect(routes.length).toBe(5);
+      expect(routes.length).toBe(6);
     });
 
     test('should use /v2/ prefix for all routes', () => {
@@ -85,6 +85,7 @@ describe('TaskHandlers', () => {
       expect(ids).toContain('tasks.tasks.list');
       expect(ids).toContain('tasks.tasks.delete');
       expect(ids).toContain('tasks.tasks.run');
+      expect(ids).toContain('tasks.tasks.buffer');
     });
   });
 

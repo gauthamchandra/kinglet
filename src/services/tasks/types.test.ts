@@ -549,6 +549,7 @@ describe('Cloud Tasks Types', () => {
         tombstoneTtl: DEFAULT_TOMBSTONE_TTL,
         stackdriverLoggingConfig: null,
         httpTarget: null,
+        appEngineRoutingOverride: null,
       };
 
       const response = queueRecordToResponse(record);
@@ -575,6 +576,7 @@ describe('Cloud Tasks Types', () => {
         tombstoneTtl: DEFAULT_TOMBSTONE_TTL,
         stackdriverLoggingConfig: null,
         httpTarget: null,
+        appEngineRoutingOverride: null,
       };
 
       const response = queueRecordToResponse(record);
@@ -596,6 +598,7 @@ describe('Cloud Tasks Types', () => {
         tombstoneTtl: DEFAULT_TOMBSTONE_TTL,
         stackdriverLoggingConfig: null,
         httpTarget: null,
+        appEngineRoutingOverride: null,
       };
 
       expect(() => queueRecordToResponse(record)).toThrow(
@@ -617,6 +620,7 @@ describe('Cloud Tasks Types', () => {
         tombstoneTtl: DEFAULT_TOMBSTONE_TTL,
         stackdriverLoggingConfig: null,
         httpTarget: null,
+        appEngineRoutingOverride: null,
       };
 
       expect(() => queueRecordToResponse(record)).toThrow(/Corrupt retryConfig JSON in record/);
@@ -676,6 +680,7 @@ describe('Cloud Tasks Types', () => {
       lastAttempt: null,
       status: 'PENDING',
       tombstoneExpiry: null,
+      appEngineHttpRequest: null,
     });
 
     test('should return FULL view by default', () => {
@@ -684,7 +689,7 @@ describe('Cloud Tasks Types', () => {
 
       expect(response.name).toBe('projects/p/locations/l/queues/q/tasks/t');
       expect(response.httpRequest).toBeTypeOf('object');
-      expect(response.httpRequest.body).toBeTypeOf('string');
+      expect(response.httpRequest?.body).toBeTypeOf('string');
       expect(response.scheduleTime).toBe('2024-01-01T00:00:00Z');
       expect(response.dispatchCount).toBe(0);
       expect(response.responseCount).toBe(0);
@@ -694,7 +699,7 @@ describe('Cloud Tasks Types', () => {
       const record = makeTaskRecord();
       const response = taskRecordToResponse(record, 'FULL');
 
-      expect(response.httpRequest.body).toBeTypeOf('string');
+      expect(response.httpRequest?.body).toBeTypeOf('string');
       expect(response.firstAttempt).toBeUndefined();
       expect(response.lastAttempt).toBeUndefined();
     });
@@ -710,13 +715,13 @@ describe('Cloud Tasks Types', () => {
         scheduleTime: '2024-01-01T00:00:00Z',
         dispatchTime: '2024-01-01T00:00:01Z',
         responseTime: '2024-01-01T00:00:02Z',
-        responseStatus: 200,
+        responseStatus: { code: 200, message: 'OK' },
       });
 
       const response = taskRecordToResponse(record, 'BASIC');
 
       expect(response.name).toBe('projects/p/locations/l/queues/q/tasks/t');
-      expect(response.httpRequest.body).toBeUndefined();
+      expect(response.httpRequest?.body).toBeUndefined();
       expect(response.firstAttempt).toBeUndefined();
       expect(response.lastAttempt).toBeUndefined();
     });
@@ -732,14 +737,14 @@ describe('Cloud Tasks Types', () => {
         scheduleTime: '2024-01-01T00:00:00Z',
         dispatchTime: '2024-01-01T00:00:01Z',
         responseTime: '2024-01-01T00:00:02Z',
-        responseStatus: 200,
+        responseStatus: { code: 200, message: 'OK' },
       });
 
       const response = taskRecordToResponse(record, 'FULL');
 
       expect(response.firstAttempt).toBeTypeOf('object');
       expect(response.lastAttempt).toBeTypeOf('object');
-      expect(response.lastAttempt?.responseStatus).toBe(200);
+      expect(response.lastAttempt?.responseStatus).toEqual({ code: 200, message: 'OK' });
     });
 
     test('should throw descriptive error for corrupt httpRequest JSON', () => {

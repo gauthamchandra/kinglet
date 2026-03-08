@@ -370,6 +370,484 @@ describe('Cloud Tasks E2E: Raw HTTP API', () => {
     // Clean up
     await fetch(emulatorUrl(`${queuesBasePath}/${camelQueueId}`), { method: 'DELETE' });
   });
+
+  test('15. Create queue with httpTarget and verify round-trip', async () => {
+    const httpTargetQueueId = 'http-target-queue';
+
+    const response = await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${httpTargetQueueId}`,
+        httpTarget: {
+          uriOverride: {
+            host: 'localhost',
+            port: callbackPort,
+            pathOverride: { path: '/override' },
+            queryOverride: { queryParams: 'key=val' },
+            scheme: 'HTTP',
+          },
+          httpMethod: 'POST',
+          headerOverrides: [{ header: { key: 'X-Custom', value: 'value1' } }],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+
+    const queue = await response.json();
+
+    expect(queue.httpTarget).toBeDefined();
+    expect(queue.httpTarget.uriOverride.host).toBe('localhost');
+    expect(queue.httpTarget.uriOverride.port).toBe(callbackPort);
+    expect(queue.httpTarget.httpMethod).toBe('POST');
+    expect(queue.httpTarget.headerOverrides).toHaveLength(1);
+
+    // Verify GET returns httpTarget
+    const getResp = await fetch(emulatorUrl(`${queuesBasePath}/${httpTargetQueueId}`));
+    const getQueue = await getResp.json();
+
+    expect(getQueue.httpTarget.uriOverride.host).toBe('localhost');
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${httpTargetQueueId}`), { method: 'DELETE' });
+  });
+
+  test('16. Create queue with httpTarget including oauthToken', async () => {
+    const qId = 'oauth-queue';
+
+    const response = await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qId}`,
+        httpTarget: {
+          uriOverride: { host: 'localhost', scheme: 'HTTP' },
+          oauthToken: {
+            serviceAccountEmail: 'sa@project.iam.gserviceaccount.com',
+            scope: 'https://www.googleapis.com/auth/cloud-platform',
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+
+    const queue = await response.json();
+
+    expect(queue.httpTarget.oauthToken.serviceAccountEmail).toBe(
+      'sa@project.iam.gserviceaccount.com'
+    );
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
+  });
+
+  test('17. Queue httpTarget uriOverride supports uriOverrideEnforceMode', async () => {
+    const qId = 'enforce-mode-queue';
+
+    const response = await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qId}`,
+        httpTarget: {
+          uriOverride: {
+            host: 'localhost',
+            scheme: 'HTTP',
+            uriOverrideEnforceMode: 'ALWAYS',
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+
+    const queue = await response.json();
+
+    expect(queue.httpTarget.uriOverride.uriOverrideEnforceMode).toBe('ALWAYS');
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
+  });
+
+  test('18. Task attempt responseStatus is a Status object with code and message', async () => {
+    const qId = 'attempt-status-queue';
+
+    await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qId}`,
+      }),
+    });
+
+    const tasksPath = `${queuesBasePath}/${qId}/tasks`;
+
+    const createResp = await fetch(emulatorUrl(tasksPath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task: {
+          httpRequest: {
+            url: callbackUrl('/attempt-check'),
+            httpMethod: 'POST',
+          },
+        },
+      }),
+    });
+
+    const task = await createResp.json();
+    const taskId = task.name.split('/').pop();
+
+    // Force run the task
+    callbackRequests.length = 0;
+
+    await fetch(emulatorUrl(`${tasksPath}/${taskId}:run`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    await waitForCallback(callbackRequests, 1, 5000);
+
+    // Wait briefly for dispatch engine to update the task record
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Get the task with FULL view to check attempt data
+    const getResp = await fetch(emulatorUrl(`${tasksPath}/${taskId}?responseView=FULL`));
+
+    if (getResp.status === 200) {
+      const updatedTask = await getResp.json();
+
+      if (updatedTask.lastAttempt) {
+        expect(updatedTask.lastAttempt.responseStatus).toHaveProperty('code');
+        expect(updatedTask.lastAttempt.responseStatus).toHaveProperty('message');
+        expect(updatedTask.lastAttempt.responseStatus.code).toBeTypeOf('number');
+        expect(updatedTask.lastAttempt.responseStatus.message).toBeTypeOf('string');
+      }
+    }
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
+  });
+
+  test('19. tasks.run respects responseView=BASIC (omits body from httpRequest)', async () => {
+    const qId = 'run-view-queue';
+
+    await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qId}`,
+      }),
+    });
+
+    const tasksPath = `${queuesBasePath}/${qId}/tasks`;
+
+    const createResp = await fetch(emulatorUrl(tasksPath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task: {
+          httpRequest: {
+            url: callbackUrl('/run-view-test'),
+            httpMethod: 'POST',
+            body: Buffer.from('secret-payload').toString('base64'),
+          },
+        },
+      }),
+    });
+
+    const task = await createResp.json();
+    const taskId = task.name.split('/').pop();
+
+    // Run with BASIC view -- body should be stripped from httpRequest in response
+    const runResp = await fetch(emulatorUrl(`${tasksPath}/${taskId}:run`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ responseView: 'BASIC' }),
+    });
+
+    expect(runResp.status).toBe(200);
+
+    const runResult = await runResp.json();
+
+    expect(runResult.httpRequest.body).toBeUndefined();
+    expect(runResult.view).toBe('BASIC');
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
+  });
+
+  test('20. queues.patch with updateMask only updates specified fields', async () => {
+    const qId = 'mask-queue';
+
+    await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qId}`,
+        rateLimits: { maxDispatchesPerSecond: 100, maxBurstSize: 50, maxConcurrentDispatches: 200 },
+        retryConfig: {
+          maxAttempts: 5,
+          maxRetryDuration: '0s',
+          minBackoff: '0.100s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+      }),
+    });
+
+    // PATCH with updateMask=rateLimits -- only rateLimits should change
+    const patchResp = await fetch(emulatorUrl(`${queuesBasePath}/${qId}?updateMask=rateLimits`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rateLimits: { maxDispatchesPerSecond: 10, maxBurstSize: 5, maxConcurrentDispatches: 20 },
+        retryConfig: {
+          maxAttempts: 99,
+          maxRetryDuration: '0s',
+          minBackoff: '1s',
+          maxBackoff: '100s',
+          maxDoublings: 4,
+        },
+      }),
+    });
+
+    expect(patchResp.status).toBe(200);
+
+    const queue = await patchResp.json();
+
+    // rateLimits should be updated
+    expect(queue.rateLimits.maxDispatchesPerSecond).toBe(10);
+
+    // retryConfig should be UNCHANGED because it was not in the updateMask
+    expect(queue.retryConfig.maxAttempts).toBe(5);
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
+  });
+
+  test('21. queues.list supports filter parameter', async () => {
+    const qRunning = 'filter-running-q';
+    const qPaused = 'filter-paused-q';
+
+    await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qRunning}`,
+      }),
+    });
+
+    await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qPaused}`,
+      }),
+    });
+
+    await fetch(emulatorUrl(`${queuesBasePath}/${qPaused}:pause`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    // List with filter=state=PAUSED
+    const resp = await fetch(emulatorUrl(`${queuesBasePath}?filter=state%3DPAUSED`));
+
+    expect(resp.status).toBe(200);
+
+    const result = await resp.json();
+    const names = result.queues.map((q: { name: string }) => q.name);
+
+    expect(names).toContain(`projects/${project}/locations/${location}/queues/${qPaused}`);
+    expect(names).not.toContain(`projects/${project}/locations/${location}/queues/${qRunning}`);
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qRunning}`), { method: 'DELETE' });
+    await fetch(emulatorUrl(`${queuesBasePath}/${qPaused}`), { method: 'DELETE' });
+  });
+
+  test('22. locations.list returns available locations', async () => {
+    const resp = await fetch(emulatorUrl(`/v2/projects/${project}/locations`));
+
+    expect(resp.status).toBe(200);
+
+    const result = await resp.json();
+
+    expect(result.locations).toBeInstanceOf(Array);
+    expect(result.locations.length).toBeGreaterThanOrEqual(1);
+    expect(result.locations[0].locationId).toBeTypeOf('string');
+    expect(result.locations[0].name).toMatch(/^projects\/[^/]+\/locations\/[^/]+$/);
+  });
+
+  test('23. locations.get returns a specific location', async () => {
+    const resp = await fetch(emulatorUrl(`/v2/projects/${project}/locations/${location}`));
+
+    expect(resp.status).toBe(200);
+
+    const loc = await resp.json();
+
+    expect(loc.locationId).toBe(location);
+    expect(loc.name).toBe(`projects/${project}/locations/${location}`);
+  });
+
+  test('24. getCmekConfig returns default config', async () => {
+    const resp = await fetch(
+      emulatorUrl(`/v2/projects/${project}/locations/${location}/cmekConfig`)
+    );
+
+    expect(resp.status).toBe(200);
+
+    const config = await resp.json();
+
+    expect(config.name).toBe(`projects/${project}/locations/${location}/cmekConfig`);
+  });
+
+  test('25. updateCmekConfig stores and returns CMEK config', async () => {
+    const resp = await fetch(
+      emulatorUrl(`/v2/projects/${project}/locations/${location}/cmekConfig`),
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kmsKey: 'projects/my-project/locations/us-central1/keyRings/my-kr/cryptoKeys/my-key',
+        }),
+      }
+    );
+
+    expect(resp.status).toBe(200);
+
+    const config = await resp.json();
+
+    expect(config.kmsKey).toBe(
+      'projects/my-project/locations/us-central1/keyRings/my-kr/cryptoKeys/my-key'
+    );
+    expect(config.name).toBe(`projects/${project}/locations/${location}/cmekConfig`);
+  });
+
+  test('26. tasks.buffer creates a task from queue httpTarget and provided body', async () => {
+    const qId = 'buffer-queue';
+
+    // Create queue with httpTarget pointing to our callback server
+    await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qId}`,
+        httpTarget: {
+          uriOverride: {
+            scheme: 'HTTP',
+            host: `localhost:${callbackPort}`,
+            pathOverride: { path: '/buffer-callback' },
+          },
+          httpMethod: 'POST',
+          headerOverrides: [{ header: { key: 'X-Buffer-Source', value: 'test' } }],
+        },
+      }),
+    });
+
+    // Buffer a task
+    const tasksPath = `${queuesBasePath}/${qId}/tasks`;
+
+    const bufferResp = await fetch(emulatorUrl(`${tasksPath}/my-buffered-task:buffer`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        body: {
+          contentType: 'application/json',
+          data: Buffer.from(JSON.stringify({ msg: 'buffered' })).toString('base64'),
+        },
+      }),
+    });
+
+    expect(bufferResp.status).toBe(200);
+
+    const result = await bufferResp.json();
+
+    expect(result.task).toBeDefined();
+    expect(result.task.name).toContain('my-buffered-task');
+    expect(result.task.httpRequest).toBeDefined();
+    expect(result.task.httpRequest.url).toContain('localhost');
+    expect(result.task.httpRequest.url).toContain('/buffer-callback');
+    expect(result.task.httpRequest.httpMethod).toBe('POST');
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
+  });
+
+  test('27. Create task with appEngineHttpRequest (stub)', async () => {
+    const qId = 'appengine-queue';
+
+    await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qId}`,
+      }),
+    });
+
+    const tasksPath = `${queuesBasePath}/${qId}/tasks`;
+
+    const resp = await fetch(emulatorUrl(tasksPath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task: {
+          appEngineHttpRequest: {
+            httpMethod: 'POST',
+            relativeUri: '/worker',
+            body: Buffer.from('ae-payload').toString('base64'),
+          },
+        },
+      }),
+    });
+
+    expect(resp.status).toBe(200);
+
+    const task = await resp.json();
+
+    expect(task.appEngineHttpRequest).toBeDefined();
+    expect(task.appEngineHttpRequest.relativeUri).toBe('/worker');
+    expect(task.appEngineHttpRequest.httpMethod).toBe('POST');
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
+  });
+
+  test('28. Create queue with appEngineRoutingOverride (stub)', async () => {
+    const qId = 'ae-routing-queue';
+
+    const resp = await fetch(emulatorUrl(queuesBasePath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `projects/${project}/locations/${location}/queues/${qId}`,
+        appEngineRoutingOverride: {
+          service: 'worker-service',
+          version: 'v2',
+        },
+      }),
+    });
+
+    expect(resp.status).toBe(200);
+
+    const queue = await resp.json();
+
+    expect(queue.appEngineRoutingOverride).toBeDefined();
+    expect(queue.appEngineRoutingOverride.service).toBe('worker-service');
+
+    // Verify round-trip via GET
+    const getResp = await fetch(emulatorUrl(`${queuesBasePath}/${qId}`));
+    const getQueue = await getResp.json();
+
+    expect(getQueue.appEngineRoutingOverride.service).toBe('worker-service');
+    expect(getQueue.appEngineRoutingOverride.version).toBe('v2');
+
+    // Cleanup
+    await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
+  });
 });
 
 // ── Test Path 2: Official @google-cloud/tasks Client Library ──

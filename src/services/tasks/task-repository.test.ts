@@ -24,6 +24,7 @@ function makeTaskData(
     lastAttempt: null,
     status: TaskStatus.PENDING,
     tombstoneExpiry: null,
+    appEngineHttpRequest: null,
     ...overrides,
   };
 }

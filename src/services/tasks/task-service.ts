@@ -14,7 +14,7 @@ import {
   TaskStatus,
   parseDurationSeconds,
 } from './types.ts';
-import type { TaskRecord, TaskResponse } from './types.ts';
+import type { AppEngineHttpRequest, TaskRecord, TaskResponse, QueueHttpTarget } from './types.ts';
 import { TasksError } from './queue-service.ts';
 
 export type DispatchCallback = (task: TaskRecord) => Promise<void>;
@@ -94,7 +94,10 @@ export class TaskService {
       taskName,
       queueName,
       {
-        httpRequest: request.task.httpRequest,
+        ...(request.task.httpRequest ? { httpRequest: request.task.httpRequest } : {}),
+        ...(request.task.appEngineHttpRequest
+          ? { appEngineHttpRequest: request.task.appEngineHttpRequest as AppEngineHttpRequest }
+          : {}),
         scheduleTime: request.task.scheduleTime,
         dispatchDeadline: request.task.dispatchDeadline,
       },
@@ -149,7 +152,7 @@ export class TaskService {
     });
   }
 
-  async runTask(name: string): Promise<TaskResponse> {
+  async runTask(name: string, responseView?: string): Promise<TaskResponse> {
     const record = await this.taskRepo.getTaskByName(name);
 
     if (!record || record.status === TaskStatus.TOMBSTONE) {
@@ -160,6 +163,106 @@ export class TaskService {
       await this.dispatchCallback(record);
     }
 
-    return taskRecordToResponse(record);
+    return taskRecordToResponse(record, responseView);
+  }
+
+  async bufferTask(
+    project: string,
+    location: string,
+    queueId: string,
+    taskId: string,
+    queueName: string,
+    body?: Record<string, unknown>
+  ): Promise<{ task: TaskResponse }> {
+    const queue = await this.queueRepo.getQueueByName(queueName);
+
+    if (!queue) {
+      throw new TasksError('NOT_FOUND', `Queue ${queueName} not found`);
+    }
+
+    if (queue.state === QueueState.DISABLED) {
+      throw new TasksError('FAILED_PRECONDITION', `Queue ${queueName} is disabled`);
+    }
+
+    if (!queue.httpTarget) {
+      throw new TasksError(
+        'FAILED_PRECONDITION',
+        `Queue ${queueName} does not have an httpTarget configured`
+      );
+    }
+
+    const httpTarget = JSON.parse(queue.httpTarget) as QueueHttpTarget;
+    const httpRequest = this.buildHttpRequestFromTarget(httpTarget, body);
+
+    const resolvedTaskId = taskId || randomUUID();
+    const taskName = buildTaskName(project, location, queueId, resolvedTaskId);
+
+    const existing = await this.taskRepo.getTaskByName(taskName);
+
+    if (existing) {
+      throw new TasksError('ALREADY_EXISTS', `Task ${taskName} already exists`);
+    }
+
+    const record = requestToTaskRecord(
+      taskName,
+      queueName,
+      { httpRequest },
+      { taskTtl: queue.taskTtl, tombstoneTtl: queue.tombstoneTtl }
+    );
+
+    const created = await this.taskRepo.createTask(record);
+
+    return { task: taskRecordToResponse(created) };
+  }
+
+  private buildHttpRequestFromTarget(
+    httpTarget: QueueHttpTarget,
+    body?: Record<string, unknown>
+  ): { url: string; httpMethod: string; headers?: Record<string, string>; body?: string } {
+    const uri = httpTarget.uriOverride;
+    const scheme = uri?.scheme?.toLowerCase() ?? 'https';
+    const host = uri?.host ?? 'localhost';
+    const port = uri?.port;
+    const path = uri?.pathOverride?.path ?? '';
+    const query = uri?.queryOverride?.queryParams ?? '';
+
+    const portSuffix = port ? `:${port}` : '';
+    const querySuffix = query ? `?${query}` : '';
+    const url = `${scheme}://${host}${portSuffix}${path}${querySuffix}`;
+
+    const httpMethod = httpTarget.httpMethod ?? 'POST';
+
+    const headers: Record<string, string> = {};
+
+    if (httpTarget.headerOverrides) {
+      for (const override of httpTarget.headerOverrides) {
+        headers[override.header.key] = override.header.value;
+      }
+    }
+
+    let taskBody: string | undefined;
+
+    if (body?.body) {
+      if (typeof body.body === 'string') {
+        taskBody = body.body;
+      } else {
+        const httpBody = body.body as Record<string, unknown>;
+
+        if (typeof httpBody.data === 'string') {
+          taskBody = httpBody.data;
+        }
+
+        if (typeof httpBody.contentType === 'string') {
+          headers['Content-Type'] = httpBody.contentType;
+        }
+      }
+    }
+
+    return {
+      url,
+      httpMethod,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+      ...(taskBody ? { body: taskBody } : {}),
+    };
   }
 }

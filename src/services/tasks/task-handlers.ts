@@ -59,6 +59,12 @@ export class TaskHandlers {
         path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId:run',
         handler: (req, ctx) => this.handleRunTask(req, ctx),
       },
+      {
+        id: 'tasks.tasks.buffer',
+        method: 'POST',
+        path: '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId:buffer',
+        handler: (req, ctx) => this.handleBufferTask(req, ctx),
+      },
     ];
   }
 
@@ -132,7 +138,31 @@ export class TaskHandlers {
   private async handleRunTask(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const name = this.buildTaskNameFromParams(req.params);
-      const result = await this.service.runTask(name);
+      const body = req.body as Record<string, unknown> | undefined;
+      const responseView = body?.responseView ? String(body.responseView) : undefined;
+
+      const result = await this.service.runTask(name, responseView);
+
+      return this.responseUtils.success(result);
+    } catch (err) {
+      return this.handleError(err);
+    }
+  }
+
+  private async handleBufferTask(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
+    try {
+      const { project, location, queueId, taskId } = req.params;
+      const queueName = buildQueueName(project ?? '', location ?? '', queueId ?? '');
+      const body = req.body as Record<string, unknown> | undefined;
+
+      const result = await this.service.bufferTask(
+        project ?? '',
+        location ?? '',
+        queueId ?? '',
+        taskId ?? '',
+        queueName,
+        body
+      );
 
       return this.responseUtils.success(result);
     } catch (err) {
