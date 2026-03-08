@@ -11,7 +11,7 @@ import type {
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { BucketService } from './bucket-service.ts';
-import { GcsError } from './bucket-service.ts';
+import { handleGcsError } from './error-handler.ts';
 
 export class BucketHandlers {
   private service: BucketService;
@@ -128,19 +128,6 @@ export class BucketHandlers {
   }
 
   private handleError(err: unknown): RouteResponse {
-    if (err instanceof GcsError) {
-      switch (err.code) {
-        case 'NOT_FOUND':
-          return this.responseUtils.notFound('Bucket', err.message);
-        case 'ALREADY_EXISTS':
-          return this.responseUtils.alreadyExists('Bucket', err.message);
-        case 'INVALID_ARGUMENT':
-          return this.responseUtils.badRequest(err.message);
-        case 'FAILED_PRECONDITION':
-          return this.responseUtils.failedPrecondition(err.message);
-      }
-    }
-
-    return this.responseUtils.badRequest(err instanceof Error ? err.message : 'Unknown error');
+    return handleGcsError(err, 'Bucket', this.responseUtils);
   }
 }

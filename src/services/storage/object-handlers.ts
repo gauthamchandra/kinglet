@@ -10,7 +10,7 @@ import type {
 } from '@/core/gateway/request-router.ts';
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
-import { GcsError } from './bucket-service.ts';
+import { handleGcsError } from './error-handler.ts';
 import type { ObjectService } from './object-service.ts';
 import { parseObjectName } from './types.ts';
 
@@ -18,7 +18,11 @@ interface ResumableUpload {
   bucket: string;
   name: string;
   contentType: string;
+  createdAt: number;
 }
+
+const RESUMABLE_UPLOAD_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const MAX_PENDING_UPLOADS = 10_000;
 
 export class ObjectHandlers {
   private service: ObjectService;
@@ -106,13 +110,16 @@ export class ObjectHandlers {
       if (uploadType === 'resumable') {
         const body = (req.body ?? {}) as { name?: string; contentType?: string };
         const name = parseObjectName(body.name ?? (req.query.name as string) ?? '');
-        const contentType =
-          body.contentType ?? req.headers['content-type'] ?? 'application/octet-stream';
+        // Use contentType from the JSON body only — the request's Content-Type header
+        // describes the initiation request itself (application/json), not the object.
+        const contentType = body.contentType ?? 'application/octet-stream';
+
+        this.evictStaleUploads();
 
         this.uploadCounter++;
         const uploadId = String(this.uploadCounter);
 
-        this.resumableUploads.set(uploadId, { bucket, name, contentType });
+        this.resumableUploads.set(uploadId, { bucket, name, contentType, createdAt: Date.now() });
 
         const origin = req.originalRequest ? new URL(req.originalRequest.url).origin : '';
 
@@ -314,19 +321,20 @@ export class ObjectHandlers {
   }
 
   private handleError(err: unknown): RouteResponse {
-    if (err instanceof GcsError) {
-      switch (err.code) {
-        case 'NOT_FOUND':
-          return this.responseUtils.notFound('Object', err.message);
-        case 'ALREADY_EXISTS':
-          return this.responseUtils.alreadyExists('Object', err.message);
-        case 'INVALID_ARGUMENT':
-          return this.responseUtils.badRequest(err.message);
-        case 'FAILED_PRECONDITION':
-          return this.responseUtils.failedPrecondition(err.message);
-      }
+    return handleGcsError(err, 'Object', this.responseUtils);
+  }
+
+  private evictStaleUploads(): void {
+    if (this.resumableUploads.size < MAX_PENDING_UPLOADS) {
+      return;
     }
 
-    return this.responseUtils.badRequest(err instanceof Error ? err.message : 'Unknown error');
+    const now = Date.now();
+
+    for (const [id, upload] of this.resumableUploads) {
+      if (now - upload.createdAt > RESUMABLE_UPLOAD_TTL_MS) {
+        this.resumableUploads.delete(id);
+      }
+    }
   }
 }

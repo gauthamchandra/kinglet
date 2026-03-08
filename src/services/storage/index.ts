@@ -64,10 +64,9 @@ export class CloudStorageService {
   }
 
   async stop(): Promise<void> {
-    if (this.blobStore) {
-      this.blobStore.cleanup();
-    }
-
+    // Intentionally do NOT call blobStore.cleanup() here.
+    // Blob data must survive restarts when metadata is persisted via sqlite/hybrid storage.
+    // cleanup() is only used in tests to remove temporary directories.
     this.logger.info('Cloud Storage service stopped');
   }
 }
