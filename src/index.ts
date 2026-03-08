@@ -9,6 +9,7 @@ import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
+import { CloudStorageService } from '@/services/storage/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 
@@ -18,6 +19,7 @@ let server: Server | null = null;
 let storageManager: StorageManager | null = null;
 let schedulerService: SchedulerService | null = null;
 let tasksService: CloudTasksService | null = null;
+let cloudStorageService: CloudStorageService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -83,6 +85,18 @@ async function main(): Promise<void> {
       logger.info('Secret Manager service enabled (stub - not yet implemented)');
     }
 
+    if (config.services.storage.enabled) {
+      cloudStorageService = new CloudStorageService(storageManager, new Logger('Storage'));
+      await cloudStorageService.initialize();
+
+      for (const route of cloudStorageService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      cloudStorageService.start();
+      logger.info('Cloud Storage service enabled and started');
+    }
+
     server = Bun.serve({
       port: config.server.httpPort,
       fetch: request => router.route(request),
@@ -117,6 +131,11 @@ async function shutdown(signal: string): Promise<void> {
   if (tasksService) {
     await tasksService.stop();
     logger.info('Tasks service stopped');
+  }
+
+  if (cloudStorageService) {
+    await cloudStorageService.stop();
+    logger.info('Cloud Storage service stopped');
   }
 
   if (storageManager) {

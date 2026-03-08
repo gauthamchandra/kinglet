@@ -14,10 +14,10 @@ tasks that build incrementally toward a fully functional system.
 1. **Foundation (Week 1)**: Core infrastructure, tooling, and project setup
 2. **Test Migration (Week 1.5)**: Transition to co-located testing structure
 3. **Core Framework (Week 2)**: API Gateway, Discovery API, Storage Layer
-4. **Service Implementation (Weeks 3-5)**: Individual GCP service emulation
-5. **Integration & Testing (Week 6)**: End-to-end testing, client library
+4. **Service Implementation (Weeks 3-6)**: Individual GCP service emulation (Pub/Sub, Scheduler, Tasks, Secrets, Cloud Storage)
+5. **Integration & Testing (Week 7)**: End-to-end testing, client library
    validation
-6. **Deployment & Documentation (Week 7)**: Containerization, deployment,
+6. **Deployment & Documentation (Week 8)**: Containerization, deployment,
    documentation
 
 ## Phase 1: Foundation Setup
@@ -554,6 +554,92 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Secrets Discovery integration
   - **Success Criteria**: Client library connects
 
+### 13. Cloud Storage Service
+
+- [ ] **13.1 Create Cloud Storage Data Models**
+  - Define Bucket interface with core properties (name, location, storageClass, timeCreated, updated, metageneration, generation, etag, id, kind, selfLink)
+  - Define Object interface with core properties (name, bucket, contentType, size, crc32c, md5Hash, generation, metageneration, etag, timeCreated, updated, storageClass, mediaLink, metadata, etc.)
+  - Define BucketAccessControl, ObjectAccessControl, and related ACL interfaces
+  - Create database schema for bucket metadata, object metadata, and ACL records
+  - Define supporting types: ComposeRequest, RewriteResponse, Channel, Notification, Folder, ManagedFolder, HmacKey/HmacKeyMetadata
+  - **Deliverable**: Cloud Storage data layer with full TypeScript types
+  - **Success Criteria**: Models match the 34 schemas defined in the GCP discovery document
+
+- [ ] **13.2 Implement Bucket Management (Highest Priority)**
+  - Create bucket CRUD: `buckets.insert`, `buckets.get`, `buckets.list`, `buckets.delete`, `buckets.patch`
+  - Add bucket validation (name constraints, location, storageClass)
+  - Implement bucket listing with pagination and projection support
+  - Add label support and metageneration tracking
+  - Store bucket metadata in SQLite via the existing storage layer
+  - Write comprehensive unit tests co-located with bucket implementation
+  - **Deliverable**: Bucket management API with co-located tests
+  - **Success Criteria**: All bucket CRUD operations work and tests pass
+
+- [ ] **13.3 Implement Object CRUD (Highest Priority)**
+  - Create object CRUD: `objects.insert`, `objects.get`, `objects.list`, `objects.delete`, `objects.patch`
+  - Store object data on local filesystem with metadata in SQLite
+  - Support `alt=media` for data download on `objects.get`
+  - Handle both simple upload and multipart upload on `objects.insert`
+  - Implement object listing with prefix filtering, delimiter support, and pagination
+  - Track generation and metageneration for optimistic concurrency
+  - Write comprehensive unit tests co-located with object implementation
+  - **Deliverable**: Object management API with co-located tests
+  - **Success Criteria**: All object CRUD operations work including upload/download and tests pass
+
+- [ ] **13.4 Implement Object Copy, Rewrite, and Compose (High Priority)**
+  - Implement `objects.copy` for same-bucket and cross-bucket copies
+  - Implement `objects.rewrite` with single-pass completion (always return `done: true` in emulator)
+  - Implement `objects.compose` for parallel composite uploads (concatenate source object bytes, merge metadata)
+  - Write unit tests co-located with implementation
+  - **Deliverable**: Advanced object operations with co-located tests
+  - **Success Criteria**: Copy, rewrite, and compose operations work correctly; client libraries (gsutil, Go/Python/Java SDK) can use these endpoints
+
+- [ ] **13.5 Implement Bucket and Object Update + Preconditions (Medium Priority)**
+  - Implement `buckets.update` for full replacement of bucket metadata
+  - Implement `objects.update` for full replacement of object metadata
+  - Implement `objects.move` for same-bucket renames (metadata rename in local storage)
+  - Add precondition header support across all relevant handlers: `ifGenerationMatch`, `ifGenerationNotMatch`, `ifMetagenerationMatch`, `ifMetagenerationNotMatch`
+  - Write unit tests co-located with implementation
+  - **Deliverable**: Complete metadata update and precondition support with co-located tests
+  - **Success Criteria**: Optimistic concurrency via preconditions works correctly
+
+- [ ] **13.6 Implement ACL Endpoints (Medium Priority)**
+  - Implement `bucketAccessControls.*` (6 methods: delete, get, insert, list, patch, update)
+  - Implement `objectAccessControls.*` (6 methods: delete, get, insert, list, patch, update)
+  - Implement `defaultObjectAccessControls.*` (6 methods: delete, get, insert, list, patch, update)
+  - Create shared ACL storage abstraction for all three ACL types
+  - Write unit tests co-located with implementation
+  - **Deliverable**: Complete ACL management (18 endpoints) with co-located tests
+  - **Success Criteria**: Fine-grained access control CRUD works for buckets, objects, and default object ACLs
+
+- [ ] **13.7 Implement Notifications, Folders, and HMAC Keys (Low Priority)**
+  - Implement `notifications.*` (4 methods: delete, get, insert, list) — store configs locally, no real Pub/Sub integration needed
+  - Implement `folders.*` (6 methods: delete, get, insert, list, rename) — for hierarchical namespace buckets
+  - Implement `managedFolders.*` (4 methods: delete, get, insert, list)
+  - Implement `projects.hmacKeys.*` (5 methods: create, delete, get, list, update) — generate synthetic HMAC keys
+  - Write unit tests co-located with implementation
+  - **Deliverable**: Notification, folder, and HMAC key management with co-located tests
+  - **Success Criteria**: All secondary resource types work correctly
+
+- [ ] **13.8 Implement Advanced and Operations Endpoints (Lowest Priority)**
+  - Implement `buckets.lockRetentionPolicy`, `buckets.relocate`, `buckets.restore`, `buckets.getStorageLayout`
+  - Implement `objects.bulkRestore`, `objects.restore`, `objects.watchAll`
+  - Implement `channels.stop` for watch channel cleanup
+  - Implement `buckets.operations.*` (4 methods: advanceRelocateBucket, cancel, get, list) for long-running operation tracking
+  - Implement `anywhereCaches.*` (7 methods: disable, get, insert, list, pause, resume, update) — stub with no-op responses
+  - Implement `projects.serviceAccount.get`
+  - Write unit tests co-located with implementation
+  - **Deliverable**: Full Cloud Storage API coverage (73 non-IAM endpoints) with co-located tests
+  - **Success Criteria**: All non-IAM endpoints return valid responses
+
+- [ ] **13.9 Add Cloud Storage Discovery Document**
+  - Generate Discovery Document from the official GCS v1 discovery spec
+  - Register with Discovery API
+  - Validate against GCP spec
+  - Test with @google-cloud/storage client library
+  - **Deliverable**: Cloud Storage Discovery integration
+  - **Success Criteria**: Client library connects and basic operations work unmodified
+
 ### 12.6 Clean Up Knip Configuration
 
 - [ ] **12.6 Remove Knip Ignore Clauses**
@@ -570,9 +656,9 @@ tasks that build incrementally toward a fully functional system.
 
 ## Phase 4: Integration & Testing
 
-### 13. Integration Testing
+### 14. Integration Testing
 
-- [ ] **13.1 Create Integration Test Suite**
+- [ ] **14.1 Create Integration Test Suite**
   - Set up test environment
   - Create test fixtures
   - Add test data generators
@@ -580,23 +666,25 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Integration test framework
   - **Success Criteria**: Tests run in isolation
 
-- [ ] **13.2 Test Service Interactions**
+- [ ] **14.2 Test Service Interactions**
   - Test Pub/Sub with Scheduler
   - Test Tasks with HTTP targets
   - Test Secrets access patterns
+  - Test Cloud Storage with object lifecycle
   - Verify cross-service communication
   - **Deliverable**: Service interaction tests
   - **Success Criteria**: Services work together
 
-- [ ] **13.3 Test Client Library Compatibility**
+- [ ] **14.3 Test Client Library Compatibility**
   - Test @google-cloud/pubsub
   - Test @google-cloud/scheduler
   - Test @google-cloud/tasks
   - Test @google-cloud/secret-manager
+  - Test @google-cloud/storage
   - **Deliverable**: Client library validation
   - **Success Criteria**: Libraries work unmodified
 
-- [ ] **13.4 Performance Testing**
+- [ ] **14.4 Performance Testing**
   - Create load test scenarios
   - Test throughput limits
   - Measure response times
@@ -604,7 +692,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Performance benchmarks
   - **Success Criteria**: Meets performance targets
 
-- [ ] **13.5 Error Handling Testing**
+- [ ] **14.5 Error Handling Testing**
   - Test invalid requests
   - Test service failures
   - Test recovery mechanisms
@@ -612,24 +700,25 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Robust error handling
   - **Success Criteria**: Graceful error recovery
 
-### 14. End-to-End Testing
+### 15. End-to-End Testing
 
-- [ ] **14.1 Create E2E Test Scenarios**
+- [ ] **15.1 Create E2E Test Scenarios**
   - Design real-world workflows
   - Create test applications
   - Set up test infrastructure
   - **Deliverable**: E2E test suite
   - **Success Criteria**: Realistic scenarios work
 
-- [ ] **14.2 Test Complete Workflows**
+- [ ] **15.2 Test Complete Workflows**
   - Test message publishing pipeline
   - Test scheduled job execution
   - Test task queue processing
   - Test secret rotation
+  - Test Cloud Storage upload/download/copy pipelines
   - **Deliverable**: Workflow validation
   - **Success Criteria**: Full workflows succeed
 
-- [ ] **14.3 Test Docker Container**
+- [ ] **15.3 Test Docker Container**
   - Build Docker image
   - Test container startup
   - Verify exposed ports
@@ -639,9 +728,9 @@ tasks that build incrementally toward a fully functional system.
 
 ## Phase 5: Deployment & Documentation
 
-### 15. Docker Containerization
+### 16. Docker Containerization
 
-- [x] **15.1 Create Multi-Stage Dockerfile**
+- [x] **16.1 Create Multi-Stage Dockerfile**
   - Set up builder stage
   - Create production stage
   - Optimize image size
@@ -652,7 +741,7 @@ tasks that build incrementally toward a fully functional system.
   - **Implementation**: Dockerfile with production-only deps, health check, SQLite persistence
   - **Features**: Multi-arch support (amd64/arm64) via CI workflow
 
-- [x] **15.2 Configure Container Settings**
+- [x] **16.2 Configure Container Settings**
   - Set up environment variables
   - Configure volumes
   - Add health checks
@@ -662,7 +751,7 @@ tasks that build incrementally toward a fully functional system.
   - **Status**: ✅ Complete - Environment config via Zod schema, health check via healthcheck.ts, /app/data persistence
   - **Implementation**: Dockerfile HEALTHCHECK directive, src/healthcheck.ts, config system for env vars
 
-- [ ] **15.3 Create Docker Compose Configuration**
+- [ ] **16.3 Create Docker Compose Configuration**
   - Define service configuration
   - Add network settings
   - Configure persistence
@@ -670,9 +759,9 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Docker Compose setup
   - **Success Criteria**: Single command startup
 
-### 16. Documentation
+### 17. Documentation
 
-- [ ] **16.1 Create User Documentation**
+- [ ] **17.1 Create User Documentation**
   - Write getting started guide
   - Document configuration options
   - Create troubleshooting guide
@@ -680,7 +769,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: User documentation
   - **Success Criteria**: Clear usage instructions
 
-- [ ] **16.2 Generate API Documentation**
+- [ ] **17.2 Generate API Documentation**
   - Document all endpoints
   - Add request/response examples
   - Create authentication guide
@@ -688,7 +777,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: API documentation
   - **Success Criteria**: Complete API reference
 
-- [ ] **16.3 Create Development Documentation**
+- [ ] **17.3 Create Development Documentation**
   - Document architecture
   - Add contribution guidelines
   - Create development setup guide
@@ -696,7 +785,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Developer documentation
   - **Success Criteria**: Contributors can onboard
 
-- [ ] **16.4 Add Code Examples**
+- [ ] **17.4 Add Code Examples**
   - Create Python examples
   - Add Node.js examples
   - Include Go examples
@@ -704,9 +793,9 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Multi-language examples
   - **Success Criteria**: Examples work correctly
 
-### 17. Release Preparation
+### 18. Release Preparation
 
-- [x] **17.1 Create CI/CD Pipeline**
+- [x] **18.1 Create CI/CD Pipeline**
   - Set up automated testing
   - Add Docker image building
   - Configure release automation
@@ -717,7 +806,7 @@ tasks that build incrementally toward a fully functional system.
   - **Implementation**: .github/workflows/ci.yml (lint, format, test, build, Docker), .github/workflows/release.yml (release-please, GHCR)
   - **Features**: 80% coverage enforcement, multi-arch Docker builds, semantic versioning
 
-- [x] **17.2 Prepare Release Artifacts**
+- [x] **18.2 Prepare Release Artifacts**
   - Tag version in Git
   - Build release binaries
   - Create release notes
@@ -728,7 +817,7 @@ tasks that build incrementally toward a fully functional system.
   - **Implementation**: release-please-config.json, .release-please-manifest.json
   - **Features**: Conventional commit parsing, automated changelog, semantic version tags
 
-- [ ] **17.3 Set Up Distribution**
+- [ ] **18.3 Set Up Distribution**
   - Publish to Docker Hub
   - Create GitHub release
   - Update documentation site
@@ -743,7 +832,7 @@ tasks that build incrementally toward a fully functional system.
 1. Complete all Phase 1 tasks before moving to Phase 1.5
 2. Complete test structure migration (Phase 1.5) before Phase 2
 3. Core Framework (Phase 2) must be complete before services
-4. Implement services in order: Pub/Sub → Scheduler → Tasks → Secrets
+4. Implement services in order: Pub/Sub → Scheduler → Tasks → Secrets → Cloud Storage
 5. Co-located testing should be implemented alongside each component
 6. E2E testing (Phase 5) is comprehensive validation after all services complete
 7. Documentation can be written in parallel with development
@@ -808,16 +897,16 @@ tasks that build incrementally toward a fully functional system.
 - **Phase 1**: 5 days (Foundation)
 - **Phase 1.5**: 2 days (Test Migration)
 - **Phase 2**: 8 days (Core Framework)
-- **Phase 3**: 15 days (Services)
+- **Phase 3**: 20 days (Services — including Cloud Storage)
 - **Phase 4**: 5 days (Integration & Testing)
 - **Phase 5**: 5 days (Deployment)
 
 ### Total Effort
 
-- **Development**: 40 days (including test migration)
+- **Development**: 45 days (including test migration)
 - **Testing**: Continuous co-located testing (included above)
 - **Documentation**: 3 days (parallel)
-- **Total Timeline**: 8-9 weeks with single developer
+- **Total Timeline**: 9-10 weeks with single developer
 
 ## Definition of Done
 
@@ -847,6 +936,11 @@ Each task is considered complete when:
 ### Version History
 
 - **v1.0.0** (2025-09-27): Initial task breakdown
+- **v1.2.0** (2026-03-07): Added Cloud Storage service (§13) based on GCS v1 compatibility report
+  - Added 9 tasks (13.1-13.9) covering 73 non-IAM endpoints across buckets, objects, ACLs, notifications, folders, HMAC keys, and advanced operations
+  - Prioritized by real-world usage: Bucket/Object CRUD (highest) → copy/rewrite/compose (high) → ACLs/preconditions (medium) → notifications/folders/HMAC (low) → advanced/operations (lowest)
+  - Renumbered Integration Testing (§14), E2E Testing (§15), Docker (§16), Documentation (§17), Release (§18)
+  - Updated effort estimates (+5 days for Cloud Storage), timeline (9-10 weeks), and status tracking
 - **v1.1.0** (2025-09-27): Updated to reflect co-located testing strategy from DESIGN.md
   - Added Phase 1.5 for test structure migration
   - Updated all service implementation tasks to include co-located testing
@@ -856,9 +950,9 @@ Each task is considered complete when:
 ### Status
 
 - **Current Phase**: Phase 3 (Service Implementation) — In Progress
-- **Completed**: Phase 1 (Foundation), Phase 1.5 (Test Migration), Phase 2 (Core Framework), Scheduler (10.1-10.4), Tasks (11.1-11.4), Dockerfile (15.1-15.2), CI/CD (17.1-17.2)
-- **Next Action**: Implement Pub/Sub service (9.1-9.5), then Secrets Manager (12.1-12.5)
-- **Remaining**: Pub/Sub, Secrets Manager, Discovery Documents (10.5, 11.5), Task TTL (11.6), Knip cleanup (12.6), Integration/E2E tests, Docker Compose, Documentation, Distribution
+- **Completed**: Phase 1 (Foundation), Phase 1.5 (Test Migration), Phase 2 (Core Framework), Scheduler (10.1-10.4), Tasks (11.1-11.4), Dockerfile (16.1-16.2), CI/CD (18.1-18.2)
+- **Next Action**: Implement Pub/Sub service (9.1-9.5), then Secrets Manager (12.1-12.5), then Cloud Storage (13.1-13.9)
+- **Remaining**: Pub/Sub, Secrets Manager, Cloud Storage (13.1-13.9), Discovery Documents (10.5, 11.5), Task TTL (11.6), Knip cleanup (12.6), Integration/E2E tests, Docker Compose, Documentation, Distribution
 
 ### References
 

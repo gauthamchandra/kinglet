@@ -1,14 +1,16 @@
 ---
-description: "Audit GCP API compatibility by comparing our service implementations against official Google REST discovery documents. Use when: /compatibility-audit, audit compatibility, check GCP coverage, API gap analysis, find missing endpoints, compare with GCP API."
+description: "Audit GCP API compatibility by comparing our service implementations against official Google REST discovery documents. Use when: /compatibility-audit [service-name], audit compatibility, check GCP coverage, API gap analysis, find missing endpoints, compare with GCP API."
 ---
 
 # GCP Compatibility Audit
 
-Audit each emulated GCP service against its official REST discovery document to identify missing endpoints, parameter gaps, and schema mismatches.
+Audit emulated GCP services against their official REST discovery documents to identify missing endpoints, parameter gaps, and schema mismatches.
+
+Accepts an optional service name argument to audit a single service (e.g., `/compatibility-audit cloud-storage`). Without an argument, audits all services.
 
 ## Instructions
 
-### Step 1: Read the registry
+### Step 1: Read the registry and apply filter
 
 Read `discovery-document-registry.json` from the project root. It contains an array of services, each with:
 - `name`: kebab-case service identifier (used for report filenames)
@@ -17,9 +19,13 @@ Read `discovery-document-registry.json` from the project root. It contains an ar
 - `version`: API version (e.g., "v2")
 - `implementationPath`: relative path to our service implementation
 
+**Service filter**: Check if the user provided a service name argument (the text after `/compatibility-audit`).
+- If a service name **was provided**: filter the services array to only include entries where `name` matches the argument. If no match is found, inform the user and list all available service names from the registry, then stop.
+- If **no argument** was provided: use the full services array (audit all services).
+
 ### Step 2: Dispatch audit subagents
 
-Launch one subagent per service **in parallel** (all in a single message) using the Task tool with `subagent_type: "general-purpose"`. Each subagent gets the prompt below, with service-specific values filled in.
+Launch one subagent per service in the filtered list **in parallel** (all in a single message) using the Agent tool with `subagent_type: "general-purpose"`. Each subagent gets the prompt below, with service-specific values filled in.
 
 **Subagent prompt template** (fill in `{SERVICE_NAME}`, `{DISPLAY_NAME}`, `{DISCOVERY_URL}`, `{VERSION}`, `{IMPL_PATH}`):
 
@@ -144,7 +150,9 @@ Return a brief summary of your findings when done (e.g., "Cloud Tasks: 13/19 end
 
 ### Step 3: Generate summary report
 
-After ALL subagents complete, read each report from `.compatibility-reports/` and write a summary to `.compatibility-reports/SUMMARY.md`:
+**If only a single service was audited** (service name filter was used): skip SUMMARY.md generation. Instead, read the individual report from `.compatibility-reports/{SERVICE_NAME}-report.md` and present the key findings (summary stats + missing endpoints list) directly to the user.
+
+**If multiple services were audited** (no filter): after ALL subagents complete, read each report from `.compatibility-reports/` and write a summary to `.compatibility-reports/SUMMARY.md`:
 
 ```markdown
 # GCP Compatibility Audit Summary

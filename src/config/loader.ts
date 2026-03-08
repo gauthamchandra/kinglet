@@ -124,6 +124,7 @@ export class ConfigLoader {
         scheduler: {},
         tasks: {},
         secrets: {},
+        storage: {},
         ...mergedConfig.services,
       },
     };
@@ -253,6 +254,7 @@ export async function loadConfigFromEnv(
       scheduler: {},
       tasks: {},
       secrets: {},
+      storage: {},
       ...partialConfig.services,
     },
   };

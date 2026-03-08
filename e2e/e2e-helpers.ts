@@ -71,6 +71,14 @@ export function buildRouter(routes: RouteDefinition[]) {
 
         const result = await route.handler(routeRequest, context);
 
+        // Support binary responses (e.g., object media downloads)
+        if (result.body instanceof Uint8Array) {
+          return new Response(result.body, {
+            status: result.status,
+            headers: result.headers ?? {},
+          });
+        }
+
         return new Response(result.body !== undefined ? JSON.stringify(result.body) : null, {
           status: result.status,
           headers: {
