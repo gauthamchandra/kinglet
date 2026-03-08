@@ -49,7 +49,9 @@ jobs:
 
       - name: Parse router output
         id: router
-        run: bash .github/scripts/parse-router-output.sh '${{ steps.classify.outputs.response }}'
+        env:
+          ROUTER_RESPONSE: ${{ steps.classify.outputs.response }}
+        run: bash .github/scripts/parse-router-output.sh
 
   security-review:
     name: 'Security expert'
@@ -84,7 +86,9 @@ jobs:
           token: ${{ github.token }}
 
       - name: Save findings
-        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/security-findings.json
+        env:
+          RESPONSE: ${{ steps.review.outputs.response }}
+        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/security-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -125,7 +129,9 @@ jobs:
           token: ${{ github.token }}
 
       - name: Save findings
-        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/bun-compliance-findings.json
+        env:
+          RESPONSE: ${{ steps.review.outputs.response }}
+        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/bun-compliance-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -166,7 +172,9 @@ jobs:
           token: ${{ github.token }}
 
       - name: Save findings
-        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/architecture-findings.json
+        env:
+          RESPONSE: ${{ steps.review.outputs.response }}
+        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/architecture-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -207,7 +215,9 @@ jobs:
           token: ${{ github.token }}
 
       - name: Save findings
-        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/test-quality-findings.json
+        env:
+          RESPONSE: ${{ steps.review.outputs.response }}
+        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/test-quality-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -247,7 +257,9 @@ jobs:
           token: ${{ github.token }}
 
       - name: Save findings
-        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/general-findings.json
+        env:
+          RESPONSE: ${{ steps.review.outputs.response }}
+        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/general-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -326,12 +338,15 @@ jobs:
           token: ${{ github.token }}
 
       - name: Parse meta-review output
+        env:
+          RAW_RESPONSE: ${{ steps.review.outputs.response }}
         run: |
           # Extract the final findings and summary from meta-review response
-          RESPONSE='${{ steps.review.outputs.response }}'
+          # Strip DeepSeek R1 <think>...</think> reasoning blocks
+          RESPONSE=$(printf '%s' "$RAW_RESPONSE" | sed 's/<think>.*<\/think>//g')
 
           # Strip any markdown fencing the model might have added
-          RESPONSE=$(echo "$RESPONSE" | sed 's/^```json//; s/^```//; s/```$//' | tr -d '\n')
+          RESPONSE=$(printf '%s' "$RESPONSE" | sed 's/^```json//; s/^```//; s/```$//' | tr -d '\n')
 
           # Extract findings array into the standard format
           echo "$RESPONSE" | jq '{ "findings": .findings }' > /tmp/final-findings.json 2>/dev/null \

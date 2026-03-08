@@ -3,14 +3,17 @@
 # Parse the JSON output from the router LLM and set GitHub Actions outputs.
 # Extracts boolean flags for each expert category from the model's response.
 #
-# Usage: bash parse-router-output.sh <router-response>
+# Usage: ROUTER_RESPONSE="..." bash parse-router-output.sh
 
 set -euo pipefail
 
-RESPONSE="${1:?Usage: parse-router-output.sh <router-response-json>}"
+RESPONSE="${ROUTER_RESPONSE:?ROUTER_RESPONSE env var must be set}"
+
+# Strip DeepSeek R1 <think>...</think> reasoning blocks
+RESPONSE=$(printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g')
 
 # Strip any markdown fencing the model might have added despite instructions
-RESPONSE=$(echo "$RESPONSE" | sed 's/^```json//; s/^```//; s/```$//' | tr -d '\n')
+RESPONSE=$(printf '%s' "$RESPONSE" | sed 's/^```json//; s/^```//; s/```$//' | tr -d '\n')
 
 # Parse JSON booleans with jq, defaulting to true on parse failure (fail-open)
 parse_field() {
