@@ -95,6 +95,7 @@ export class TaskRepository {
           { field: 'queueName', operator: 'eq', value: queueName },
           { field: 'status', operator: 'eq', value: TaskStatus.PENDING },
           { field: 'scheduleTime', operator: 'lte', value: now },
+          { field: 'httpRequest', operator: 'ne', value: null },
         ],
         operator: 'and',
       },

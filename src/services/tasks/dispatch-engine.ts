@@ -140,8 +140,8 @@ export class DispatchEngine {
     const attempt = task.dispatchCount;
 
     if (!task.httpRequest) {
-      this.logger.debug(
-        `Task ${task.name} has no httpRequest (appEngineHttpRequest tasks are not dispatched)`
+      this.logger.warn(
+        `Task ${task.name} has no httpRequest — skipping dispatch (appEngineHttpRequest tasks are not yet supported)`
       );
 
       return;
