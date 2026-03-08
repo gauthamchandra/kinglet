@@ -3,7 +3,8 @@
  */
 
 import type { StorageManager } from '@/core/storage/manager.ts';
-import type { BaseRecord } from '@/core/storage/types.ts';
+import type { BaseRecord, QueryCondition } from '@/core/storage/types.ts';
+import { TasksError } from './queue-service.ts';
 import type { QueueRecord } from './types.ts';
 import { QueueState, TASKS_QUEUES_TABLE, tasksQueuesTableSchema } from './types.ts';
 
@@ -45,16 +46,30 @@ export class QueueRepository {
     project: string,
     location: string,
     pageSize?: number,
-    pageToken?: string
+    pageToken?: string,
+    filter?: string
   ): Promise<ListQueuesResult> {
     const prefix = `projects/${project}/locations/${location}/queues/`;
 
     const offset = pageToken ? parseInt(pageToken, 10) : 0;
     const limit = pageSize ?? 100;
 
+    const conditions: QueryCondition[] = [{ field: 'name', operator: 'like', value: `${prefix}%` }];
+
+    if (filter) {
+      const match = filter.match(/^(\w+)\s*=\s*(\w+)$/);
+
+      if (!match) {
+        throw new TasksError('INVALID_ARGUMENT', `Invalid filter expression: ${filter}`);
+      }
+
+      conditions.push({ field: match[1] as string, operator: 'eq', value: match[2] as string });
+    }
+
     const result = await this.storage.find<QueueRecord>(TASKS_QUEUES_TABLE, {
       filter: {
-        conditions: [{ field: 'name', operator: 'like', value: `${prefix}%` }],
+        conditions,
+        operator: 'and',
       },
       pagination: { limit, offset },
       sort: [{ field: 'name', direction: 'asc' }],

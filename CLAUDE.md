@@ -127,6 +127,19 @@ await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
 - **Prefer specific assertions over vague ones.** Use `toBeTypeOf('string')` instead of `toBeDefined()` when you know the expected type. Use exact value matches (`toBe`, `toEqual`) when the value is deterministic.
 - **Every test must have at least one `expect()` call** that validates observable behavior.
 - **Do not write comments that restate assertions** (e.g., `// Task should be deleted` right before `expect(task).toBeNull()`). The test name and assertion are self-documenting.
+- **Never wrap assertions inside `if` blocks.** Conditional assertions silently pass when the condition is false, making the test unable to catch regressions. Assert the precondition directly instead:
+```ts
+// BAD - silently skips if status isn't 200
+if (resp.status === 200) {
+  const data = await resp.json();
+  expect(data.field).toBe('value');
+}
+
+// GOOD - fails explicitly if precondition isn't met
+expect(resp.status).toBe(200);
+const data = await resp.json();
+expect(data.field).toBe('value');
+```
 
 Test environment is configured to use error-level logging and test NODE_ENV.
 
@@ -162,3 +175,4 @@ Each ADR should include: Status, Context, Decision, Rationale, Alternatives Cons
 - When writing typescript code, use substring() instead of the deprecated substr() method.
 - When importing types in Typescript, they must be imported using a type-only import. So instead of `import { StorageConfig } from '../types'`, do `import type { StorageConfig } from '../types'`.
 - Prefer static imports over dynamic `await import()` for readability. Only use dynamic imports when there is a genuine need (conditional loading, circular dependency breaking, etc.).
+- When checking if a numeric variable is present, use `value != null` instead of a truthy check (`value ?` or `if (value)`), since `0` is a valid number but falsy.

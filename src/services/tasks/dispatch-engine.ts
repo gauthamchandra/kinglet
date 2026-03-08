@@ -139,6 +139,14 @@ export class DispatchEngine {
 
     const attempt = task.dispatchCount;
 
+    if (!task.httpRequest) {
+      this.logger.warn(
+        `Task ${task.name} has no httpRequest — skipping dispatch (appEngineHttpRequest tasks are not yet supported)`
+      );
+
+      return;
+    }
+
     let httpRequest: TaskHttpRequest;
 
     try {
@@ -158,7 +166,7 @@ export class DispatchEngine {
 
     const dispatchTime = new Date().toISOString();
 
-    const success = await this.executeHttpRequest(task.name, httpRequest, timeoutMs);
+    const result = await this.executeHttpRequest(task.name, httpRequest, timeoutMs);
 
     const responseTime = new Date().toISOString();
 
@@ -166,8 +174,10 @@ export class DispatchEngine {
       scheduleTime: task.scheduleTime,
       dispatchTime,
       responseTime,
-      responseStatus: success ? 200 : 500,
+      responseStatus: { code: result.statusCode, message: result.statusMessage },
     });
+
+    const success = result.success;
 
     if (success) {
       this.logger.info(`Task ${task.name} dispatched successfully`);
@@ -286,7 +296,7 @@ export class DispatchEngine {
     taskName: string,
     httpRequest: TaskHttpRequest,
     timeoutMs: number
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; statusCode: number; statusMessage: string }> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -306,20 +316,30 @@ export class DispatchEngine {
       if (response.ok) {
         this.logger.info(`Task ${taskName} executed successfully (${response.status})`);
 
-        return true;
+        return {
+          success: true,
+          statusCode: response.status,
+          statusMessage: response.statusText || 'OK',
+        };
       }
 
       this.logger.warn(`Task ${taskName} returned non-2xx status: ${response.status}`);
 
-      return false;
+      return {
+        success: false,
+        statusCode: response.status,
+        statusMessage: response.statusText || 'Error',
+      };
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         this.logger.warn(`Task ${taskName} timed out after ${timeoutMs}ms`);
-      } else {
-        this.logger.error(`Task ${taskName} execution failed`, err);
+
+        return { success: false, statusCode: 504, statusMessage: 'Gateway Timeout' };
       }
 
-      return false;
+      this.logger.error(`Task ${taskName} execution failed`, err);
+
+      return { success: false, statusCode: 500, statusMessage: 'Internal Server Error' };
     } finally {
       clearTimeout(timeoutId);
     }

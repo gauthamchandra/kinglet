@@ -647,7 +647,6 @@ export class ServiceDispatcher {
       case 'linear':
         delay = initialDelay * attempt;
         break;
-      case 'fixed':
       default:
         delay = initialDelay;
         break;
