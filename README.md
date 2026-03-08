@@ -135,8 +135,11 @@ curl -X POST http://localhost:8765/v2/projects/test-project/locations/us-central
 |---------|--------|-------------|-------|
 | Cloud Scheduler | Implemented | v1 | Job CRUD, pause/resume, cron execution |
 | Cloud Tasks | Implemented | v2 | Queue lifecycle, task CRUD, HTTP dispatch |
+| Cloud Workflows | Experimental | v1 | Workflow CRUD, revisions, LRO operations |
 | Pub/Sub | Planned | — | Not yet implemented |
 | Secret Manager | Planned | — | Not yet implemented |
+
+> **Experimental** means the service API is implemented but has not yet been validated against production use cases or official GCP client libraries. Breaking changes may occur.
 
 ## Configuration
 
@@ -167,6 +170,7 @@ All configuration is via environment variables. Defaults are shown below.
 | `ENABLE_SCHEDULER` | `true` | Enable Cloud Scheduler service |
 | `ENABLE_TASKS` | `true` | Enable Cloud Tasks service |
 | `ENABLE_SECRETS` | `true` | Enable Secret Manager service |
+| `ENABLE_WORKFLOWS` | `true` | Enable Cloud Workflows service |
 
 ### Logging
 
@@ -241,6 +245,34 @@ docker run -d \
 | `POST` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks` | Create task |
 | `DELETE` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks/{taskId}` | Delete task |
 | `POST` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks/{taskId}:run` | Run task immediately |
+
+### Cloud Workflows (v1) — Experimental
+
+**Workflows**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/locations/{location}/workflows` | List workflows |
+| `GET` | `/v1/projects/{project}/locations/{location}/workflows/{workflowId}` | Get workflow |
+| `POST` | `/v1/projects/{project}/locations/{location}/workflows` | Create workflow |
+| `PATCH` | `/v1/projects/{project}/locations/{location}/workflows/{workflowId}` | Update workflow |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/workflows/{workflowId}` | Delete workflow |
+| `GET` | `/v1/projects/{project}/locations/{location}/workflows/{workflowId}:listRevisions` | List revisions |
+
+**Operations**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/locations/{location}/operations` | List operations |
+| `GET` | `/v1/projects/{project}/locations/{location}/operations/{operationId}` | Get operation |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/operations/{operationId}` | Delete operation |
+
+**Locations**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/locations` | List locations |
+| `GET` | `/v1/projects/{project}/locations/{location}` | Get location |
 
 ## Storage
 
