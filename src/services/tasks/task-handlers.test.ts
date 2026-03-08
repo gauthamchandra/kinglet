@@ -269,8 +269,8 @@ describe('TaskHandlers', () => {
     });
   });
 
-  describe('run task handler', () => {
-    test('should run a task', async () => {
+  describe('task action routing', () => {
+    test('should route :run action to run handler', async () => {
       await taskService.createTask('p', 'l', 'q', {
         task: {
           name: 'projects/p/locations/l/queues/q/tasks/t1',
@@ -279,19 +279,103 @@ describe('TaskHandlers', () => {
       });
 
       const routes = handlers.getRoutes();
-      const runRoute = routes.find(r => r.id === 'tasks.tasks.action');
+      const actionRoute = routes.find(r => r.id === 'tasks.tasks.action');
 
       const req = makeRouteRequest({
         params: { project: 'p', location: 'l', queueId: 'q', taskAction: 't1:run' },
       });
 
-      const res = await runRoute?.handler(req, ctx);
+      const res = await actionRoute?.handler(req, ctx);
 
       expect(res?.status).toBe(200);
 
       const body = res?.body as Record<string, unknown>;
 
       expect(body.name).toBe('projects/p/locations/l/queues/q/tasks/t1');
+    });
+
+    test('should correctly extract taskId from action with colons in ID', async () => {
+      await taskService.createTask('p', 'l', 'q', {
+        task: {
+          name: 'projects/p/locations/l/queues/q/tasks/task-with-colon',
+          httpRequest: { url: 'https://example.com', httpMethod: 'POST' },
+        },
+      });
+
+      const routes = handlers.getRoutes();
+      const actionRoute = routes.find(r => r.id === 'tasks.tasks.action');
+
+      const req = makeRouteRequest({
+        params: {
+          project: 'p',
+          location: 'l',
+          queueId: 'q',
+          taskAction: 'task-with-colon:run',
+        },
+      });
+
+      const res = await actionRoute?.handler(req, ctx);
+
+      expect(res?.status).toBe(200);
+
+      const body = res?.body as Record<string, unknown>;
+
+      expect(body.name).toBe('projects/p/locations/l/queues/q/tasks/task-with-colon');
+    });
+
+    test('should return 400 for unknown action verb', async () => {
+      const routes = handlers.getRoutes();
+      const actionRoute = routes.find(r => r.id === 'tasks.tasks.action');
+
+      const req = makeRouteRequest({
+        params: { project: 'p', location: 'l', queueId: 'q', taskAction: 't1:unknown' },
+      });
+
+      const res = await actionRoute?.handler(req, ctx);
+
+      expect(res?.status).toBe(400);
+    });
+
+    test('should return 400 when no colon separator present', async () => {
+      const routes = handlers.getRoutes();
+      const actionRoute = routes.find(r => r.id === 'tasks.tasks.action');
+
+      const req = makeRouteRequest({
+        params: { project: 'p', location: 'l', queueId: 'q', taskAction: 'noaction' },
+      });
+
+      const res = await actionRoute?.handler(req, ctx);
+
+      expect(res?.status).toBe(400);
+    });
+
+    test('should route :buffer action to buffer handler', async () => {
+      await queueService.updateQueue(
+        'projects/p/locations/l/queues/q',
+        { httpTarget: { uriOverride: { host: 'localhost', port: 8080 } } },
+        'httpTarget'
+      );
+
+      const routes = handlers.getRoutes();
+      const actionRoute = routes.find(r => r.id === 'tasks.tasks.action');
+
+      const req = makeRouteRequest({
+        params: {
+          project: 'p',
+          location: 'l',
+          queueId: 'q',
+          taskAction: 'my-buffered-task:buffer',
+        },
+        body: { body: { data: Buffer.from('hello').toString('base64') } },
+      });
+
+      const res = await actionRoute?.handler(req, ctx);
+
+      expect(res?.status).toBe(200);
+
+      const body = res?.body as { task: Record<string, unknown> };
+
+      expect(body.task.name).toBe('projects/p/locations/l/queues/q/tasks/my-buffered-task');
     });
   });
 });
