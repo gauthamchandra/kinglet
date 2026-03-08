@@ -131,12 +131,14 @@ export class QueueHandlers {
       const pageSize =
         pageSizeRaw && !Number.isNaN(pageSizeRaw) && pageSizeRaw > 0 ? pageSizeRaw : undefined;
       const pageToken = req.query.pageToken ? String(req.query.pageToken) : undefined;
+      const filter = req.query.filter ? String(req.query.filter) : undefined;
 
       const result = await this.service.listQueues(
         project ?? '',
         location ?? '',
         pageSize,
-        pageToken
+        pageToken,
+        filter
       );
 
       const responseBody: Record<string, unknown> = { queues: result.queues };
@@ -154,7 +156,9 @@ export class QueueHandlers {
   private async handleUpdateQueue(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const name = this.buildNameFromParams(req.params);
-      const result = await this.service.updateQueue(name, req.body);
+      const updateMask = req.query.updateMask ? String(req.query.updateMask) : undefined;
+
+      const result = await this.service.updateQueue(name, req.body, updateMask);
 
       return this.responseUtils.success(result);
     } catch (err) {

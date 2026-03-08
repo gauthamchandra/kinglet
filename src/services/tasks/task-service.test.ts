@@ -44,8 +44,8 @@ describe('TaskService', () => {
       });
 
       expect(result.name).toMatch(/^projects\/p\/locations\/l\/queues\/q\/tasks\//);
-      expect(result.httpRequest.url).toBe('https://example.com/handler');
-      expect(result.httpRequest.httpMethod).toBe('POST');
+      expect(result.httpRequest?.url).toBe('https://example.com/handler');
+      expect(result.httpRequest?.httpMethod).toBe('POST');
       expect(result.scheduleTime).toBeTypeOf('string');
       expect(result.dispatchCount).toBe(0);
     });
@@ -90,7 +90,7 @@ describe('TaskService', () => {
         responseView: 'BASIC',
       });
 
-      expect(result.httpRequest.body).toBeUndefined();
+      expect(result.httpRequest?.body).toBeUndefined();
     });
 
     test('should throw NOT_FOUND for non-existent queue', async () => {
@@ -216,11 +216,11 @@ describe('TaskService', () => {
 
       const basic = await service.getTask('projects/p/locations/l/queues/q/tasks/t1', 'BASIC');
 
-      expect(basic.httpRequest.body).toBeUndefined();
+      expect(basic.httpRequest?.body).toBeUndefined();
 
       const full = await service.getTask('projects/p/locations/l/queues/q/tasks/t1', 'FULL');
 
-      expect(full.httpRequest.body).toBeTypeOf('string');
+      expect(full.httpRequest?.body).toBeTypeOf('string');
     });
 
     test('should throw NOT_FOUND for missing task', async () => {

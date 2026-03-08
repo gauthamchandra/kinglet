@@ -36,6 +36,7 @@ function makeQueueData(
     tombstoneTtl: DEFAULT_TOMBSTONE_TTL,
     stackdriverLoggingConfig: null,
     httpTarget: null,
+    appEngineRoutingOverride: null,
     ...overrides,
   };
 }
@@ -58,6 +59,7 @@ function makeTaskData(
     lastAttempt: null,
     status: TaskStatus.PENDING,
     tombstoneExpiry: null,
+    appEngineHttpRequest: null,
     ...overrides,
   };
 }
