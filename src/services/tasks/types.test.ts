@@ -726,6 +726,37 @@ describe('Cloud Tasks Types', () => {
       expect(response.lastAttempt).toBeUndefined();
     });
 
+    test('BASIC view should omit appEngineHttpRequest body', () => {
+      const record = makeTaskRecord();
+
+      record.httpRequest = null;
+      record.appEngineHttpRequest = JSON.stringify({
+        httpMethod: 'POST',
+        relativeUri: '/handler',
+        body: Buffer.from('{"key":"value"}').toString('base64'),
+      });
+
+      const response = taskRecordToResponse(record, 'BASIC');
+
+      expect(response.appEngineHttpRequest?.body).toBeUndefined();
+      expect(response.appEngineHttpRequest?.relativeUri).toBe('/handler');
+    });
+
+    test('FULL view should include appEngineHttpRequest body', () => {
+      const record = makeTaskRecord();
+
+      record.httpRequest = null;
+      record.appEngineHttpRequest = JSON.stringify({
+        httpMethod: 'POST',
+        relativeUri: '/handler',
+        body: Buffer.from('{"key":"value"}').toString('base64'),
+      });
+
+      const response = taskRecordToResponse(record, 'FULL');
+
+      expect(response.appEngineHttpRequest?.body).toBeTypeOf('string');
+    });
+
     test('FULL view should include attempts when present', () => {
       const record = makeTaskRecord();
 

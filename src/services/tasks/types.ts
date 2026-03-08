@@ -563,11 +563,17 @@ export function taskRecordToResponse(record: TaskRecord, view?: string): TaskRes
   }
 
   if (record.appEngineHttpRequest) {
-    response.appEngineHttpRequest = parseJsonField<AppEngineHttpRequest>(
+    const appEngineHttpRequest = parseJsonField<AppEngineHttpRequest>(
       record.appEngineHttpRequest,
       'appEngineHttpRequest',
       record.name
     );
+
+    if (isBasic) {
+      delete appEngineHttpRequest.body;
+    }
+
+    response.appEngineHttpRequest = appEngineHttpRequest;
   }
 
   if (!isBasic && record.firstAttempt) {
