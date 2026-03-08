@@ -109,7 +109,7 @@ export function matchRoute(pattern: string, pathname: string): Record<string, st
     const pathPart = pathParts[i] ?? '';
 
     // Check for action suffix pattern like :jobId:pause
-    const actionMatch = pp.match(/^:([^:]+)(:[a-z]+)$/);
+    const actionMatch = pp.match(/^:([^:]+)(:[a-zA-Z]+)$/);
 
     if (actionMatch) {
       const paramName = actionMatch[1] as string;

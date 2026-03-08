@@ -17,6 +17,7 @@
         "@commitlint/config-conventional": "^20.0.0",
         "@google-cloud/scheduler": "^5.3.1",
         "@google-cloud/tasks": "^6.2.1",
+        "@google-cloud/workflows": "4.3.0",
         "@types/bun": "latest",
         "@types/node": "^24.5.2",
         "husky": "^9.1.7",
@@ -94,6 +95,8 @@
     "@google-cloud/scheduler": ["@google-cloud/scheduler@5.3.1", "", { "dependencies": { "google-gax": "^5.0.0" } }, "sha512-EGPTRRjMO4F/52HPVPVmcP4EUaONnISXo6VJP75QOQw9cMhg+yiruj8zb0BM4iUIY8+vOwlFv/VCHqrZ8gj6bw=="],
 
     "@google-cloud/tasks": ["@google-cloud/tasks@6.2.1", "", { "dependencies": { "google-gax": "^5.0.0" } }, "sha512-Y21jNAdaUwZvYQijJSE9E27NA87c/Wl9fZxNDGx6WsWFFGEBmJmc1zg2fXLXTW0kPvKIxHQC+IcKa9SNgvIEsQ=="],
+
+    "@google-cloud/workflows": ["@google-cloud/workflows@4.3.0", "", { "dependencies": { "google-gax": "^5.0.1-rc.0" } }, "sha512-cRJgMafu0VGyU3NXxfwm9fBU/bjWaRgdTsEyP5i7wU7uiPBwUHwZAnrhrZBpfPmV+DLLz4rlzgwUqMsZ4LcHAA=="],
 
     "@grpc/grpc-js": ["@grpc/grpc-js@1.14.0", "", { "dependencies": { "@grpc/proto-loader": "^0.8.0", "@js-sdsl/ordered-map": "^4.4.2" } }, "sha512-N8Jx6PaYzcTRNzirReJCtADVoq4z7+1KQ4E70jTg/koQiMoUSN1kbNjPOqpPbhMFhfU1/l7ixspPl8dNY+FoUg=="],
 

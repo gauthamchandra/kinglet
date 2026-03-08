@@ -10,6 +10,7 @@ import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
+import { CloudWorkflowsService } from '@/services/workflows/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 
 const logger = new Logger('Main');
@@ -18,6 +19,7 @@ let server: Server | null = null;
 let storageManager: StorageManager | null = null;
 let schedulerService: SchedulerService | null = null;
 let tasksService: CloudTasksService | null = null;
+let workflowsService: CloudWorkflowsService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -83,6 +85,17 @@ async function main(): Promise<void> {
       logger.info('Secret Manager service enabled (stub - not yet implemented)');
     }
 
+    if (config.services.workflows.enabled) {
+      workflowsService = new CloudWorkflowsService(storageManager, new Logger('Workflows'));
+      await workflowsService.initialize();
+
+      for (const route of workflowsService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      logger.info('Cloud Workflows service enabled');
+    }
+
     server = Bun.serve({
       port: config.server.httpPort,
       fetch: request => router.route(request),
@@ -117,6 +130,11 @@ async function shutdown(signal: string): Promise<void> {
   if (tasksService) {
     await tasksService.stop();
     logger.info('Tasks service stopped');
+  }
+
+  if (workflowsService) {
+    await workflowsService.stop();
+    logger.info('Workflows service stopped');
   }
 
   if (storageManager) {
