@@ -9,6 +9,7 @@ import {
   buildWorkflowName,
   CreateWorkflowRequestSchema,
   generateRevisionId,
+  requestToWorkflowRecord,
   revisionRecordToResponse,
   UpdateWorkflowRequestSchema,
   workflowRecordToResponse,
@@ -78,24 +79,10 @@ export class WorkflowService {
     }
 
     const revisionId = generateRevisionId(1);
-    const now = new Date().toISOString();
 
-    const record = await this.repo.createWorkflow({
-      name,
-      description: request.description ?? '',
-      state: 'ACTIVE',
-      revisionId,
-      revisionCreateTime: now,
-      labels: JSON.stringify(request.labels ?? {}),
-      serviceAccount: request.serviceAccount ?? '',
-      sourceContents: request.sourceContents,
-      cryptoKeyName: request.cryptoKeyName ?? null,
-      stateError: null,
-      callLogLevel: request.callLogLevel ?? 'CALL_LOG_LEVEL_UNSPECIFIED',
-      userEnvVars: request.userEnvVars ? JSON.stringify(request.userEnvVars) : null,
-      executionHistoryLevel: request.executionHistoryLevel ?? 'EXECUTION_HISTORY_LEVEL_UNSPECIFIED',
-      tags: request.tags ? JSON.stringify(request.tags) : null,
-    });
+    const record = await this.repo.createWorkflow(
+      requestToWorkflowRecord(name, request, revisionId)
+    );
 
     // Create first revision snapshot
     await this.repo.createRevision({
@@ -103,7 +90,7 @@ export class WorkflowService {
       revisionId,
       description: record.description,
       state: record.state,
-      revisionCreateTime: now,
+      revisionCreateTime: record.revisionCreateTime,
       labels: record.labels,
       serviceAccount: record.serviceAccount,
       sourceContents: record.sourceContents,

@@ -4,7 +4,7 @@
 
 This document provides a comprehensive task breakdown for implementing the
 LocalStack GCP emulator based on the approved REQUIREMENTS.md and DESIGN.md
-documents. The implementation is organized into 5 phases with discrete, testable
+documents. The implementation is organized into 6 phases with discrete, testable
 tasks that build incrementally toward a fully functional system.
 
 ## Implementation Phases
@@ -554,9 +554,9 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Secrets Discovery integration
   - **Success Criteria**: Client library connects
 
-### 12.6 Clean Up Knip Configuration
+### 12.6 Knip Configuration Cleanup
 
-- [ ] **12.6 Remove Knip Ignore Clauses**
+- [ ] **12.6 Clean Up Knip Configuration**
   - Review `ignoreFiles` and `ignoreIssues` in `knip.json`
   - Remove `ignoreFiles` for barrel `index.ts` files once they are imported
   - Remove `ignoreIssues` for proto-types, shared types, and storage interfaces
