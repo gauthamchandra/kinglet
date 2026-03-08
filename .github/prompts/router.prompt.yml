@@ -55,6 +55,5 @@ messages:
       ```
 
 modelParameters:
-  maxCompletionTokens: 256
   temperature: 0.1
   top_p: 0.95
