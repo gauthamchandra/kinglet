@@ -2,9 +2,15 @@
  * Workflow Service - business logic for Cloud Workflows CRUD and revision management
  */
 
+import type { BaseRecord } from '@/core/storage/types.ts';
 import type { OperationsStore } from './operations.ts';
 import type { WorkflowRepository } from './repository.ts';
-import type { OperationResponse, WorkflowResponse } from './types.ts';
+import type {
+  OperationResponse,
+  WorkflowRecord,
+  WorkflowResponse,
+  WorkflowRevisionRecord,
+} from './types.ts';
 import {
   buildWorkflowName,
   CreateWorkflowRequestSchema,
@@ -85,22 +91,9 @@ export class WorkflowService {
     );
 
     // Create first revision snapshot
-    await this.repo.createRevision({
-      workflowName: name,
-      revisionId,
-      description: record.description,
-      state: record.state,
-      revisionCreateTime: record.revisionCreateTime,
-      labels: record.labels,
-      serviceAccount: record.serviceAccount,
-      sourceContents: record.sourceContents,
-      cryptoKeyName: record.cryptoKeyName,
-      stateError: record.stateError,
-      callLogLevel: record.callLogLevel,
-      userEnvVars: record.userEnvVars,
-      executionHistoryLevel: record.executionHistoryLevel,
-      tags: record.tags,
-    });
+    await this.repo.createRevision(
+      buildRevisionSnapshot(record, revisionId, record.revisionCreateTime)
+    );
 
     const workflowResponse = workflowRecordToResponse(record);
 
@@ -225,22 +218,7 @@ export class WorkflowService {
       }
 
       // Create revision snapshot
-      await this.repo.createRevision({
-        workflowName: name,
-        revisionId: newRevisionId,
-        description: updated.description,
-        state: updated.state,
-        revisionCreateTime: now,
-        labels: updated.labels,
-        serviceAccount: updated.serviceAccount,
-        sourceContents: updated.sourceContents,
-        cryptoKeyName: updated.cryptoKeyName,
-        stateError: updated.stateError,
-        callLogLevel: updated.callLogLevel,
-        userEnvVars: updated.userEnvVars,
-        executionHistoryLevel: updated.executionHistoryLevel,
-        tags: updated.tags,
-      });
+      await this.repo.createRevision(buildRevisionSnapshot(updated, newRevisionId, now));
 
       const { project, location } = parseNameComponents(name);
       const workflowResponse = workflowRecordToResponse(updated);
@@ -298,6 +276,29 @@ export class WorkflowService {
       nextPageToken: result.nextPageToken,
     };
   }
+}
+
+function buildRevisionSnapshot(
+  record: WorkflowRecord,
+  revisionId: string,
+  revisionCreateTime: string
+): Omit<WorkflowRevisionRecord, keyof BaseRecord> {
+  return {
+    workflowName: record.name,
+    revisionId,
+    description: record.description,
+    state: record.state,
+    revisionCreateTime,
+    labels: record.labels,
+    serviceAccount: record.serviceAccount,
+    sourceContents: record.sourceContents,
+    cryptoKeyName: record.cryptoKeyName,
+    stateError: record.stateError,
+    callLogLevel: record.callLogLevel,
+    userEnvVars: record.userEnvVars,
+    executionHistoryLevel: record.executionHistoryLevel,
+    tags: record.tags,
+  };
 }
 
 function parseNameComponents(name: string): { project: string; location: string } {
