@@ -227,7 +227,7 @@ export class TaskService {
     const path = uri?.pathOverride?.path ?? '';
     const query = uri?.queryOverride?.queryParams ?? '';
 
-    const portSuffix = port ? `:${port}` : '';
+    const portSuffix = port != null ? `:${port}` : '';
     const querySuffix = query ? `?${query}` : '';
     const url = `${scheme}://${host}${portSuffix}${path}${querySuffix}`;
 

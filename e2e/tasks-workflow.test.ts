@@ -516,16 +516,14 @@ describe('Cloud Tasks E2E: Raw HTTP API', () => {
     // Get the task with FULL view to check attempt data
     const getResp = await fetch(emulatorUrl(`${tasksPath}/${taskId}?responseView=FULL`));
 
-    if (getResp.status === 200) {
-      const updatedTask = await getResp.json();
+    expect(getResp.status).toBe(200);
+    const updatedTask = await getResp.json();
 
-      if (updatedTask.lastAttempt) {
-        expect(updatedTask.lastAttempt.responseStatus).toHaveProperty('code');
-        expect(updatedTask.lastAttempt.responseStatus).toHaveProperty('message');
-        expect(updatedTask.lastAttempt.responseStatus.code).toBeTypeOf('number');
-        expect(updatedTask.lastAttempt.responseStatus.message).toBeTypeOf('string');
-      }
-    }
+    expect(updatedTask.lastAttempt).toBeDefined();
+    expect(updatedTask.lastAttempt.responseStatus).toHaveProperty('code');
+    expect(updatedTask.lastAttempt.responseStatus).toHaveProperty('message');
+    expect(updatedTask.lastAttempt.responseStatus.code).toBeTypeOf('number');
+    expect(updatedTask.lastAttempt.responseStatus.message).toBeTypeOf('string');
 
     // Cleanup
     await fetch(emulatorUrl(`${queuesBasePath}/${qId}`), { method: 'DELETE' });
