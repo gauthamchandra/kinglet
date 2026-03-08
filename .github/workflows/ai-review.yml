@@ -88,7 +88,7 @@ jobs:
       - name: Save findings
         env:
           RESPONSE: ${{ steps.review.outputs.response }}
-        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/security-findings.json
+        run: printf '%s' "$RESPONSE" | sed '/<think>/,/<\/think>/d' > /tmp/security-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -131,7 +131,7 @@ jobs:
       - name: Save findings
         env:
           RESPONSE: ${{ steps.review.outputs.response }}
-        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/bun-compliance-findings.json
+        run: printf '%s' "$RESPONSE" | sed '/<think>/,/<\/think>/d' > /tmp/bun-compliance-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -174,7 +174,7 @@ jobs:
       - name: Save findings
         env:
           RESPONSE: ${{ steps.review.outputs.response }}
-        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/architecture-findings.json
+        run: printf '%s' "$RESPONSE" | sed '/<think>/,/<\/think>/d' > /tmp/architecture-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -217,7 +217,7 @@ jobs:
       - name: Save findings
         env:
           RESPONSE: ${{ steps.review.outputs.response }}
-        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/test-quality-findings.json
+        run: printf '%s' "$RESPONSE" | sed '/<think>/,/<\/think>/d' > /tmp/test-quality-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -259,7 +259,7 @@ jobs:
       - name: Save findings
         env:
           RESPONSE: ${{ steps.review.outputs.response }}
-        run: printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g' > /tmp/general-findings.json
+        run: printf '%s' "$RESPONSE" | sed '/<think>/,/<\/think>/d' > /tmp/general-findings.json
 
       - name: Upload findings
         uses: actions/upload-artifact@v4
@@ -343,7 +343,7 @@ jobs:
         run: |
           # Extract the final findings and summary from meta-review response
           # Strip DeepSeek R1 <think>...</think> reasoning blocks
-          RESPONSE=$(printf '%s' "$RAW_RESPONSE" | sed 's/<think>.*<\/think>//g')
+          RESPONSE=$(printf '%s' "$RAW_RESPONSE" | sed '/<think>/,/<\/think>/d')
 
           # Strip any markdown fencing the model might have added
           RESPONSE=$(printf '%s' "$RESPONSE" | sed 's/^```json//; s/^```//; s/```$//' | tr -d '\n')

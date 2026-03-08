@@ -10,7 +10,7 @@ set -euo pipefail
 RESPONSE="${ROUTER_RESPONSE:?ROUTER_RESPONSE env var must be set}"
 
 # Strip DeepSeek R1 <think>...</think> reasoning blocks
-RESPONSE=$(printf '%s' "$RESPONSE" | sed 's/<think>.*<\/think>//g')
+RESPONSE=$(printf '%s\n' "$RESPONSE" | sed '/<think>/,/<\/think>/d')
 
 # Strip any markdown fencing the model might have added despite instructions
 RESPONSE=$(printf '%s' "$RESPONSE" | sed 's/^```json//; s/^```//; s/```$//' | tr -d '\n')
