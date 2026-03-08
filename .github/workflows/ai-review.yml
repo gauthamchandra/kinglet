@@ -35,7 +35,7 @@ jobs:
         id: classify
         uses: actions/ai-inference@v2
         with:
-          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          model: 'deepseek/DeepSeek-R1-0528'
           prompt-file: '.github/prompts/router.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -46,7 +46,7 @@ jobs:
         run: bash .github/scripts/parse-router-output.sh '${{ steps.classify.outputs.response }}'
 
   security-review:
-    name: "Security expert"
+    name: 'Security expert'
     needs: route
     if: ${{ needs.route.outputs.security == 'true' }}
     runs-on: ubuntu-latest
@@ -70,7 +70,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          model: 'deepseek/DeepSeek-R1-0528'
           prompt-file: '.github/prompts/security-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -87,7 +87,7 @@ jobs:
           path: /tmp/security-findings.json
 
   bun-compliance-review:
-    name: "Bun compliance expert"
+    name: 'Bun compliance expert'
     needs: route
     if: ${{ needs.route.outputs.bun-compliance == 'true' }}
     runs-on: ubuntu-latest
@@ -111,7 +111,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          model: 'deepseek/DeepSeek-R1-0528'
           prompt-file: '.github/prompts/bun-compliance-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -128,7 +128,7 @@ jobs:
           path: /tmp/bun-compliance-findings.json
 
   architecture-review:
-    name: "Architecture expert"
+    name: 'Architecture expert'
     needs: route
     if: ${{ needs.route.outputs.architecture == 'true' }}
     runs-on: ubuntu-latest
@@ -152,7 +152,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          model: 'deepseek/DeepSeek-R1-0528'
           prompt-file: '.github/prompts/architecture-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -169,7 +169,7 @@ jobs:
           path: /tmp/architecture-findings.json
 
   test-quality-review:
-    name: "Test quality expert"
+    name: 'Test quality expert'
     needs: route
     if: ${{ needs.route.outputs.test-quality == 'true' }}
     runs-on: ubuntu-latest
@@ -193,7 +193,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          model: 'deepseek/DeepSeek-R1-0528'
           prompt-file: '.github/prompts/test-quality-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -210,7 +210,7 @@ jobs:
           path: /tmp/test-quality-findings.json
 
   general-review:
-    name: "General expert"
+    name: 'General expert'
     needs: route
     runs-on: ubuntu-latest
     permissions:
@@ -233,7 +233,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          model: 'deepseek/DeepSeek-R1-0528'
           prompt-file: '.github/prompts/general-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -251,7 +251,15 @@ jobs:
 
   aggregate:
     name: Aggregate and deduplicate findings
-    needs: [route, security-review, bun-compliance-review, architecture-review, test-quality-review, general-review]
+    needs:
+      [
+        route,
+        security-review,
+        bun-compliance-review,
+        architecture-review,
+        test-quality-review,
+        general-review,
+      ]
     if: ${{ always() && needs.route.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
@@ -274,7 +282,7 @@ jobs:
           path: /tmp/aggregated-findings.json
 
   meta-review:
-    name: "Meta-review (final sweep)"
+    name: 'Meta-review (final sweep)'
     needs: aggregate
     runs-on: ubuntu-latest
     permissions:
@@ -303,7 +311,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          model: 'deepseek/DeepSeek-R1-0528'
           prompt-file: '.github/prompts/meta-review-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
