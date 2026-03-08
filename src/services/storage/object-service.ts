@@ -161,6 +161,34 @@ export class ObjectService {
     return objectRecordToResponse(updated);
   }
 
+  async updateObject(
+    bucket: string,
+    name: string,
+    body: { metadata?: Record<string, string>; contentType?: string }
+  ): Promise<ObjectResponse> {
+    const existing = await this.objectRepo.getObject(bucket, name);
+
+    if (!existing) {
+      throw new GcsError('NOT_FOUND', `Object ${name} not found in bucket ${bucket}`);
+    }
+
+    // PUT performs full replacement: omitted fields reset to defaults
+    const updates: Record<string, unknown> = {
+      metadata: body.metadata ? JSON.stringify(body.metadata) : null,
+      contentType: body.contentType ?? 'application/octet-stream',
+      metageneration: existing.metageneration + 1,
+      updated: new Date().toISOString(),
+    };
+
+    const updated = await this.objectRepo.updateObject(bucket, name, updates);
+
+    if (!updated) {
+      throw new GcsError('NOT_FOUND', `Object ${name} not found in bucket ${bucket}`);
+    }
+
+    return objectRecordToResponse(updated);
+  }
+
   async deleteObject(bucket: string, name: string): Promise<void> {
     const record = await this.objectRepo.getObject(bucket, name);
 

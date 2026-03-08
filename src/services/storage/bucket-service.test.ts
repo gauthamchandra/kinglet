@@ -149,6 +149,69 @@ describe('BucketService', () => {
     await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
   });
 
+  // ── updateBucket (PUT - full replacement) ──
+
+  test('updateBucket resets omitted fields to defaults', async () => {
+    await service.createBucket('proj-1', {
+      name: 'replace-me',
+      storageClass: 'COLDLINE',
+      labels: { env: 'prod' },
+      versioning: { enabled: true },
+    });
+
+    // PUT with only storageClass — labels, versioning, cors, lifecycle should reset to null/default
+    const result = await service.updateBucket('replace-me', {
+      storageClass: 'NEARLINE',
+    });
+
+    expect(result.storageClass).toBe('NEARLINE');
+    expect(result.labels).toBeUndefined();
+    expect(result.versioning).toBeUndefined();
+    expect(result.cors).toBeUndefined();
+    expect(result.lifecycle).toBeUndefined();
+  });
+
+  test('updateBucket with empty body resets all to defaults', async () => {
+    await service.createBucket('proj-1', {
+      name: 'reset-all',
+      storageClass: 'ARCHIVE',
+      labels: { team: 'infra' },
+    });
+
+    const result = await service.updateBucket('reset-all', {});
+
+    expect(result.storageClass).toBe('STANDARD');
+    expect(result.labels).toBeUndefined();
+  });
+
+  test('updateBucket increments metageneration', async () => {
+    await service.createBucket('proj-1', { name: 'put-meta' });
+    const result = await service.updateBucket('put-meta', {});
+    expect(result.metageneration).toBe('2');
+  });
+
+  test('updateBucket throws NOT_FOUND', async () => {
+    const promise = service.updateBucket('nope', {});
+    await expect(promise).rejects.toBeInstanceOf(GcsError);
+    await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
+  });
+
+  test('patchBucket preserves omitted fields', async () => {
+    await service.createBucket('proj-1', {
+      name: 'patch-preserve',
+      storageClass: 'COLDLINE',
+      labels: { env: 'prod' },
+    });
+
+    // PATCH with only storageClass — labels should be preserved
+    const result = await service.patchBucket('patch-preserve', {
+      storageClass: 'NEARLINE',
+    });
+
+    expect(result.storageClass).toBe('NEARLINE');
+    expect(result.labels).toEqual({ env: 'prod' });
+  });
+
   // ── deleteBucket ──
 
   test('deleteBucket succeeds for empty bucket', async () => {

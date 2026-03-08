@@ -266,7 +266,7 @@ export class ObjectHandlers {
       const name = parseObjectName(req.params.object ?? '');
       const body = (req.body ?? {}) as { metadata?: Record<string, string>; contentType?: string };
 
-      const result = await this.service.patchObject(bucket, name, body);
+      const result = await this.service.updateObject(bucket, name, body);
       return this.responseUtils.success(result);
     } catch (err) {
       return this.handleError(err);

@@ -8,6 +8,7 @@ import type { BucketListResponse, BucketResponse } from './types.ts';
 import {
   bucketRecordToResponse,
   CreateBucketRequestSchema,
+  DEFAULT_STORAGE_CLASS,
   parseBucketName,
   requestToBucketRecord,
   UpdateBucketRequestSchema,
@@ -140,7 +141,36 @@ export class BucketService {
   }
 
   async updateBucket(name: string, body: unknown): Promise<BucketResponse> {
-    return this.patchBucket(name, body);
+    const parsed = UpdateBucketRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      throw new GcsError('INVALID_ARGUMENT', `Invalid update request: ${parsed.error.message}`);
+    }
+
+    const existing = await this.bucketRepo.getBucketByName(name);
+
+    if (!existing) {
+      throw new GcsError('NOT_FOUND', `Bucket ${name} not found`);
+    }
+
+    // PUT performs full replacement: omitted fields reset to defaults
+    const updates: Record<string, unknown> = {
+      storageClass: parsed.data.storageClass ?? DEFAULT_STORAGE_CLASS,
+      versioning: parsed.data.versioning ? JSON.stringify(parsed.data.versioning) : null,
+      labels: parsed.data.labels ? JSON.stringify(parsed.data.labels) : null,
+      cors: parsed.data.cors ? JSON.stringify(parsed.data.cors) : null,
+      lifecycle: parsed.data.lifecycle ? JSON.stringify(parsed.data.lifecycle) : null,
+      metageneration: existing.metageneration + 1,
+      updated: new Date().toISOString(),
+    };
+
+    const updated = await this.bucketRepo.updateBucket(name, updates);
+
+    if (!updated) {
+      throw new GcsError('NOT_FOUND', `Bucket ${name} not found`);
+    }
+
+    return bucketRecordToResponse(updated);
   }
 
   async deleteBucket(name: string): Promise<void> {

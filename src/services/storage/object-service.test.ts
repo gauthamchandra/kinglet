@@ -189,6 +189,63 @@ describe('ObjectService', () => {
     await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
   });
 
+  // ── updateObject (PUT - full replacement) ──
+
+  test('updateObject resets omitted fields to defaults', async () => {
+    await service.insertObject('test-bucket', 'update-me.txt', new TextEncoder().encode('data'), {
+      contentType: 'text/plain',
+      metadata: { env: 'prod', team: 'infra' },
+    });
+
+    // PUT with only contentType — metadata should be cleared
+    const result = await service.updateObject('test-bucket', 'update-me.txt', {
+      contentType: 'application/json',
+    });
+
+    expect(result.contentType).toBe('application/json');
+    expect(result.metadata).toBeUndefined();
+  });
+
+  test('updateObject with empty body resets contentType to default', async () => {
+    await service.insertObject('test-bucket', 'reset.txt', new TextEncoder().encode('data'), {
+      contentType: 'text/html',
+      metadata: { key: 'val' },
+    });
+
+    const result = await service.updateObject('test-bucket', 'reset.txt', {});
+
+    expect(result.contentType).toBe('application/octet-stream');
+    expect(result.metadata).toBeUndefined();
+  });
+
+  test('updateObject increments metageneration', async () => {
+    await service.insertObject('test-bucket', 'put-meta.txt', new TextEncoder().encode('data'));
+
+    const result = await service.updateObject('test-bucket', 'put-meta.txt', {});
+    expect(result.metageneration).toBe('2');
+  });
+
+  test('updateObject throws NOT_FOUND', async () => {
+    const promise = service.updateObject('test-bucket', 'nope', {});
+    await expect(promise).rejects.toBeInstanceOf(GcsError);
+    await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
+  });
+
+  test('patchObject preserves omitted fields', async () => {
+    await service.insertObject('test-bucket', 'patch-keep.txt', new TextEncoder().encode('data'), {
+      contentType: 'text/plain',
+      metadata: { env: 'prod' },
+    });
+
+    // PATCH with only contentType — metadata should be preserved
+    const result = await service.patchObject('test-bucket', 'patch-keep.txt', {
+      contentType: 'application/json',
+    });
+
+    expect(result.contentType).toBe('application/json');
+    expect(result.metadata).toEqual({ env: 'prod' });
+  });
+
   // ── deleteObject ──
 
   test('deleteObject deletes blob and record', async () => {
