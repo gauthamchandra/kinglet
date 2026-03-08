@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord, QueryCondition } from '@/core/storage/types.ts';
+import { TasksError } from './queue-service.ts';
 import type { QueueRecord } from './types.ts';
 import { QueueState, TASKS_QUEUES_TABLE, tasksQueuesTableSchema } from './types.ts';
 
@@ -58,9 +59,11 @@ export class QueueRepository {
     if (filter) {
       const match = filter.match(/^(\w+)\s*=\s*(\w+)$/);
 
-      if (match) {
-        conditions.push({ field: match[1] as string, operator: 'eq', value: match[2] as string });
+      if (!match) {
+        throw new TasksError('INVALID_ARGUMENT', `Invalid filter expression: ${filter}`);
       }
+
+      conditions.push({ field: match[1] as string, operator: 'eq', value: match[2] as string });
     }
 
     const result = await this.storage.find<QueueRecord>(TASKS_QUEUES_TABLE, {

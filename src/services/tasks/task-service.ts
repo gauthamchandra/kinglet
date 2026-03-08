@@ -8,6 +8,7 @@ import { TasksError } from './queue-service.ts';
 import type { TaskRepository } from './task-repository.ts';
 import type { AppEngineHttpRequest, QueueHttpTarget, TaskRecord, TaskResponse } from './types.ts';
 import {
+  buildQueueName,
   buildTaskName,
   CreateTaskRequestSchema,
   parseDurationSeconds,
@@ -171,9 +172,9 @@ export class TaskService {
     location: string,
     queueId: string,
     taskId: string,
-    queueName: string,
     body?: Record<string, unknown>
   ): Promise<{ task: TaskResponse }> {
+    const queueName = buildQueueName(project, location, queueId);
     const queue = await this.queueRepo.getQueueByName(queueName);
 
     if (!queue) {

@@ -169,7 +169,6 @@ export class TaskHandlers {
   private async handleBufferTask(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const { project, location, queueId, taskId } = req.params;
-      const queueName = buildQueueName(project ?? '', location ?? '', queueId ?? '');
       const body = req.body as Record<string, unknown> | undefined;
 
       const result = await this.service.bufferTask(
@@ -177,7 +176,6 @@ export class TaskHandlers {
         location ?? '',
         queueId ?? '',
         taskId ?? '',
-        queueName,
         body
       );
 
