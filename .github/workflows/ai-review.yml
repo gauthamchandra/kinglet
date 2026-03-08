@@ -1,0 +1,374 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  models: read
+
+jobs:
+  route:
+    name: Route prompt experts
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    outputs:
+      security: ${{ steps.router.outputs.security }}
+      bun-compliance: ${{ steps.router.outputs.bun-compliance }}
+      architecture: ${{ steps.router.outputs.architecture }}
+      test-quality: ${{ steps.router.outputs.test-quality }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get PR diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+
+      - name: Annotate diff with line numbers
+        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+
+      - name: Classify diff with LLM router
+        id: classify
+        uses: actions/ai-inference@v2
+        with:
+          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          prompt-file: '.github/prompts/router.prompt.yml'
+          file_input: |
+            diff: /tmp/pr-diff-annotated.txt
+          token: ${{ github.token }}
+
+      - name: Parse router output
+        id: router
+        run: bash .github/scripts/parse-router-output.sh '${{ steps.classify.outputs.response }}'
+
+  security-review:
+    name: "Security expert"
+    needs: route
+    if: ${{ needs.route.outputs.security == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      models: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get PR diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+
+      - name: Annotate diff with line numbers
+        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+
+      - name: Run security review
+        id: review
+        uses: actions/ai-inference@v2
+        with:
+          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          prompt-file: '.github/prompts/security-expert.prompt.yml'
+          file_input: |
+            diff: /tmp/pr-diff-annotated.txt
+          toolsets: 'repos'
+          token: ${{ github.token }}
+
+      - name: Save findings
+        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/security-findings.json
+
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-findings
+          path: /tmp/security-findings.json
+
+  bun-compliance-review:
+    name: "Bun compliance expert"
+    needs: route
+    if: ${{ needs.route.outputs.bun-compliance == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      models: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get PR diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+
+      - name: Annotate diff with line numbers
+        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+
+      - name: Run Bun compliance review
+        id: review
+        uses: actions/ai-inference@v2
+        with:
+          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          prompt-file: '.github/prompts/bun-compliance-expert.prompt.yml'
+          file_input: |
+            diff: /tmp/pr-diff-annotated.txt
+          toolsets: 'repos'
+          token: ${{ github.token }}
+
+      - name: Save findings
+        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/bun-compliance-findings.json
+
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-compliance-findings
+          path: /tmp/bun-compliance-findings.json
+
+  architecture-review:
+    name: "Architecture expert"
+    needs: route
+    if: ${{ needs.route.outputs.architecture == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      models: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get PR diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+
+      - name: Annotate diff with line numbers
+        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+
+      - name: Run architecture review
+        id: review
+        uses: actions/ai-inference@v2
+        with:
+          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          prompt-file: '.github/prompts/architecture-expert.prompt.yml'
+          file_input: |
+            diff: /tmp/pr-diff-annotated.txt
+          toolsets: 'repos'
+          token: ${{ github.token }}
+
+      - name: Save findings
+        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/architecture-findings.json
+
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-findings
+          path: /tmp/architecture-findings.json
+
+  test-quality-review:
+    name: "Test quality expert"
+    needs: route
+    if: ${{ needs.route.outputs.test-quality == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      models: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get PR diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+
+      - name: Annotate diff with line numbers
+        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+
+      - name: Run test quality review
+        id: review
+        uses: actions/ai-inference@v2
+        with:
+          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          prompt-file: '.github/prompts/test-quality-expert.prompt.yml'
+          file_input: |
+            diff: /tmp/pr-diff-annotated.txt
+          toolsets: 'repos'
+          token: ${{ github.token }}
+
+      - name: Save findings
+        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/test-quality-findings.json
+
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-quality-findings
+          path: /tmp/test-quality-findings.json
+
+  general-review:
+    name: "General expert"
+    needs: route
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      models: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get PR diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+
+      - name: Annotate diff with line numbers
+        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+
+      - name: Run general review
+        id: review
+        uses: actions/ai-inference@v2
+        with:
+          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          prompt-file: '.github/prompts/general-expert.prompt.yml'
+          file_input: |
+            diff: /tmp/pr-diff-annotated.txt
+          toolsets: 'repos'
+          token: ${{ github.token }}
+
+      - name: Save findings
+        run: printf '%s\n' '${{ steps.review.outputs.response }}' > /tmp/general-findings.json
+
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: general-findings
+          path: /tmp/general-findings.json
+
+  aggregate:
+    name: Aggregate and deduplicate findings
+    needs: [route, security-review, bun-compliance-review, architecture-review, test-quality-review, general-review]
+    if: ${{ always() && needs.route.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all findings
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/findings
+          merge-multiple: true
+
+      - name: Aggregate and deduplicate
+        run: bash .github/scripts/aggregate-findings.sh /tmp/findings /tmp/aggregated-findings.json
+
+      - name: Upload aggregated findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: aggregated-findings
+          path: /tmp/aggregated-findings.json
+
+  meta-review:
+    name: "Meta-review (final sweep)"
+    needs: aggregate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      models: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get PR diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.txt
+
+      - name: Annotate diff with line numbers
+        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+
+      - name: Download aggregated findings
+        uses: actions/download-artifact@v4
+        with:
+          name: aggregated-findings
+          path: /tmp
+
+      - name: Run meta-review
+        id: review
+        uses: actions/ai-inference@v2
+        with:
+          model: 'azureml-deepseek/DeepSeek-R1-0528'
+          prompt-file: '.github/prompts/meta-review-expert.prompt.yml'
+          file_input: |
+            diff: /tmp/pr-diff-annotated.txt
+            findings: /tmp/aggregated-findings.json
+          toolsets: 'repos'
+          token: ${{ github.token }}
+
+      - name: Parse meta-review output
+        run: |
+          # Extract the final findings and summary from meta-review response
+          RESPONSE='${{ steps.review.outputs.response }}'
+
+          # Strip any markdown fencing the model might have added
+          RESPONSE=$(echo "$RESPONSE" | sed 's/^```json//; s/^```//; s/```$//' | tr -d '\n')
+
+          # Extract findings array into the standard format
+          echo "$RESPONSE" | jq '{ "findings": .findings }' > /tmp/final-findings.json 2>/dev/null \
+            || cp /tmp/aggregated-findings.json /tmp/final-findings.json
+
+          # Extract executive summary
+          echo "$RESPONSE" | jq -r '.summary // "No summary available."' > /tmp/executive-summary.md 2>/dev/null \
+            || echo "Meta-review could not produce a summary." > /tmp/executive-summary.md
+
+          # Log removed findings for transparency
+          REMOVED=$(echo "$RESPONSE" | jq '.removed | length' 2>/dev/null || echo 0)
+          echo "Meta-review removed $REMOVED false positive(s)"
+
+      - name: Upload final findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-findings
+          path: |
+            /tmp/final-findings.json
+            /tmp/executive-summary.md
+
+  post-review:
+    name: Post review comment
+    needs: [route, meta-review]
+    if: ${{ always() && needs.route.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download final findings
+        uses: actions/download-artifact@v4
+        with:
+          name: final-findings
+          path: /tmp
+
+      - name: Render markdown comment
+        run: |
+          bash .github/scripts/render-findings.sh \
+            /tmp/final-findings.json \
+            /tmp/review.md \
+            /tmp/executive-summary.md \
+            "${{ github.repository }}" \
+            "${{ github.event.pull_request.head.sha }}"
+
+      - name: Post PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --repo "${{ github.repository }}" \
+            --body-file /tmp/review.md
