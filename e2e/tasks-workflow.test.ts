@@ -53,6 +53,12 @@ beforeAll(async () => {
 
       callbackRequests.push(record);
 
+      const url = new URL(request.url);
+
+      if (url.pathname === '/attempt-check') {
+        return new Response('Intentional failure', { status: 500 });
+      }
+
       return new Response('OK', { status: 200 });
     },
   });
@@ -479,6 +485,13 @@ describe('Cloud Tasks E2E: Raw HTTP API', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: `projects/${project}/locations/${location}/queues/${qId}`,
+        retryConfig: {
+          maxAttempts: 1,
+          maxRetryDuration: '0s',
+          minBackoff: '0.100s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
       }),
     });
 
@@ -500,7 +513,7 @@ describe('Cloud Tasks E2E: Raw HTTP API', () => {
     const task = await createResp.json();
     const taskId = task.name.split('/').pop();
 
-    // Force run the task
+    // Force run the task (callback returns 500 for /attempt-check)
     callbackRequests.length = 0;
 
     await fetch(emulatorUrl(`${tasksPath}/${taskId}:run`), {
@@ -513,7 +526,7 @@ describe('Cloud Tasks E2E: Raw HTTP API', () => {
     // Wait briefly for dispatch engine to update the task record
     await new Promise(resolve => setTimeout(resolve, 200));
 
-    // Get the task with FULL view to check attempt data
+    // Task should be FAILED (not tombstoned) since the callback returned 500
     const getResp = await fetch(emulatorUrl(`${tasksPath}/${taskId}?responseView=FULL`));
 
     expect(getResp.status).toBe(200);
