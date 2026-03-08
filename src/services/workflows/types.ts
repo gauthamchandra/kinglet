@@ -259,26 +259,6 @@ export function buildWorkflowName(project: string, location: string, workflowId:
   return `projects/${project}/locations/${location}/workflows/${workflowId}`;
 }
 
-export function parseOperationName(name: string): {
-  project: string;
-  location: string;
-  operationId: string;
-} {
-  const match = name.match(/^projects\/([^/]+)\/locations\/([^/]+)\/operations\/([^/]+)$/);
-
-  if (!match) {
-    throw new Error(
-      `Invalid operation resource name: "${name}". Expected format: projects/{project}/locations/{location}/operations/{operationId}`
-    );
-  }
-
-  return {
-    project: match[1] as string,
-    location: match[2] as string,
-    operationId: match[3] as string,
-  };
-}
-
 export function buildOperationName(project: string, location: string, operationId: string): string {
   return `projects/${project}/locations/${location}/operations/${operationId}`;
 }

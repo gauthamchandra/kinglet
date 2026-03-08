@@ -36,7 +36,7 @@ const ServicesConfigSchema = z.object({
   scheduler: z.object({ enabled: z.boolean().default(true) }),
   tasks: z.object({ enabled: z.boolean().default(true) }),
   secrets: z.object({ enabled: z.boolean().default(true) }),
-  workflows: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  workflows: z.object({ enabled: z.boolean().default(true) }),
 });
 
 // Logging configuration schema

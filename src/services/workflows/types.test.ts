@@ -13,7 +13,6 @@ import {
   ExecutionHistoryLevel,
   generateRevisionId,
   operationRecordToResponse,
-  parseOperationName,
   parseWorkflowName,
   requestToWorkflowRecord,
   revisionRecordToResponse,
@@ -57,24 +56,6 @@ describe('buildWorkflowName', () => {
     const result = buildWorkflowName('my-project', 'us-central1', 'my-workflow');
 
     expect(result).toBe('projects/my-project/locations/us-central1/workflows/my-workflow');
-  });
-});
-
-describe('parseOperationName', () => {
-  test('parses a valid operation resource name', () => {
-    const result = parseOperationName(
-      'projects/my-project/locations/us-central1/operations/op-123'
-    );
-
-    expect(result).toEqual({
-      project: 'my-project',
-      location: 'us-central1',
-      operationId: 'op-123',
-    });
-  });
-
-  test('throws for invalid format', () => {
-    expect(() => parseOperationName('invalid')).toThrow('Invalid operation resource name');
   });
 });
 
