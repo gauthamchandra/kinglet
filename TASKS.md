@@ -4,7 +4,7 @@
 
 This document provides a comprehensive task breakdown for implementing the
 LocalStack GCP emulator based on the approved REQUIREMENTS.md and DESIGN.md
-documents. The implementation is organized into 5 phases with discrete, testable
+documents. The implementation is organized into 6 phases with discrete, testable
 tasks that build incrementally toward a fully functional system.
 
 ## Implementation Phases
@@ -554,9 +554,9 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Secrets Discovery integration
   - **Success Criteria**: Client library connects
 
-### 12.6 Clean Up Knip Configuration
+### 12.6 Knip Configuration Cleanup
 
-- [ ] **12.6 Remove Knip Ignore Clauses**
+- [ ] **12.6 Clean Up Knip Configuration**
   - Review `ignoreFiles` and `ignoreIssues` in `knip.json`
   - Remove `ignoreFiles` for barrel `index.ts` files once they are imported
   - Remove `ignoreIssues` for proto-types, shared types, and storage interfaces
@@ -568,11 +568,117 @@ tasks that build incrementally toward a fully functional system.
   - **Success Criteria**: `bun run knip` passes clean with no ignore overrides
     for Phase 3 code
 
+### 13. Cloud Workflows Service
+
+- [ ] **13.1 Create Workflows Data Models & Types**
+  - Define TypeScript types: `Workflow`, `StateError`, `Operation`,
+    `OperationMetadata`, `Status`
+  - Define response types: `ListWorkflowsResponse`,
+    `ListWorkflowRevisionsResponse`, `ListOperationsResponse`
+  - Define Zod validation schemas for create/update requests
+  - Add resource name helpers (`buildWorkflowName`, `parseWorkflowName`)
+  - Add `revisionId` generation logic (format: `000001-a4d` — zero-padded
+    ordinal + hyphen + 3 hex chars)
+  - Write co-located unit tests for types, schemas, and helpers
+  - **Deliverable**: Workflows type system with validation
+  - **Success Criteria**: Types match GCP Workflows v1 spec, all schemas
+    validate correctly
+  - **Pattern**: Follow `src/services/scheduler/types.ts` and
+    `src/services/tasks/types.ts`
+
+- [ ] **13.2 Implement Workflows Storage & Repository**
+  - Create SQLite schema for workflows with revision tracking (store full
+    snapshots per revision, not overwrite)
+  - Implement `WorkflowRepository` with CRUD operations
+  - Support querying by resource name, project/location, and revisionId
+  - Implement pagination in list queries (pageSize/pageToken)
+  - Write co-located unit tests for repository operations
+  - **Deliverable**: Persistent workflow storage with revision history
+  - **Success Criteria**: All CRUD operations work, revisions are preserved,
+    pagination returns correct pages
+  - **Pattern**: Follow `src/services/scheduler/repository.ts`
+
+- [ ] **13.3 Implement Long-Running Operations (LRO) Support**
+  - Create an operations store within the workflows service to track
+    create/delete/patch operations
+  - Operations complete synchronously for local emulation but return proper
+    `Operation` response envelopes with `done: true`
+  - Store operations with `OperationMetadata` (createTime, endTime, target,
+    verb, apiVersion)
+  - Support list, get, and delete for stored operations
+  - Write co-located unit tests for LRO store
+  - **Deliverable**: Operation tracking for async-style API responses
+  - **Success Criteria**: Create/delete/patch return valid Operation objects,
+    operations can be queried after creation
+  - **Note**: Build as a service-local module. Extract to `src/core/` later if
+    other services need LRO
+
+- [ ] **13.4 Implement Workflow CRUD Handlers**
+  - `POST v1/{+parent}/workflows` — create workflow, return Operation
+  - `GET v1/{+name}` — get workflow (with optional `revisionId` query param)
+  - `GET v1/{+parent}/workflows` — list workflows (pagination, filter, orderBy)
+  - `DELETE v1/{+name}` — delete workflow and all revisions, return Operation
+  - `PATCH v1/{+name}` — update workflow (with `updateMask`), create new
+    revision when `sourceContents` or `serviceAccount` change, return Operation
+  - Create `WorkflowService` class with business logic
+  - Create `WorkflowHandlers` class with `getRoutes()` returning
+    `RouteDefinition[]`
+  - Write co-located unit tests for service and handlers
+  - **Deliverable**: Core Workflows API (5 endpoints)
+  - **Success Criteria**: All CRUD operations work end-to-end with correct
+    GCP-compatible responses
+  - **Pattern**: Follow `src/services/scheduler/handlers.ts` and
+    `src/services/scheduler/service.ts`
+  - **Depends on**: 13.1, 13.2, 13.3
+
+- [ ] **13.5 Implement Workflow Revisions**
+  - `GET v1/{+name}:listRevisions` — list revisions in reverse chronological
+    order with pagination
+  - Ensure `patch` creates new revisions when `sourceContents` or
+    `serviceAccount` change
+  - Each revision stores full Workflow snapshot with unique `revisionId` and
+    `revisionCreateTime`
+  - Write co-located unit tests for revision listing and creation
+  - **Deliverable**: Workflow revision history endpoint
+  - **Success Criteria**: Revisions are created on relevant updates, listed in
+    reverse chronological order with correct pagination
+  - **Depends on**: 13.2, 13.4
+
+- [ ] **13.6 Implement Operations Endpoints**
+  - `GET v1/{+name}/operations` — list operations (pagination, filter)
+  - `GET v1/{+name}` — get single operation by name
+  - `DELETE v1/{+name}` — delete operation record
+  - Write co-located unit tests for operations endpoints
+  - **Deliverable**: Operations management API (3 endpoints)
+  - **Success Criteria**: Operations created by CRUD handlers are queryable and
+    deletable
+  - **Depends on**: 13.3
+
+- [ ] **13.7 Implement Location Endpoints**
+  - `GET v1/{+name}/locations` — list locations (hardcoded GCP locations,
+    pagination)
+  - `GET v1/{+name}` — get single location
+  - Check if shared location handling exists in `src/core/` first; if not,
+    implement within the workflows service
+  - Write co-located unit tests for location endpoints
+  - **Deliverable**: Location discovery API (2 endpoints)
+  - **Success Criteria**: Returns valid GCP location data
+  - **Lowest priority** — standard infrastructure endpoints
+
+- [ ] **13.8 Add Workflows Discovery Document**
+  - Generate Discovery Document for Cloud Workflows v1
+  - Register with Discovery API via service registry
+  - Validate against GCP spec
+  - Test with client library
+  - **Deliverable**: Workflows Discovery integration
+  - **Success Criteria**: Client library connects and recognizes API
+  - **Pattern**: Follow existing Discovery integration pattern
+
 ## Phase 4: Integration & Testing
 
-### 13. Integration Testing
+### 14. Integration Testing
 
-- [ ] **13.1 Create Integration Test Suite**
+- [ ] **14.1 Create Integration Test Suite**
   - Set up test environment
   - Create test fixtures
   - Add test data generators
@@ -580,7 +686,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Integration test framework
   - **Success Criteria**: Tests run in isolation
 
-- [ ] **13.2 Test Service Interactions**
+- [ ] **14.2 Test Service Interactions**
   - Test Pub/Sub with Scheduler
   - Test Tasks with HTTP targets
   - Test Secrets access patterns
@@ -588,7 +694,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Service interaction tests
   - **Success Criteria**: Services work together
 
-- [ ] **13.3 Test Client Library Compatibility**
+- [ ] **14.3 Test Client Library Compatibility**
   - Test @google-cloud/pubsub
   - Test @google-cloud/scheduler
   - Test @google-cloud/tasks
@@ -596,7 +702,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Client library validation
   - **Success Criteria**: Libraries work unmodified
 
-- [ ] **13.4 Performance Testing**
+- [ ] **14.4 Performance Testing**
   - Create load test scenarios
   - Test throughput limits
   - Measure response times
@@ -604,7 +710,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Performance benchmarks
   - **Success Criteria**: Meets performance targets
 
-- [ ] **13.5 Error Handling Testing**
+- [ ] **14.5 Error Handling Testing**
   - Test invalid requests
   - Test service failures
   - Test recovery mechanisms
@@ -612,16 +718,16 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Robust error handling
   - **Success Criteria**: Graceful error recovery
 
-### 14. End-to-End Testing
+### 15. End-to-End Testing
 
-- [ ] **14.1 Create E2E Test Scenarios**
+- [ ] **15.1 Create E2E Test Scenarios**
   - Design real-world workflows
   - Create test applications
   - Set up test infrastructure
   - **Deliverable**: E2E test suite
   - **Success Criteria**: Realistic scenarios work
 
-- [ ] **14.2 Test Complete Workflows**
+- [ ] **15.2 Test Complete Workflows**
   - Test message publishing pipeline
   - Test scheduled job execution
   - Test task queue processing
@@ -629,7 +735,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Workflow validation
   - **Success Criteria**: Full workflows succeed
 
-- [ ] **14.3 Test Docker Container**
+- [ ] **15.3 Test Docker Container**
   - Build Docker image
   - Test container startup
   - Verify exposed ports
@@ -639,9 +745,9 @@ tasks that build incrementally toward a fully functional system.
 
 ## Phase 5: Deployment & Documentation
 
-### 15. Docker Containerization
+### 16. Docker Containerization
 
-- [x] **15.1 Create Multi-Stage Dockerfile**
+- [x] **16.1 Create Multi-Stage Dockerfile**
   - Set up builder stage
   - Create production stage
   - Optimize image size
@@ -652,7 +758,7 @@ tasks that build incrementally toward a fully functional system.
   - **Implementation**: Dockerfile with production-only deps, health check, SQLite persistence
   - **Features**: Multi-arch support (amd64/arm64) via CI workflow
 
-- [x] **15.2 Configure Container Settings**
+- [x] **16.2 Configure Container Settings**
   - Set up environment variables
   - Configure volumes
   - Add health checks
@@ -662,7 +768,7 @@ tasks that build incrementally toward a fully functional system.
   - **Status**: ✅ Complete - Environment config via Zod schema, health check via healthcheck.ts, /app/data persistence
   - **Implementation**: Dockerfile HEALTHCHECK directive, src/healthcheck.ts, config system for env vars
 
-- [ ] **15.3 Create Docker Compose Configuration**
+- [ ] **16.3 Create Docker Compose Configuration**
   - Define service configuration
   - Add network settings
   - Configure persistence
@@ -670,9 +776,9 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Docker Compose setup
   - **Success Criteria**: Single command startup
 
-### 16. Documentation
+### 17. Documentation
 
-- [ ] **16.1 Create User Documentation**
+- [ ] **17.1 Create User Documentation**
   - Write getting started guide
   - Document configuration options
   - Create troubleshooting guide
@@ -680,7 +786,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: User documentation
   - **Success Criteria**: Clear usage instructions
 
-- [ ] **16.2 Generate API Documentation**
+- [ ] **17.2 Generate API Documentation**
   - Document all endpoints
   - Add request/response examples
   - Create authentication guide
@@ -688,7 +794,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: API documentation
   - **Success Criteria**: Complete API reference
 
-- [ ] **16.3 Create Development Documentation**
+- [ ] **17.3 Create Development Documentation**
   - Document architecture
   - Add contribution guidelines
   - Create development setup guide
@@ -696,7 +802,7 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Developer documentation
   - **Success Criteria**: Contributors can onboard
 
-- [ ] **16.4 Add Code Examples**
+- [ ] **17.4 Add Code Examples**
   - Create Python examples
   - Add Node.js examples
   - Include Go examples
@@ -704,9 +810,9 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Multi-language examples
   - **Success Criteria**: Examples work correctly
 
-### 17. Release Preparation
+### 18. Release Preparation
 
-- [x] **17.1 Create CI/CD Pipeline**
+- [x] **18.1 Create CI/CD Pipeline**
   - Set up automated testing
   - Add Docker image building
   - Configure release automation
@@ -717,7 +823,7 @@ tasks that build incrementally toward a fully functional system.
   - **Implementation**: .github/workflows/ci.yml (lint, format, test, build, Docker), .github/workflows/release.yml (release-please, GHCR)
   - **Features**: 80% coverage enforcement, multi-arch Docker builds, semantic versioning
 
-- [x] **17.2 Prepare Release Artifacts**
+- [x] **18.2 Prepare Release Artifacts**
   - Tag version in Git
   - Build release binaries
   - Create release notes
@@ -728,7 +834,7 @@ tasks that build incrementally toward a fully functional system.
   - **Implementation**: release-please-config.json, .release-please-manifest.json
   - **Features**: Conventional commit parsing, automated changelog, semantic version tags
 
-- [ ] **17.3 Set Up Distribution**
+- [ ] **18.3 Set Up Distribution**
   - Publish to Docker Hub
   - Create GitHub release
   - Update documentation site
@@ -743,9 +849,10 @@ tasks that build incrementally toward a fully functional system.
 1. Complete all Phase 1 tasks before moving to Phase 1.5
 2. Complete test structure migration (Phase 1.5) before Phase 2
 3. Core Framework (Phase 2) must be complete before services
-4. Implement services in order: Pub/Sub → Scheduler → Tasks → Secrets
+4. Implement services in order: Pub/Sub → Scheduler → Tasks → Secrets →
+   Workflows
 5. Co-located testing should be implemented alongside each component
-6. E2E testing (Phase 5) is comprehensive validation after all services complete
+6. E2E testing (Phase 4) is comprehensive validation after all services complete
 7. Documentation can be written in parallel with development
 
 ### Task Dependencies
@@ -856,9 +963,9 @@ Each task is considered complete when:
 ### Status
 
 - **Current Phase**: Phase 3 (Service Implementation) — In Progress
-- **Completed**: Phase 1 (Foundation), Phase 1.5 (Test Migration), Phase 2 (Core Framework), Scheduler (10.1-10.4), Tasks (11.1-11.4), Dockerfile (15.1-15.2), CI/CD (17.1-17.2)
-- **Next Action**: Implement Pub/Sub service (9.1-9.5), then Secrets Manager (12.1-12.5)
-- **Remaining**: Pub/Sub, Secrets Manager, Discovery Documents (10.5, 11.5), Task TTL (11.6), Knip cleanup (12.6), Integration/E2E tests, Docker Compose, Documentation, Distribution
+- **Completed**: Phase 1 (Foundation), Phase 1.5 (Test Migration), Phase 2 (Core Framework), Scheduler (10.1-10.4), Tasks (11.1-11.4), Dockerfile (16.1-16.2), CI/CD (18.1-18.2)
+- **Next Action**: Implement Pub/Sub service (9.1-9.5), then Secrets Manager (12.1-12.5), then Cloud Workflows (13.1-13.8)
+- **Remaining**: Pub/Sub, Secrets Manager, Cloud Workflows (13.1-13.8), Discovery Documents (10.5, 11.5), Task TTL (11.6), Knip cleanup (12.6), Integration/E2E tests, Docker Compose, Documentation, Distribution
 
 ### References
 

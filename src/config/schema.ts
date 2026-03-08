@@ -36,6 +36,7 @@ const ServicesConfigSchema = z.object({
   scheduler: z.object({ enabled: z.boolean().default(true) }),
   tasks: z.object({ enabled: z.boolean().default(true) }),
   secrets: z.object({ enabled: z.boolean().default(true) }),
+  workflows: z.object({ enabled: z.boolean().default(true) }),
 });
 
 // Logging configuration schema
@@ -98,6 +99,10 @@ export const EnvConfigSchema = z.object({
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
   ENABLE_SECRETS: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
+  ENABLE_WORKFLOWS: z
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
@@ -169,7 +174,8 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.ENABLE_PUBSUB !== undefined ||
     env.ENABLE_SCHEDULER !== undefined ||
     env.ENABLE_TASKS !== undefined ||
-    env.ENABLE_SECRETS !== undefined;
+    env.ENABLE_SECRETS !== undefined ||
+    env.ENABLE_WORKFLOWS !== undefined;
 
   if (hasServiceConfig) {
     config.services = {};
@@ -182,6 +188,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       config.services.scheduler = { enabled: enabledServices.includes('scheduler') };
       config.services.tasks = { enabled: enabledServices.includes('tasks') };
       config.services.secrets = { enabled: enabledServices.includes('secrets') };
+      config.services.workflows = { enabled: enabledServices.includes('workflows') };
     }
 
     // Map individual service enablement
@@ -200,6 +207,11 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.ENABLE_SECRETS !== undefined) {
       if (!config.services.secrets) config.services.secrets = {};
       config.services.secrets.enabled = env.ENABLE_SECRETS;
+    }
+
+    if (env.ENABLE_WORKFLOWS !== undefined) {
+      if (!config.services.workflows) config.services.workflows = {};
+      config.services.workflows.enabled = env.ENABLE_WORKFLOWS;
     }
   }
 
