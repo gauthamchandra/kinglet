@@ -41,7 +41,7 @@ jobs:
         id: classify
         uses: actions/ai-inference@v2
         with:
-          model: 'deepseek/DeepSeek-R1-0528'
+          model: 'openai/gpt-4o-mini'
           prompt-file: '.github/prompts/router.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-router.txt
@@ -78,7 +78,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'deepseek/DeepSeek-R1-0528'
+          model: 'openai/gpt-4o-mini'
           prompt-file: '.github/prompts/security-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -121,7 +121,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'deepseek/DeepSeek-R1-0528'
+          model: 'openai/gpt-4o-mini'
           prompt-file: '.github/prompts/bun-compliance-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -164,7 +164,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'deepseek/DeepSeek-R1-0528'
+          model: 'openai/gpt-4o-mini'
           prompt-file: '.github/prompts/architecture-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -207,7 +207,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'deepseek/DeepSeek-R1-0528'
+          model: 'openai/gpt-4o-mini'
           prompt-file: '.github/prompts/test-quality-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -249,7 +249,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'deepseek/DeepSeek-R1-0528'
+          model: 'openai/gpt-4o-mini'
           prompt-file: '.github/prompts/general-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -329,7 +329,7 @@ jobs:
         id: review
         uses: actions/ai-inference@v2
         with:
-          model: 'deepseek/DeepSeek-R1-0528'
+          model: 'openai/gpt-4o-mini'
           prompt-file: '.github/prompts/meta-review-expert.prompt.yml'
           file_input: |
             diff: /tmp/pr-diff-annotated.txt
@@ -374,6 +374,7 @@ jobs:
     if: ${{ always() && needs.route.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - name: Checkout code
