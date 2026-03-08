@@ -2,16 +2,16 @@
  * Discovery Endpoints Tests
  */
 
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { DiscoveryDocumentGenerator, type ServiceInfo } from './discovery-document-generator.ts';
 import {
   DiscoveryEndpoints,
   type DiscoveryQuery,
-  type ServiceListQuery,
   DiscoveryQuerySchema,
+  type ServiceListQuery,
   ServiceListQuerySchema,
 } from './discovery-endpoints.ts';
-import { DiscoveryDocumentGenerator, type ServiceInfo } from './discovery-document-generator.ts';
 import { ServiceRegistry } from './service-registry.ts';
 
 // Mock logger

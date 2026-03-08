@@ -2,18 +2,18 @@
  * Validation Layer Tests
  */
 
-import { describe, expect, test, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { createMockLogger } from '../../../test-utils/mock-logger.ts';
 import {
-  ValidationLayer,
   CommonSchemas,
-  type ValidationRequest,
-  type ValidationConfig,
-  type QuotaLimits,
   type CustomValidator,
-  type SanitizerFunction,
   DEFAULT_VALIDATION_CONFIG,
+  type QuotaLimits,
+  type SanitizerFunction,
+  type ValidationConfig,
+  ValidationLayer,
+  type ValidationRequest,
 } from './validation-layer.ts';
 
 // Mock logger

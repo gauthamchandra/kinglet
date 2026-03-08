@@ -2,18 +2,18 @@
  * Queue Service - business logic for Cloud Tasks queue CRUD and state management
  */
 
-import type { QueueRepository } from './queue-repository.ts';
-import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import type { RouteResponse } from '@/core/gateway/request-router.ts';
+import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
+import type { QueueRepository } from './queue-repository.ts';
+import type { QueueResponse } from './types.ts';
 import {
   buildQueueName,
   CreateQueueRequestSchema,
-  UpdateQueueRequestSchema,
   QueueState,
   queueRecordToResponse,
   requestToQueueRecord,
+  UpdateQueueRequestSchema,
 } from './types.ts';
-import type { QueueResponse } from './types.ts';
 
 export type TasksErrorCode =
   | 'NOT_FOUND'

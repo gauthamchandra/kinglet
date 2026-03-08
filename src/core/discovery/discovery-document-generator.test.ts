@@ -2,9 +2,9 @@
  * Unit tests for Discovery Document Generator
  */
 
-import { test, expect, describe, beforeEach } from 'bun:test';
-import { DiscoveryDocumentGenerator, type ServiceInfo } from './discovery-document-generator.ts';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { Logger } from '@/shared/utils/logger.ts';
+import { DiscoveryDocumentGenerator, type ServiceInfo } from './discovery-document-generator.ts';
 
 describe('DiscoveryDocumentGenerator', () => {
   let generator: DiscoveryDocumentGenerator;

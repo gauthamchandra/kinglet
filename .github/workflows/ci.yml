@@ -27,7 +27,7 @@ jobs:
         run: bun run lint
 
       - name: Check formatting
-        run: bunx prettier --check .
+        run: bunx biome format .
 
       - name: Run tests with coverage
         run: bun test --coverage 2>&1 | tee coverage-output.txt || true

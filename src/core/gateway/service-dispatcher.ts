@@ -5,12 +5,12 @@
  * circuit breaker pattern, and retry logic for the LocalStack GCP emulator.
  */
 
-import type { Logger } from '@/shared/utils/logger.ts';
 import type {
-  ServiceRegistry,
   ServiceDefinition,
   ServiceQuery,
+  ServiceRegistry,
 } from '@/core/discovery/service-registry.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 
 // Dispatch configuration and interfaces
 export interface DispatchConfig {
@@ -642,7 +642,7 @@ export class ServiceDispatcher {
 
     switch (backoffStrategy) {
       case 'exponential':
-        delay = initialDelay * Math.pow(backoffMultiplier, attempt - 1);
+        delay = initialDelay * backoffMultiplier ** (attempt - 1);
         break;
       case 'linear':
         delay = initialDelay * attempt;
@@ -779,12 +779,10 @@ export class ServiceDispatcher {
 // Load Balancer implementation
 class LoadBalancer {
   private config: LoadBalancerConfig;
-  private logger: Logger;
   private roundRobinIndex = 0;
 
-  constructor(config: LoadBalancerConfig, logger: Logger) {
+  constructor(config: LoadBalancerConfig, _logger: Logger) {
     this.config = config;
-    this.logger = logger;
   }
 
   selectEndpoint(endpoints: ServiceEndpoint[]): ServiceEndpoint {

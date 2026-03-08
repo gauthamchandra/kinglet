@@ -2,9 +2,9 @@
  * LRU Cache Tests
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { LRUCache } from './lru-cache';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { LRUCacheConfig } from './lru-cache';
+import { LRUCache } from './lru-cache';
 
 describe('LRUCache', () => {
   let cache: LRUCache;

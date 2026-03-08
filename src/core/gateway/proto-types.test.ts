@@ -2,23 +2,23 @@
  * Unit tests for Protocol Buffer Type Definitions and Utilities
  */
 
-import { test, expect, describe } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import {
+  createFieldMask,
+  createStatus,
+  type Duration,
   dateToTimestamp,
-  timestampToDate,
-  millisecondsAsDuration,
+  decodeBase64,
   durationToMilliseconds,
   encodeBase64,
-  decodeBase64,
-  createStatus,
-  createFieldMask,
   GrpcStatus,
-  type Timestamp,
-  type Duration,
-  type PubsubMessage,
-  type Topic,
   type Job,
+  millisecondsAsDuration,
+  type PubsubMessage,
   type Secret,
+  type Timestamp,
+  type Topic,
+  timestampToDate,
 } from './proto-types.ts';
 
 describe('Protocol Buffer Types', () => {

@@ -6,12 +6,12 @@
  */
 
 import type {
+  RouteContext,
   RouteDefinition,
   RouteRequest,
-  RouteContext,
   RouteResponse,
 } from '@/core/gateway/request-router.ts';
-import { StandardResponseFormatter, ResponseUtils } from '@/core/gateway/response-handlers.ts';
+import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 
 const DEFAULT_LOCATIONS = [

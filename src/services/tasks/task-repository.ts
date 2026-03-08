@@ -4,8 +4,8 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { tasksTableSchema, TASKS_TABLE, TaskStatus } from './types.ts';
 import type { TaskRecord } from './types.ts';
+import { TASKS_TABLE, TaskStatus, tasksTableSchema } from './types.ts';
 
 export interface ListTasksResult {
   tasks: TaskRecord[];

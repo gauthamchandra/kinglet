@@ -3,8 +3,8 @@
  * Provides consistent response formatting across the application
  */
 
-import type { RouteResponse } from './request-router.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import type { RouteResponse } from './request-router.ts';
 
 export interface GcpErrorDetail {
   '@type': string;

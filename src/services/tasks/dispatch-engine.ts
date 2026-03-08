@@ -9,13 +9,13 @@ import type { Logger } from '@/shared/utils/logger.ts';
 import type { QueueRepository } from './queue-repository.ts';
 import type { TaskRepository } from './task-repository.ts';
 import { TokenBucket } from './token-bucket.ts';
+import type { QueueRecord, TaskHttpRequest, TaskRecord, TaskRetryConfig } from './types.ts';
 import {
-  parseDurationSeconds,
-  TaskStatus,
   DEFAULT_RETRY_CONFIG,
+  parseDurationSeconds,
   TaskRetryConfigSchema,
+  TaskStatus,
 } from './types.ts';
-import type { QueueRecord, TaskRecord, TaskRetryConfig, TaskHttpRequest } from './types.ts';
 
 const DEFAULT_DISPATCH_TIMEOUT_MS = 600_000; // 10 minutes fallback
 
@@ -243,7 +243,7 @@ export class DispatchEngine {
     maxDoublings: number
   ): number {
     const exponent = Math.min(attempt, maxDoublings);
-    const backoff = minBackoff * Math.pow(2, exponent);
+    const backoff = minBackoff * 2 ** exponent;
 
     return Math.min(backoff, maxBackoff);
   }

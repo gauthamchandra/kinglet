@@ -2,12 +2,12 @@
  * Tests for TaskRepository
  */
 
-import { test, expect, describe, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
-import { TaskRepository } from './task-repository.ts';
-import { TaskStatus, DEFAULT_DISPATCH_DEADLINE } from './types.ts';
-import type { TaskRecord } from './types.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { TaskRepository } from './task-repository.ts';
+import type { TaskRecord } from './types.ts';
+import { DEFAULT_DISPATCH_DEADLINE, TaskStatus } from './types.ts';
 
 function makeTaskData(
   overrides: Partial<Omit<TaskRecord, keyof BaseRecord>> = {}

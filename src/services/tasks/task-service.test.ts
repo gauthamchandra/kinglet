@@ -2,11 +2,11 @@
  * Tests for TaskService
  */
 
-import { test, expect, describe, beforeEach, mock } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { QueueRepository } from './queue-repository.ts';
-import { TaskRepository } from './task-repository.ts';
 import { QueueService, TasksError } from './queue-service.ts';
+import { TaskRepository } from './task-repository.ts';
 import { TaskService } from './task-service.ts';
 
 describe('TaskService', () => {

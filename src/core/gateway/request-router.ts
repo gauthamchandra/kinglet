@@ -416,9 +416,9 @@ export class RequestRouter {
 
     // Validate parameter syntax
     const paramRegex = /\{([^}]*)\}/g;
-    let match;
+    let match: RegExpExecArray | null = paramRegex.exec(path);
 
-    while ((match = paramRegex.exec(path)) !== null) {
+    while (match !== null) {
       const paramSpec = match[1];
 
       // Check for empty parameter
@@ -443,6 +443,8 @@ export class RequestRouter {
           }
         }
       }
+
+      match = paramRegex.exec(path);
     }
   }
 

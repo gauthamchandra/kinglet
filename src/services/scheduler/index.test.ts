@@ -2,7 +2,7 @@
  * Tests for SchedulerService - entry point integration test
  */
 
-import { test, expect, describe, afterEach } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { SchedulerService } from './index.ts';

@@ -2,14 +2,14 @@
  * Service Dispatcher Tests
  */
 
-import { describe, expect, test, beforeEach, afterEach, afterAll, mock } from 'bun:test';
-import { createMockLogger } from '../../../test-utils/mock-logger.ts';
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { ServiceRegistry } from '@/core/discovery/service-registry.ts';
+import { createMockLogger } from '../../../test-utils/mock-logger.ts';
 import {
-  ServiceDispatcher,
+  type DispatchConfig,
   DispatchError,
   type DispatchRequest,
-  type DispatchConfig,
+  ServiceDispatcher,
 } from './service-dispatcher.ts';
 
 // Mock logger
@@ -554,7 +554,7 @@ describe('ServiceDispatcher', () => {
 
       expect(capturedUrl).toContain('param1=value1');
       expect(capturedUrl).toContain('param2=value2');
-      expect(capturedHeaders['authorization']).toBe('Bearer token123'); // Headers are normalized to lowercase
+      expect(capturedHeaders.authorization).toBe('Bearer token123'); // Headers are normalized to lowercase
       expect(capturedHeaders['x-request-id']).toBeDefined();
     });
 

@@ -26,9 +26,10 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun test --coverage` - Run tests with coverage report
 
 ### Code Quality
-- `bun run lint` - Run ESLint
-- `bun run lint:fix` - Run ESLint with auto-fix
-- `bun run format` - Format code with Prettier
+- `bun run lint` - Run Biome linter (+ tsc + knip)
+- `bun run lint:fix` - Run Biome linter with auto-fix
+- `bun run format` - Format code with Biome
+- `bun run format:check` - Check formatting without writing
 
 ## Architecture
 
@@ -147,7 +148,7 @@ Each ADR should include: Status, Context, Decision, Rationale, Alternatives Cons
 - Co-locate tests with source files for easier discovery
 - Try to use `bunx` over `npx` wherever possible
 - When moving code to a new location in response to feedback from the user, do not leave useless comments such as "// BEGIN is now called explicitly via begin() method".
-- Avoid non-null assertions (`!`) - they trigger ESLint warnings. Use type guards, optional chaining (`?.`), or refine type definitions instead
+- Avoid non-null assertions (`!`) - they trigger Biome warnings. Use type guards, optional chaining (`?.`), or refine type definitions instead
 - Avoid empty interface definitions - use `Record<never, never>` for truly empty types or union types with specific values instead. Empty interfaces provide no type safety and can be extended unexpectedly
 - For readability, when writing Typescript code, add a padding line between key statements to increase legibility. So instead of this:     const listeners = this.eventListeners.get(event);
     if (!listeners) {

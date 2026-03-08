@@ -37,11 +37,7 @@ build/
 .gitattributes
 
 # Development tools
-.eslintrc*
-.prettierrc*
-eslint.config.js
-.eslintignore
-.prettierignore
+biome.json
 bunfig.toml
 tsconfig*.json
 !tsconfig.json

@@ -4,12 +4,12 @@
  * Uses mocked JobService to test request-to-service mapping and response formatting.
  */
 
-import { test, expect, describe, beforeEach, mock } from 'bun:test';
-import { SchedulerHandlers } from './handlers.ts';
-import { SchedulerError } from './service.ts';
-import type { JobService } from './service.ts';
-import type { RouteRequest, RouteContext } from '@/core/gateway/request-router.ts';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import type { RouteContext, RouteRequest } from '@/core/gateway/request-router.ts';
 import { Logger } from '@/shared/utils/logger.ts';
+import { SchedulerHandlers } from './handlers.ts';
+import type { JobService } from './service.ts';
+import { SchedulerError } from './service.ts';
 
 function makeRouteRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
   return {
