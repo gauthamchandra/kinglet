@@ -71,8 +71,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
-      - name: Annotate diff with line numbers
-        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+      - name: Annotate and truncate diff
+        run: |
+          bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-full.txt
+          head -500 /tmp/pr-diff-full.txt > /tmp/pr-diff-annotated.txt
 
       - name: Run security review
         id: review
@@ -114,8 +116,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
-      - name: Annotate diff with line numbers
-        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+      - name: Annotate and truncate diff
+        run: |
+          bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-full.txt
+          head -500 /tmp/pr-diff-full.txt > /tmp/pr-diff-annotated.txt
 
       - name: Run Bun compliance review
         id: review
@@ -157,8 +161,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
-      - name: Annotate diff with line numbers
-        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+      - name: Annotate and truncate diff
+        run: |
+          bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-full.txt
+          head -500 /tmp/pr-diff-full.txt > /tmp/pr-diff-annotated.txt
 
       - name: Run architecture review
         id: review
@@ -200,8 +206,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
-      - name: Annotate diff with line numbers
-        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+      - name: Annotate and truncate diff
+        run: |
+          bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-full.txt
+          head -500 /tmp/pr-diff-full.txt > /tmp/pr-diff-annotated.txt
 
       - name: Run test quality review
         id: review
@@ -242,8 +250,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
-      - name: Annotate diff with line numbers
-        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+      - name: Annotate and truncate diff
+        run: |
+          bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-full.txt
+          head -500 /tmp/pr-diff-full.txt > /tmp/pr-diff-annotated.txt
 
       - name: Run general review
         id: review
@@ -316,8 +326,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} > /tmp/pr-diff.txt
 
-      - name: Annotate diff with line numbers
-        run: bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-annotated.txt
+      - name: Annotate and truncate diff
+        run: |
+          bash .github/scripts/annotate-diff.sh /tmp/pr-diff.txt /tmp/pr-diff-full.txt
+          head -500 /tmp/pr-diff-full.txt > /tmp/pr-diff-annotated.txt
 
       - name: Download aggregated findings
         uses: actions/download-artifact@v4
