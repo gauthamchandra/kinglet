@@ -76,8 +76,8 @@ describe('ObjectService', () => {
 
     expect(result.size).toBe('8');
 
-    const media = await service.getObjectMedia('test-bucket', 'overwrite.txt');
-    expect(new TextDecoder().decode(media)).toBe('replaced');
+    const overwritten = await service.getObjectMedia('test-bucket', 'overwrite.txt');
+    expect(new TextDecoder().decode(overwritten.data)).toBe('replaced');
   });
 
   test('insertObject throws NOT_FOUND for nonexistent bucket', async () => {
@@ -106,12 +106,15 @@ describe('ObjectService', () => {
 
   // ── getObjectMedia ──
 
-  test('getObjectMedia returns Uint8Array', async () => {
+  test('getObjectMedia returns data and contentType', async () => {
     const data = new TextEncoder().encode('binary data');
-    await service.insertObject('test-bucket', 'media.txt', data);
+    await service.insertObject('test-bucket', 'media.txt', data, {
+      contentType: 'text/plain',
+    });
 
-    const media = await service.getObjectMedia('test-bucket', 'media.txt');
-    expect(media).toEqual(data);
+    const result = await service.getObjectMedia('test-bucket', 'media.txt');
+    expect(result.data).toEqual(data);
+    expect(result.contentType).toBe('text/plain');
   });
 
   test('getObjectMedia throws NOT_FOUND', async () => {
@@ -273,8 +276,8 @@ describe('ObjectService', () => {
     expect(result.name).toBe('dst.txt');
     expect(result.bucket).toBe('test-bucket');
 
-    const media = await service.getObjectMedia('test-bucket', 'dst.txt');
-    expect(new TextDecoder().decode(media)).toBe('copy me');
+    const copyMedia = await service.getObjectMedia('test-bucket', 'dst.txt');
+    expect(new TextDecoder().decode(copyMedia.data)).toBe('copy me');
   });
 
   test('copyObject copies cross-bucket', async () => {
@@ -347,8 +350,8 @@ describe('ObjectService', () => {
 
     expect(result.name).toBe('composed.txt');
 
-    const media = await service.getObjectMedia('test-bucket', 'composed.txt');
-    expect(new TextDecoder().decode(media)).toBe('Hello World');
+    const composed = await service.getObjectMedia('test-bucket', 'composed.txt');
+    expect(new TextDecoder().decode(composed.data)).toBe('Hello World');
   });
 
   test('composeObjects handles up to 32 objects', async () => {

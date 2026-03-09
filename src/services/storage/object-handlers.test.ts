@@ -54,12 +54,21 @@ describe('ObjectHandlers', () => {
       getObject: mock(() =>
         Promise.resolve({ kind: 'storage#object', name: 'test.txt', contentType: 'text/plain' })
       ),
-      getObjectMedia: mock(() => Promise.resolve(new TextEncoder().encode('hello'))),
+      getObjectMedia: mock(() =>
+        Promise.resolve({ data: new TextEncoder().encode('hello'), contentType: 'text/plain' })
+      ),
       listObjects: mock(() =>
         Promise.resolve({ kind: 'storage#objects', items: [], prefixes: [] })
       ),
       deleteObject: mock(() => Promise.resolve()),
       patchObject: mock(() => Promise.resolve({ kind: 'storage#object', name: 'test.txt' })),
+      updateObject: mock(() =>
+        Promise.resolve({
+          kind: 'storage#object',
+          name: 'test.txt',
+          contentType: 'application/octet-stream',
+        })
+      ),
       copyObject: mock(() => Promise.resolve({ kind: 'storage#object', name: 'copy.txt' })),
       rewriteObject: mock(() =>
         Promise.resolve({ kind: 'storage#rewriteResponse', done: true, resource: {} })
@@ -254,5 +263,124 @@ describe('ObjectHandlers', () => {
     );
 
     expect(result.status).toBe(400);
+  });
+
+  // ── Bug fix: upload body consumed before handler reads it (#1) ──
+
+  test('handleInsertObject uses pre-parsed req.body when originalRequest is unavailable', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.insert');
+
+    const req = createRequest({
+      method: 'POST',
+      params: { bucket: 'my-bucket' },
+      query: { name: 'upload.txt' },
+      headers: { 'content-type': 'text/plain' },
+      body: 'pre-parsed content',
+      originalRequest: null as unknown as Request,
+    });
+
+    const result = await route.handler(req, createContext());
+
+    expect(result.status).toBe(200);
+    expect(mockService.insertObject).toHaveBeenCalledWith(
+      'my-bucket',
+      'upload.txt',
+      new TextEncoder().encode('pre-parsed content'),
+      { contentType: 'text/plain' }
+    );
+  });
+
+  test('handleResumableUpload uses pre-parsed req.body when originalRequest is unavailable', async () => {
+    const insertRoute = findRoute(handlers.getRoutes(), 'storage.objects.insert');
+
+    // Step 1: initiate resumable upload
+    const initReq = createRequest({
+      method: 'POST',
+      params: { bucket: 'my-bucket' },
+      query: { uploadType: 'resumable' },
+      body: { name: 'resumable.txt', contentType: 'image/png' },
+    });
+
+    const initResult = await insertRoute.handler(initReq, createContext());
+    expect(initResult.status).toBe(200);
+
+    const location = initResult.headers?.location ?? '';
+    const uploadIdMatch = location.match(/upload_id=(\d+)/);
+    const uploadId = uploadIdMatch?.[1];
+    expect(uploadId).toBeTypeOf('string');
+
+    // Step 2: finalize with body on req.body (simulating consumed originalRequest)
+    const resumableRoute = findRoute(handlers.getRoutes(), 'storage.objects.resumable');
+
+    const finalReq = createRequest({
+      method: 'PUT',
+      params: { bucket: 'my-bucket' },
+      query: { upload_id: uploadId as string },
+      body: 'binary payload',
+      originalRequest: null as unknown as Request,
+    });
+
+    const result = await resumableRoute.handler(finalReq, createContext());
+
+    expect(result.status).toBe(200);
+    expect(mockService.insertObject).toHaveBeenCalledWith(
+      'my-bucket',
+      'resumable.txt',
+      new TextEncoder().encode('binary payload'),
+      { contentType: 'image/png' }
+    );
+  });
+
+  // ── Bug fix: media download makes redundant service call (#2) ──
+
+  test('handleGetObject with alt=media does not make redundant getObject call', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.get');
+
+    const req = createRequest({
+      params: { bucket: 'my-bucket', object: 'test.txt' },
+      query: { alt: 'media' },
+    });
+
+    const result = await route.handler(req, createContext());
+
+    expect(result.status).toBe(200);
+    expect(result.headers?.['content-type']).toBe('text/plain');
+    expect(result.headers?.['content-length']).toBe('5');
+    expect(mockService.getObjectMedia).toHaveBeenCalledTimes(1);
+    expect(mockService.getObject).not.toHaveBeenCalled();
+  });
+
+  // ── Bug fix: missing updateObject handler tests (#3) ──
+
+  test('handleUpdateObject calls service.updateObject with body', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.update');
+
+    const req = createRequest({
+      method: 'PUT',
+      params: { bucket: 'my-bucket', object: 'test.txt' },
+      body: { contentType: 'application/json', metadata: { env: 'prod' } },
+    });
+
+    const result = await route.handler(req, createContext());
+
+    expect(result.status).toBe(200);
+    expect(mockService.updateObject).toHaveBeenCalledWith('my-bucket', 'test.txt', {
+      contentType: 'application/json',
+      metadata: { env: 'prod' },
+    });
+  });
+
+  test('handleUpdateObject returns 404 when object not found', async () => {
+    (mockService.updateObject as ReturnType<typeof mock>).mockRejectedValue(
+      new GcsError('NOT_FOUND', 'Object not found')
+    );
+
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.update');
+    const result = await route.handler(
+      createRequest({ method: 'PUT', params: { bucket: 'b', object: 'o' }, body: {} }),
+      createContext()
+    );
+
+    expect(result.status).toBe(404);
   });
 });

@@ -135,13 +135,7 @@ export class ObjectHandlers {
       const name = parseObjectName((req.query.name as string) ?? '');
       const contentType = req.headers['content-type'] ?? 'application/octet-stream';
 
-      let data: Uint8Array;
-
-      if (req.originalRequest) {
-        data = new Uint8Array(await req.originalRequest.arrayBuffer());
-      } else {
-        data = new Uint8Array(0);
-      }
+      const data = await this.extractBodyBytes(req);
 
       const result = await this.service.insertObject(bucket, name, data, { contentType });
       return this.responseUtils.success(result);
@@ -169,13 +163,7 @@ export class ObjectHandlers {
 
       this.resumableUploads.delete(uploadId);
 
-      let data: Uint8Array;
-
-      if (req.originalRequest) {
-        data = new Uint8Array(await req.originalRequest.arrayBuffer());
-      } else {
-        data = new Uint8Array(0);
-      }
+      const data = await this.extractBodyBytes(req);
 
       const result = await this.service.insertObject(upload.bucket, upload.name, data, {
         contentType: upload.contentType,
@@ -194,13 +182,12 @@ export class ObjectHandlers {
       const alt = req.query.alt as string | undefined;
 
       if (alt === 'media') {
-        const data = await this.service.getObjectMedia(bucket, name);
-        const metadata = await this.service.getObject(bucket, name);
+        const { data, contentType } = await this.service.getObjectMedia(bucket, name);
 
         return {
           status: 200,
           headers: {
-            'content-type': metadata.contentType,
+            'content-type': contentType,
             'content-length': String(data.length),
           },
           body: data,
@@ -318,6 +305,26 @@ export class ObjectHandlers {
     } catch (err) {
       return this.handleError(err);
     }
+  }
+
+  private async extractBodyBytes(req: RouteRequest): Promise<Uint8Array> {
+    if (typeof req.body === 'string' && req.body.length > 0) {
+      return new TextEncoder().encode(req.body);
+    }
+
+    if (req.body instanceof Uint8Array) {
+      return req.body;
+    }
+
+    if (req.body instanceof ArrayBuffer) {
+      return new Uint8Array(req.body);
+    }
+
+    if (req.originalRequest) {
+      return new Uint8Array(await req.originalRequest.arrayBuffer());
+    }
+
+    return new Uint8Array(0);
   }
 
   private handleError(err: unknown): RouteResponse {

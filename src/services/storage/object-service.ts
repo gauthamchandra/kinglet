@@ -83,7 +83,10 @@ export class ObjectService {
     return objectRecordToResponse(record);
   }
 
-  async getObjectMedia(bucket: string, name: string): Promise<Uint8Array> {
+  async getObjectMedia(
+    bucket: string,
+    name: string
+  ): Promise<{ data: Uint8Array; contentType: string }> {
     const record = await this.objectRepo.getObject(bucket, name);
 
     if (!record) {
@@ -96,7 +99,7 @@ export class ObjectService {
       throw new GcsError('NOT_FOUND', `Object data for ${name} not found`);
     }
 
-    return data;
+    return { data, contentType: record.contentType };
   }
 
   async listObjects(
