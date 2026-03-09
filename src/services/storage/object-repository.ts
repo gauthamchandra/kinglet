@@ -59,6 +59,23 @@ export class ObjectRepository {
       conditions.push({ field: 'name', operator: 'like', value: `${options.prefix}%` });
     }
 
+    if (options?.delimiter) {
+      return this.listObjectsWithDelimiter(conditions, {
+        ...options,
+        delimiter: options.delimiter,
+      });
+    }
+
+    return this.listObjectsSimple(conditions, options);
+  }
+
+  /**
+   * List objects without delimiter — uses DB-level pagination directly.
+   */
+  private async listObjectsSimple(
+    conditions: QueryCondition[],
+    options?: { maxResults?: number; pageToken?: string }
+  ): Promise<ListObjectsResult> {
     const offset = options?.pageToken ? parseInt(options.pageToken, 10) : 0;
     const limit = options?.maxResults ?? 1000;
 
@@ -68,34 +85,72 @@ export class ObjectRepository {
       sort: [{ field: 'name', direction: 'asc' }],
     });
 
-    let objects = result.data;
-    const prefixes: string[] = [];
+    const nextPageToken = result.hasMore ? String(offset + limit) : undefined;
 
-    if (options?.delimiter) {
-      const prefixLen = options.prefix?.length ?? 0;
-      const seen = new Set<string>();
-      const filtered: ObjectRecord[] = [];
+    return { objects: result.data, prefixes: [], nextPageToken };
+  }
 
-      for (const obj of objects) {
-        const rest = obj.name.substring(prefixLen);
-        const delimIdx = rest.indexOf(options.delimiter);
+  /**
+   * List objects with delimiter — fetches all matching objects and applies
+   * delimiter grouping before pagination, so that maxResults applies to the
+   * combined count of objects + prefixes (matching real GCS behavior).
+   *
+   * Tradeoff: we fetch all matching rows from the DB rather than paginating
+   * at the DB level. The DB has no concept of delimiter-based grouping, so a
+   * LIMIT N query can produce anywhere from 1 to N combined items after
+   * filtering — making consistent page sizes impossible without
+   * application-level control. For a local emulator with test-scale data
+   * this is negligible. If it becomes a bottleneck, a cursor-based approach
+   * (fetch in batches, accumulate until maxResults, encode last object name
+   * as token) would avoid loading the full result set into memory.
+   */
+  private async listObjectsWithDelimiter(
+    conditions: QueryCondition[],
+    options: { prefix?: string; delimiter: string; maxResults?: number; pageToken?: string }
+  ): Promise<ListObjectsResult> {
+    const result = await this.storage.find<ObjectRecord>(OBJECTS_TABLE, {
+      filter: { conditions, operator: 'and' },
+      sort: [{ field: 'name', direction: 'asc' }],
+    });
 
-        if (delimIdx >= 0) {
-          const prefix = obj.name.substring(0, prefixLen + delimIdx + options.delimiter.length);
+    const prefixLen = options.prefix?.length ?? 0;
+    const seenPrefixes = new Set<string>();
 
-          if (!seen.has(prefix)) {
-            seen.add(prefix);
-            prefixes.push(prefix);
-          }
-        } else {
-          filtered.push(obj);
+    type ListItem = { kind: 'object'; record: ObjectRecord } | { kind: 'prefix'; value: string };
+    const combined: ListItem[] = [];
+
+    for (const obj of result.data) {
+      const rest = obj.name.substring(prefixLen);
+      const delimIdx = rest.indexOf(options.delimiter);
+
+      if (delimIdx >= 0) {
+        const prefix = obj.name.substring(0, prefixLen + delimIdx + options.delimiter.length);
+
+        if (!seenPrefixes.has(prefix)) {
+          seenPrefixes.add(prefix);
+          combined.push({ kind: 'prefix', value: prefix });
         }
+      } else {
+        combined.push({ kind: 'object', record: obj });
       }
-
-      objects = filtered;
     }
 
-    const nextPageToken = result.hasMore ? String(offset + limit) : undefined;
+    const offset = options.pageToken ? parseInt(options.pageToken, 10) : 0;
+    const limit = options.maxResults ?? 1000;
+    const page = combined.slice(offset, offset + limit);
+
+    const objects: ObjectRecord[] = [];
+    const prefixes: string[] = [];
+
+    for (const item of page) {
+      if (item.kind === 'object') {
+        objects.push(item.record);
+      } else {
+        prefixes.push(item.value);
+      }
+    }
+
+    const nextPageToken = offset + limit < combined.length ? String(offset + limit) : undefined;
 
     return { objects, prefixes, nextPageToken };
   }

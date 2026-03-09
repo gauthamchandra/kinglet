@@ -116,6 +116,78 @@ describe('ObjectRepository', () => {
     expect(page2.nextPageToken).toBeUndefined();
   });
 
+  test('listObjects with delimiter and pagination returns consistent page sizes', async () => {
+    // 6 objects collapse into 5 combined items: "a/", "b/", "root1.txt", "root2.txt", "root3.txt"
+    await repo.createObject(makeObjectData({ name: 'a/file1.txt', generation: '1' }));
+    await repo.createObject(makeObjectData({ name: 'a/file2.txt', generation: '2' }));
+    await repo.createObject(makeObjectData({ name: 'b/file3.txt', generation: '3' }));
+    await repo.createObject(makeObjectData({ name: 'root1.txt', generation: '4' }));
+    await repo.createObject(makeObjectData({ name: 'root2.txt', generation: '5' }));
+    await repo.createObject(makeObjectData({ name: 'root3.txt', generation: '6' }));
+
+    const page1 = await repo.listObjects('test-bucket', {
+      delimiter: '/',
+      maxResults: 3,
+    });
+
+    expect(page1.prefixes.length + page1.objects.length).toBe(3);
+    expect(page1.prefixes).toEqual(['a/', 'b/']);
+    expect(page1.objects).toHaveLength(1);
+    expect(page1.objects[0]?.name).toBe('root1.txt');
+    expect(page1.nextPageToken).toBeTypeOf('string');
+
+    const page2Opts: { delimiter: string; maxResults: number; pageToken?: string } = {
+      delimiter: '/',
+      maxResults: 3,
+    };
+
+    if (page1.nextPageToken) page2Opts.pageToken = page1.nextPageToken;
+
+    const page2 = await repo.listObjects('test-bucket', page2Opts);
+
+    expect(page2.prefixes.length + page2.objects.length).toBe(2);
+    expect(page2.prefixes).toHaveLength(0);
+    expect(page2.objects).toHaveLength(2);
+    expect(page2.objects[0]?.name).toBe('root2.txt');
+    expect(page2.objects[1]?.name).toBe('root3.txt');
+    expect(page2.nextPageToken).toBeUndefined();
+  });
+
+  test('listObjects with delimiter, prefix, and pagination works correctly', async () => {
+    await repo.createObject(makeObjectData({ name: 'docs/guides/a.md', generation: '1' }));
+    await repo.createObject(makeObjectData({ name: 'docs/guides/b.md', generation: '2' }));
+    await repo.createObject(makeObjectData({ name: 'docs/api/ref.md', generation: '3' }));
+    await repo.createObject(makeObjectData({ name: 'docs/readme.md', generation: '4' }));
+
+    // With prefix "docs/" and delimiter "/", combined list: "docs/api/", "docs/guides/", "docs/readme.md"
+    const page1 = await repo.listObjects('test-bucket', {
+      prefix: 'docs/',
+      delimiter: '/',
+      maxResults: 2,
+    });
+
+    expect(page1.prefixes.length + page1.objects.length).toBe(2);
+    expect(page1.prefixes).toEqual(['docs/api/', 'docs/guides/']);
+    expect(page1.objects).toHaveLength(0);
+    expect(page1.nextPageToken).toBeTypeOf('string');
+
+    const page2Opts: { prefix: string; delimiter: string; maxResults: number; pageToken?: string } =
+      {
+        prefix: 'docs/',
+        delimiter: '/',
+        maxResults: 2,
+      };
+
+    if (page1.nextPageToken) page2Opts.pageToken = page1.nextPageToken;
+
+    const page2 = await repo.listObjects('test-bucket', page2Opts);
+
+    expect(page2.prefixes).toHaveLength(0);
+    expect(page2.objects).toHaveLength(1);
+    expect(page2.objects[0]?.name).toBe('docs/readme.md');
+    expect(page2.nextPageToken).toBeUndefined();
+  });
+
   test('updateObject updates metadata', async () => {
     await repo.createObject(makeObjectData());
 
