@@ -29,6 +29,13 @@
       "implementationPath": "src/services/pubsub/"
     },
     {
+      "name": "cloud-storage",
+      "displayName": "Cloud Storage",
+      "discoveryUrl": "https://storage.googleapis.com/$discovery/rest?version=v1",
+      "version": "v1",
+      "implementationPath": "src/services/storage/"
+    },
+    {
       "name": "workflows",
       "displayName": "Cloud Workflows",
       "discoveryUrl": "https://workflows.googleapis.com/$discovery/rest?version=v1",

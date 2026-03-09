@@ -23,6 +23,7 @@ describe('Configuration Schema', () => {
           scheduler: {},
           tasks: {},
           secrets: {},
+          storage: {},
           workflows: {},
         },
         logging: {},
@@ -61,6 +62,7 @@ describe('Configuration Schema', () => {
           scheduler: { enabled: false },
           tasks: { enabled: true },
           secrets: { enabled: false },
+          storage: { enabled: true },
           workflows: { enabled: true },
         },
         logging: {
@@ -91,6 +93,7 @@ describe('Configuration Schema', () => {
             scheduler: {},
             tasks: {},
             secrets: {},
+            storage: {},
           },
           logging: {},
         });
@@ -108,6 +111,7 @@ describe('Configuration Schema', () => {
             scheduler: {},
             tasks: {},
             secrets: {},
+            storage: {},
           },
           logging: {},
         });
@@ -204,6 +208,7 @@ describe('Configuration Schema', () => {
           scheduler: { enabled: true },
           tasks: { enabled: true },
           secrets: { enabled: true },
+          storage: { enabled: true },
           workflows: { enabled: true },
         },
         logging: { level: 'debug' },

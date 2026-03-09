@@ -135,6 +135,7 @@ curl -X POST http://localhost:8765/v2/projects/test-project/locations/us-central
 |---------|--------|-------------|-------|
 | Cloud Scheduler | Implemented | v1 | Job CRUD, pause/resume, cron execution |
 | Cloud Tasks | Implemented | v2 | Queue lifecycle, task CRUD, HTTP dispatch |
+| Cloud Storage | Experimental | v1 | Bucket CRUD, object upload/download, copy, compose, rewrite |
 | Cloud Workflows | Experimental | v1 | Workflow CRUD, revisions, LRO operations |
 | Pub/Sub | Planned | — | Not yet implemented |
 | Secret Manager | Planned | — | Not yet implemented |
@@ -170,6 +171,7 @@ All configuration is via environment variables. Defaults are shown below.
 | `ENABLE_SCHEDULER` | `true` | Enable Cloud Scheduler service |
 | `ENABLE_TASKS` | `true` | Enable Cloud Tasks service |
 | `ENABLE_SECRETS` | `true` | Enable Secret Manager service |
+| `ENABLE_STORAGE` | `true` | Enable Cloud Storage service (experimental) |
 | `ENABLE_WORKFLOWS` | `true` | Enable Cloud Workflows service |
 
 ### Logging
@@ -245,6 +247,33 @@ docker run -d \
 | `POST` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks` | Create task |
 | `DELETE` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks/{taskId}` | Delete task |
 | `POST` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks/{taskId}:run` | Run task immediately |
+
+### Cloud Storage (v1) — Experimental
+
+**Buckets**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/storage/v1/b` | Create bucket |
+| `GET` | `/storage/v1/b` | List buckets |
+| `GET` | `/storage/v1/b/{bucket}` | Get bucket |
+| `PATCH` | `/storage/v1/b/{bucket}` | Patch bucket |
+| `PUT` | `/storage/v1/b/{bucket}` | Update bucket |
+| `DELETE` | `/storage/v1/b/{bucket}` | Delete bucket |
+
+**Objects**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/upload/storage/v1/b/{bucket}/o` | Upload object |
+| `GET` | `/storage/v1/b/{bucket}/o` | List objects |
+| `GET` | `/storage/v1/b/{bucket}/o/{object}` | Get object (metadata or `alt=media` for data) |
+| `PATCH` | `/storage/v1/b/{bucket}/o/{object}` | Patch object metadata |
+| `PUT` | `/storage/v1/b/{bucket}/o/{object}` | Update object metadata |
+| `DELETE` | `/storage/v1/b/{bucket}/o/{object}` | Delete object |
+| `POST` | `/storage/v1/b/{bucket}/o/{object}/compose` | Compose objects |
+| `POST` | `/storage/v1/b/{srcBucket}/o/{srcObject}/copyTo/b/{dstBucket}/o/{dstObject}` | Copy object |
+| `POST` | `/storage/v1/b/{srcBucket}/o/{srcObject}/rewriteTo/b/{dstBucket}/o/{dstObject}` | Rewrite object |
 
 ### Cloud Workflows (v1) — Experimental
 
@@ -347,7 +376,7 @@ No manual steps are needed beyond merging the release PR that release-please ope
 bun install
 bun run dev      # start with hot reload
 bun test         # run all tests
-bun run lint     # typecheck + eslint + knip
+bun run lint     # typecheck + biome + knip
 ```
 
 See [CLAUDE.md](CLAUDE.md) for coding conventions and architecture details.
