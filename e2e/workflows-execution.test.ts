@@ -84,7 +84,9 @@ beforeAll(async () => {
   ).text();
 
   const createResp = await fetch(
-    emulatorUrl(`/v1/projects/e2e-project/locations/us-central1/workflows?workflowId=order-fulfillment`),
+    emulatorUrl(
+      `/v1/projects/e2e-project/locations/us-central1/workflows?workflowId=order-fulfillment`
+    ),
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -168,9 +170,7 @@ describe('Workflow Execution E2E: Raw HTTP API', () => {
   test('2. Get the execution by ID', async () => {
     const executionId = createdExecutionName.split('/').pop();
 
-    const response = await fetch(
-      emulatorUrl(`${execBasePath}/${executionId}`)
-    );
+    const response = await fetch(emulatorUrl(`${execBasePath}/${executionId}`));
 
     expect(response.status).toBe(200);
 
@@ -277,7 +277,9 @@ main:
     const envWorkflowId = 'env-test-workflow';
 
     await fetch(
-      emulatorUrl(`/v1/projects/${project}/locations/${location}/workflows?workflowId=${envWorkflowId}`),
+      emulatorUrl(
+        `/v1/projects/${project}/locations/${location}/workflows?workflowId=${envWorkflowId}`
+      ),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -307,9 +309,7 @@ main:
   });
 
   test('8. Get non-existent execution returns 404', async () => {
-    const response = await fetch(
-      emulatorUrl(`${execBasePath}/non-existent-id`)
-    );
+    const response = await fetch(emulatorUrl(`${execBasePath}/non-existent-id`));
 
     expect(response.status).toBe(404);
   });
