@@ -20,7 +20,7 @@ export function handleGcsError(
       case 'INVALID_ARGUMENT':
         return responseUtils.badRequest(err.message);
       case 'FAILED_PRECONDITION':
-        return responseUtils.failedPrecondition(err.message);
+        return responseUtils.conflict(err.message);
     }
   }
 

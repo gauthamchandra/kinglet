@@ -163,7 +163,7 @@ describe('BucketHandlers', () => {
     expect(result.status).toBe(400);
   });
 
-  test('FAILED_PRECONDITION maps to 400', async () => {
+  test('FAILED_PRECONDITION maps to 409 for non-empty bucket', async () => {
     (mockService.deleteBucket as ReturnType<typeof mock>).mockRejectedValue(
       new GcsError('FAILED_PRECONDITION', 'Bucket not empty')
     );
@@ -174,6 +174,6 @@ describe('BucketHandlers', () => {
       createContext()
     );
 
-    expect(result.status).toBe(400);
+    expect(result.status).toBe(409);
   });
 });

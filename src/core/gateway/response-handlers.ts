@@ -351,10 +351,19 @@ export class ResponseUtils {
   }
 
   /**
-   * Create a failed precondition error response
+   * Create a failed precondition error response (HTTP 400, standard gRPC mapping)
    */
   failedPrecondition(message: string = 'Failed precondition'): RouteResponse {
     return this.formatter.formatGcpError(400, message, 'FAILED_PRECONDITION');
+  }
+
+  /**
+   * Create a conflict error response (HTTP 409).
+   * Used by GCS for FAILED_PRECONDITION cases like deleting a non-empty bucket,
+   * where the REST API returns 409 instead of the standard gRPC mapping of 400.
+   */
+  conflict(message: string = 'Conflict'): RouteResponse {
+    return this.formatter.formatGcpError(409, message, 'FAILED_PRECONDITION');
   }
 
   /**
