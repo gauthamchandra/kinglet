@@ -44,6 +44,7 @@
     "@google-cloud/tasks": "^6.2.1",
     "@google-cloud/workflows": "4.3.0",
     "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.5.2",
     "husky": "^9.1.7",
     "knip": "^5.85.0",
@@ -60,6 +61,7 @@
     "@grpc/grpc-js": "^1.14.0",
     "@grpc/proto-loader": "^0.8.0",
     "cron-parser": "4.9.0",
+    "js-yaml": "^4.1.1",
     "pino": "^9.11.0",
     "zod": "^4.1.11"
   }

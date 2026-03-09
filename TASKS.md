@@ -652,8 +652,6 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Cloud Storage Discovery integration
   - **Success Criteria**: Client library connects and basic operations work unmodified
 
-### 12.6 Knip Configuration Cleanup
-
 ### 14. Cloud Workflows Service
 
 - [x] **14.1 Create Workflows Data Models & Types**
@@ -751,7 +749,7 @@ tasks that build incrementally toward a fully functional system.
   - **Success Criteria**: Returns valid GCP location data
   - **Lowest priority** — standard infrastructure endpoints
 
-- [x] **14.8 Add Workflows Discovery Document**
+- [ ] **14.8 Add Workflows Discovery Document**
   - Generate Discovery Document for Cloud Workflows v1
   - Register with Discovery API via service registry
   - Validate against GCP spec
@@ -759,6 +757,31 @@ tasks that build incrementally toward a fully functional system.
   - **Deliverable**: Workflows Discovery integration
   - **Success Criteria**: Client library connects and recognizes API
   - **Pattern**: Follow existing Discovery integration pattern
+
+- [x] **14.9 Implement Workflow Execution Engine**
+  - Create execution data models and repository
+    (`src/services/workflows/execution/types.ts`, `repository.ts`)
+  - Build YAML-based workflow engine with support for: assign, return, raise,
+    next, call, switch, for, try/except, try/retry, and subworkflows
+    (`execution/engine.ts`)
+  - Implement custom `${...}` expression language with arithmetic, comparison,
+    logical, and membership operators (`execution/expressions.ts`)
+  - Implement standard library modules: sys, http, json, base64, map, list,
+    text, math, uuid, and type conversion functions (`execution/stdlib.ts`)
+  - Create execution CRUD handlers: create, get, list, cancel
+    (`execution/service.ts`, `execution/handlers.ts`)
+  - Add comprehensive test suites for engine (50+ tests), expressions (80+
+    tests), stdlib (60+ tests), and handlers
+  - **Deliverable**: Complete workflow execution runtime with co-located tests
+  - **Success Criteria**: Workflows execute with full control flow, expression
+    evaluation, HTTP calls, and error handling
+  - **Status**: ✅ Complete - Full execution engine with YAML parsing,
+    expression evaluator, stdlib, and execution CRUD
+  - **Implementation**: `src/services/workflows/execution/` (engine.ts,
+    expressions.ts, stdlib.ts, types.ts, repository.ts, service.ts,
+    handlers.ts)
+  - **Tests**: 250+ tests across engine, expressions, stdlib, handlers, and
+    repository
 
 ## Phase 4: Integration & Testing
 
@@ -1042,6 +1065,9 @@ Each task is considered complete when:
 ### Version History
 
 - **v1.0.0** (2025-09-27): Initial task breakdown
+- **v1.3.0** (2026-03-09): Audit — added Workflow Execution Engine (§14.9), fixed 14.8
+  Discovery Document status (not yet implemented), removed orphaned §12.6 heading,
+  updated completion tracking in Status section
 - **v1.2.0** (2026-03-07): Added Cloud Storage service (§13) based on GCS v1 compatibility report
   - Added 9 tasks (13.1-13.9) covering 73 non-IAM endpoints across buckets, objects, ACLs, notifications, folders, HMAC keys, and advanced operations
   - Prioritized by real-world usage: Bucket/Object CRUD (highest) → copy/rewrite/compose (high) → ACLs/preconditions (medium) → notifications/folders/HMAC (low) → advanced/operations (lowest)
@@ -1056,9 +1082,9 @@ Each task is considered complete when:
 ### Status
 
 - **Current Phase**: Phase 3 (Service Implementation) — In Progress
-- **Completed**: Phase 1 (Foundation), Phase 1.5 (Test Migration), Phase 2 (Core Framework), Scheduler (10.1-10.4), Tasks (11.1-11.4), Cloud Storage (13.1-13.5, 13.9), Cloud Workflows (14.1-14.8), Dockerfile (17.1-17.2), CI/CD (19.1-19.2)
+- **Completed**: Phase 1 (Foundation), Phase 1.5 (Test Migration), Phase 2 (Core Framework), Scheduler (10.1-10.4), Tasks (11.1-11.4), Cloud Storage (13.1-13.5, 13.9), Cloud Workflows (14.1-14.7, 14.9), Dockerfile (17.1-17.2), CI/CD (19.1-19.2)
 - **Next Action**: Implement Pub/Sub service (9.1-9.5), then Secrets Manager (12.1-12.5)
-- **Remaining**: Pub/Sub (9.1-9.5), Discovery Documents (10.5, 11.5), Task TTL (11.6), Secrets Manager (12.1-12.6), Cloud Storage ACLs/Notifications/Advanced (13.6-13.8), Integration/E2E tests (15-16), Docker Compose (17.3), Documentation (18.1-18.4), Distribution (19.3)
+- **Remaining**: Pub/Sub (9.1-9.5), Discovery Documents (10.5, 11.5, 14.8), Task TTL (11.6), Secrets Manager (12.1-12.6), Cloud Storage ACLs/Notifications/Advanced (13.6-13.8), Integration/E2E tests (15-16), Docker Compose (17.3), Documentation (18.1-18.4), Distribution (19.3)
 
 ### References
 

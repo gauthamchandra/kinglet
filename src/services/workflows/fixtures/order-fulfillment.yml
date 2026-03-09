@@ -1,0 +1,218 @@
+main:
+  params: [orderData]
+  steps:
+    - init:
+        assign:
+          - orderId: ${orderData.orderId}
+          - items: ${orderData.items}
+          - customer: ${orderData.customer}
+          - shippingMethod: '${default(orderData.shippingMethod, "STANDARD")}'
+          - shippingPriority: 3
+          - shippingLabel: "Standard Shipping"
+          - projectId: ""
+          - notifications: []
+          - orderSummary:
+              status: "PROCESSING"
+              totalItems: ${len(items)}
+
+    - getEnv:
+        call: sys.get_env
+        args:
+          name: "GOOGLE_CLOUD_PROJECT_ID"
+        result: projectId
+
+    - validateOrder:
+        switch:
+          - condition: '${orderData.type != "ORDER" and orderData.type != "REFUND"}'
+            raise:
+              code: 400
+              message: "Invalid order type"
+              tags:
+                - "ValueError"
+          - condition: ${len(items) == 0}
+            raise: "Order must contain at least one item"
+
+    - processPayment:
+        try:
+          steps:
+            - chargePayment:
+                call: http.post
+                args:
+                  url: ${orderData.paymentUrl}
+                  headers:
+                    Content-Type: "application/json"
+                    X-Project-Id: ${projectId}
+                  body:
+                    orderId: ${orderId}
+                    amount: ${orderData.amount}
+                    currency: "USD"
+                  timeout: 30
+                result: paymentResponse
+            - recordPayment:
+                assign:
+                  - paymentId: ${paymentResponse.body.paymentId}
+                  - notifications: '${list.concat(notifications, "Payment processed: " + paymentId)}'
+        retry:
+          predicate: retryPredicate
+          max_retries: 3
+          backoff:
+            initial_delay: 1
+            max_delay: 10
+            multiplier: 2
+        except:
+          as: paymentError
+          steps:
+            - formatPaymentError:
+                call: errorFormatter
+                args:
+                  error: ${paymentError}
+                  context: "payment"
+                result: formattedError
+            - raisePaymentError:
+                raise: ${formattedError}
+
+    - reserveInventory:
+        steps:
+          - calculateInventory:
+              assign:
+                - reservedItems: []
+          - reserveLoop:
+              for:
+                value: item
+                in: ${items}
+                steps:
+                  - reserveItem:
+                      call: http.post
+                      args:
+                        url: ${orderData.inventoryUrl}
+                        body:
+                          sku: ${item.sku}
+                          quantity: ${item.quantity}
+                      result: reserveResult
+                  - trackReservation:
+                      assign:
+                        - reservedItems: '${list.concat(reservedItems, map.get(reserveResult, "body"))}'
+
+    - selectShipping:
+        switch:
+          - condition: '${shippingMethod == "EXPRESS"}'
+            assign:
+              - shippingPriority: 2
+              - shippingLabel: "Express Shipping"
+          - condition: '${shippingMethod == "OVERNIGHT"}'
+            assign:
+              - shippingPriority: 1
+              - shippingLabel: "Overnight Shipping"
+            next: shipOrder
+
+    - logShipping:
+        call: sys.log
+        args:
+          severity: "INFO"
+          text: ${json.encode_to_string(orderSummary)}
+
+    - shipOrder:
+        call: http.post
+        args:
+          url: ${orderData.shippingUrl}
+          body:
+            orderId: ${orderId}
+            items: ${reservedItems}
+            priority: ${shippingPriority}
+            address: ${customer.address}
+        result: shipResult
+
+    - notifyCustomer:
+        assign:
+          - notifications: '${list.concat(notifications, "Order shipped via " + shippingLabel)}'
+
+    - buildResult:
+        call: generateSummary
+        args:
+          orderId: ${orderId}
+          notifications: ${notifications}
+          paymentId: ${paymentId}
+          shippingTrackingId: '${map.get(shipResult, "body.trackingId", "pending")}'
+          customerEmail: ${customer.email}
+        result: summary
+
+    - done:
+        return: ${summary}
+
+retryPredicate:
+  params: [error]
+  steps:
+    - checkError:
+        switch:
+          - condition: '${  "ConnectionError" in error.tags}'
+            return: true
+          - condition: '${"TimeoutError" in error.tags}'
+            return: true
+          - condition: '${"HttpError" in error.tags}'
+            switch:
+              - condition: ${error.code == 429}
+                return: true
+              - condition: ${error.code == 502}
+                return: true
+              - condition: ${error.code == 503}
+                return: true
+    - notRetryable:
+        return: false
+
+errorFormatter:
+  params: [error, context]
+  steps:
+    - format:
+        assign:
+          - errorType: '${default(error.tags, "UnknownError")}'
+          - formattedMessage: '${  "Error in " + context + ": " + string(error.message)}'
+    - classify:
+        switch:
+          - condition: '${  "HttpError" in error.tags}'
+            return:
+              code: ${error.code}
+              message: ${formattedMessage}
+              tags:
+                - "HttpError"
+                - "PaymentError"
+          - condition: '${  "ConnectionError" in error.tags}'
+            return:
+              code: 503
+              message: ${formattedMessage}
+              tags:
+                - "ConnectionError"
+    - defaultError:
+        return:
+          code: 500
+          message: ${formattedMessage}
+          tags:
+            - "SystemError"
+
+generateSummary:
+  params: [orderId, notifications, paymentId, shippingTrackingId, customerEmail]
+  steps:
+    - init:
+        assign:
+          - report:
+              orderId: ${orderId}
+              paymentId: ${paymentId}
+              trackingId: ${shippingTrackingId}
+              notificationCount: ${len(notifications)}
+              customerEmail: ${text.to_lower(customerEmail)}
+              messages: []
+    - collectMessages:
+        for:
+          value: note
+          in: ${notifications}
+          steps:
+            - addMessage:
+                assign:
+                  - report:
+                      orderId: ${report.orderId}
+                      paymentId: ${report.paymentId}
+                      trackingId: ${report.trackingId}
+                      notificationCount: ${report.notificationCount}
+                      customerEmail: ${report.customerEmail}
+                      messages: ${list.concat(report.messages, note)}
+    - done:
+        return: ${report}
