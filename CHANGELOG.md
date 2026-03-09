@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0](https://github.com/gauthamchandra/localstack-gcp/compare/localstack-gcp-v1.1.0...localstack-gcp-v1.2.0) (2026-03-09)
+
+
+### Features
+
+* **storage:** add experimental Google Cloud Storage support ([#26](https://github.com/gauthamchandra/localstack-gcp/issues/26)) ([2f725b3](https://github.com/gauthamchandra/localstack-gcp/commit/2f725b328c034dc94ba900d9e149c8636c887fa3))
+* **tasks:** add App Engine, httpTarget, and location endpoint support ([#23](https://github.com/gauthamchandra/localstack-gcp/issues/23)) ([bd23b2a](https://github.com/gauthamchandra/localstack-gcp/commit/bd23b2af9f3f60f6de51e7a167a0167047266de7))
+* **workflows:** add Cloud Workflows service emulation ([#24](https://github.com/gauthamchandra/localstack-gcp/issues/24)) ([de403cb](https://github.com/gauthamchandra/localstack-gcp/commit/de403cb376447ef54d56ed0c911d1d3e0a6f4d5f))
+
 ## [1.1.0](https://github.com/gauthamchandra/localstack-gcp/compare/localstack-gcp-v1.0.0...localstack-gcp-v1.1.0) (2026-03-08)
 
 
