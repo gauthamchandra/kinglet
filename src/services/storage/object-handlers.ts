@@ -28,7 +28,6 @@ export class ObjectHandlers {
   private service: ObjectService;
   private responseUtils: ResponseUtils;
   private resumableUploads = new Map<string, ResumableUpload>();
-  private uploadCounter = 0;
 
   constructor(service: ObjectService, logger: Logger) {
     this.service = service;
@@ -116,8 +115,7 @@ export class ObjectHandlers {
 
         this.evictStaleUploads();
 
-        this.uploadCounter++;
-        const uploadId = String(this.uploadCounter);
+        const uploadId = crypto.randomUUID();
 
         this.resumableUploads.set(uploadId, { bucket, name, contentType, createdAt: Date.now() });
 
@@ -318,6 +316,11 @@ export class ObjectHandlers {
 
     if (req.body instanceof ArrayBuffer) {
       return new Uint8Array(req.body);
+    }
+
+    // Handle JSON-parsed objects (router consumed body via request.json())
+    if (req.body !== null && req.body !== undefined && typeof req.body === 'object') {
+      return new TextEncoder().encode(JSON.stringify(req.body));
     }
 
     if (req.originalRequest) {

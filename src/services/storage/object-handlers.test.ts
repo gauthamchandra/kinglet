@@ -305,7 +305,7 @@ describe('ObjectHandlers', () => {
     expect(initResult.status).toBe(200);
 
     const location = initResult.headers?.location ?? '';
-    const uploadIdMatch = location.match(/upload_id=(\d+)/);
+    const uploadIdMatch = location.match(/upload_id=([^&]+)/);
     const uploadId = uploadIdMatch?.[1];
     expect(uploadId).toBeTypeOf('string');
 
@@ -368,6 +368,52 @@ describe('ObjectHandlers', () => {
       contentType: 'application/json',
       metadata: { env: 'prod' },
     });
+  });
+
+  // ── Bug fix: extractBodyBytes doesn't handle parsed JSON objects (#4) ──
+
+  test('handleInsertObject handles JSON-parsed object body', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.insert');
+
+    const req = createRequest({
+      method: 'POST',
+      params: { bucket: 'my-bucket' },
+      query: { name: 'upload.json' },
+      headers: { 'content-type': 'application/json' },
+      body: { key: 'value', nested: { a: 1 } },
+      originalRequest: null as unknown as Request,
+    });
+
+    const result = await route.handler(req, createContext());
+
+    expect(result.status).toBe(200);
+    expect(mockService.insertObject).toHaveBeenCalledWith(
+      'my-bucket',
+      'upload.json',
+      new TextEncoder().encode(JSON.stringify({ key: 'value', nested: { a: 1 } })),
+      { contentType: 'application/json' }
+    );
+  });
+
+  // ── Bug fix: resumable upload IDs should be unique across restarts (#5) ──
+
+  test('resumable upload IDs are UUIDs, not sequential integers', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.insert');
+
+    const req = createRequest({
+      method: 'POST',
+      params: { bucket: 'my-bucket' },
+      query: { uploadType: 'resumable' },
+      body: { name: 'file.txt' },
+    });
+
+    const result = await route.handler(req, createContext());
+    const location = result.headers?.location ?? '';
+    const uploadIdMatch = location.match(/upload_id=([^&]+)/);
+    const uploadId = uploadIdMatch?.[1] ?? '';
+
+    // UUID v4 format: 8-4-4-4-12 hex chars
+    expect(uploadId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 
   test('handleUpdateObject returns 404 when object not found', async () => {
