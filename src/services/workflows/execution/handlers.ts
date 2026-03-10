@@ -145,12 +145,18 @@ export class ExecutionHandlers {
     const { project = '', location = '', workflowId = '', executionId = '' } = req.params;
     const name = buildExecutionName(project, location, workflowId, executionId);
 
-    const execution = await this.service.cancelExecution(name);
+    const result = await this.service.cancelExecution(name);
 
-    if (!execution) {
-      return this.responseUtils.notFound('Execution', name);
+    if ('error' in result) {
+      if (result.error === 'not_found') {
+        return this.responseUtils.notFound('Execution', name);
+      }
+
+      return this.responseUtils.failedPrecondition(
+        `Execution ${name} cannot be cancelled because it is in state ${result.state}`
+      );
     }
 
-    return this.responseUtils.success(executionRecordToResponse(execution));
+    return this.responseUtils.success(executionRecordToResponse(result.record));
   }
 }

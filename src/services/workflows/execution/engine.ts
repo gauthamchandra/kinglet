@@ -42,14 +42,11 @@ interface EndSignal {
 type ControlSignal = ReturnSignal | NextSignal | EndSignal;
 
 function isControlSignal(v: unknown): v is ControlSignal {
-  return (
-    v !== null &&
-    typeof v === 'object' &&
-    'type' in (v as Record<string, unknown>) &&
-    ((v as Record<string, unknown>).type === RETURN_SENTINEL ||
-      (v as Record<string, unknown>).type === NEXT_SENTINEL ||
-      (v as Record<string, unknown>).type === END_SENTINEL)
-  );
+  if (v === null || typeof v !== 'object' || !('type' in v)) return false;
+
+  const obj = v as { type: unknown };
+
+  return obj.type === RETURN_SENTINEL || obj.type === NEXT_SENTINEL || obj.type === END_SENTINEL;
 }
 
 // ── Engine ──
@@ -87,7 +84,8 @@ export class WorkflowEngine {
       // Bind main params — main accepts a single map param
       if (mainBlock.params && mainBlock.params.length > 0 && args) {
         for (const param of mainBlock.params) {
-          const paramName = typeof param === 'string' ? param : (Object.keys(param)[0] as string);
+          const paramName =
+            typeof param === 'string' ? param : firstKey(param as Record<string, unknown>);
 
           if (paramName in args) {
             scope.variables[paramName] = args[paramName];
@@ -130,6 +128,7 @@ export class WorkflowEngine {
     let i = 0;
 
     while (i < steps.length) {
+      // bounds-checked by while condition
       const step = steps[i] as WorkflowStep;
       const result = await this.executeStep(step, scope);
 
@@ -362,7 +361,7 @@ export class WorkflowEngine {
             }
           } else {
             // Param with default: { paramName: defaultValue }
-            const paramName = Object.keys(param)[0] as string;
+            const paramName = firstKey(param as Record<string, unknown>);
             subScope.variables[paramName] = paramName in args ? args[paramName] : param[paramName];
           }
         }
@@ -463,9 +462,28 @@ export class WorkflowEngine {
       );
     }
 
+    const hadValueVar = valueVar in scope.variables;
+    const prevValueVar = scope.variables[valueVar];
+    const hadIndexVar = indexVar ? indexVar in scope.variables : false;
+    const prevIndexVar = indexVar ? scope.variables[indexVar] : undefined;
+
+    const restoreLoopVars = () => {
+      if (hadValueVar) {
+        scope.variables[valueVar] = prevValueVar;
+      } else {
+        delete scope.variables[valueVar];
+      }
+
+      if (indexVar) {
+        if (hadIndexVar) {
+          scope.variables[indexVar] = prevIndexVar;
+        } else {
+          delete scope.variables[indexVar];
+        }
+      }
+    };
+
     for (let idx = 0; idx < collection.length; idx++) {
-      // Loop vars are set in the outer scope (so accumulators work)
-      // but the loop var itself should be considered local
       scope.variables[valueVar] = collection[idx];
 
       if (indexVar) {
@@ -475,19 +493,13 @@ export class WorkflowEngine {
       const result = await this.executeBlock(steps, scope);
 
       if (isControlSignal(result)) {
-        // Clean up loop vars
-        delete scope.variables[valueVar];
-
-        if (indexVar) delete scope.variables[indexVar];
+        restoreLoopVars();
 
         return result;
       }
     }
 
-    // Clean up loop variable (local to loop)
-    delete scope.variables[valueVar];
-
-    if (indexVar) delete scope.variables[indexVar];
+    restoreLoopVars();
 
     return undefined;
   }
@@ -630,7 +642,7 @@ function parseSteps(rawSteps: unknown[]): WorkflowStep[] {
 
   return rawSteps.map(step => {
     const stepObj = step as Record<string, unknown>;
-    const name = Object.keys(stepObj)[0] as string;
+    const name = firstKey(stepObj);
 
     return {
       name,
@@ -641,6 +653,16 @@ function parseSteps(rawSteps: unknown[]): WorkflowStep[] {
 
 function createScope(): VariableScope {
   return { variables: {} };
+}
+
+function firstKey(obj: Record<string, unknown>): string {
+  const key = Object.keys(obj)[0];
+
+  if (key === undefined) {
+    throw new WorkflowRuntimeError('Empty parameter definition', [ErrorTag.ValueError], 0);
+  }
+
+  return key;
 }
 
 // ── Named to Positional Arg Mapping ──
@@ -690,5 +712,14 @@ function mapNamedToPositional(fnName: string, namedArgs: Record<string, unknown>
     return Object.values(namedArgs);
   }
 
-  return mapping.map(name => namedArgs[name]).filter(v => v !== undefined);
+  const positional = mapping.map(name => namedArgs[name]);
+
+  // Only trim trailing undefined values — preserve middle ones to keep positions correct
+  let lastDefined = positional.length - 1;
+
+  while (lastDefined >= 0 && positional[lastDefined] === undefined) {
+    lastDefined--;
+  }
+
+  return positional.slice(0, lastDefined + 1);
 }

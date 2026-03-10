@@ -264,7 +264,7 @@ describe('Standard Library', () => {
     });
 
     test('text.url_encode encodes string for URLs', () => {
-      expect(stdlib('text.url_encode', ['hello world'])).toBe('hello%20world');
+      expect(stdlib('text.url_encode', ['hello world'])).toBe('hello+world');
     });
   });
 

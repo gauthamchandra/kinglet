@@ -76,16 +76,30 @@ export class ExecutionService {
     return this.repository.listExecutions(workflowName, pageSize, pageToken);
   }
 
-  async cancelExecution(name: string): Promise<ExecutionRecord | null> {
+  async cancelExecution(
+    name: string
+  ): Promise<
+    { record: ExecutionRecord } | { error: 'not_found' | 'not_cancellable'; state?: string }
+  > {
     const execution = await this.repository.getExecutionByName(name);
 
-    if (!execution || execution.state !== ExecutionState.ACTIVE) {
-      return null;
+    if (!execution) {
+      return { error: 'not_found' };
     }
 
-    return this.repository.updateExecution(name, {
+    if (execution.state !== ExecutionState.ACTIVE) {
+      return { error: 'not_cancellable', state: execution.state };
+    }
+
+    const updated = await this.repository.updateExecution(name, {
       state: ExecutionState.CANCELLED,
       endTime: new Date().toISOString(),
     });
+
+    if (!updated) {
+      return { error: 'not_found' };
+    }
+
+    return { record: updated };
   }
 }

@@ -271,5 +271,31 @@ main:
       const res = await route.handler(req, emptyCtx);
       expect(res.status).toBe(404);
     });
+
+    test('returns 400 for already-completed execution', async () => {
+      const createRoute = findRoute('executions.create');
+      const createReq = makeRequest(
+        'POST',
+        { project, location, workflowId },
+        {},
+        { argument: '{}' }
+      );
+      const createRes = await createRoute.handler(createReq, emptyCtx);
+      expect(createRes.status).toBe(200);
+
+      const body = createRes.body as Record<string, unknown>;
+      const execName = body.name as string;
+      const executionId = execName.split('/').pop() ?? '';
+
+      const cancelRoute = findRoute('executions.cancel');
+      const cancelReq = makeRequest('POST', {
+        project,
+        location,
+        workflowId,
+        executionId,
+      });
+      const cancelRes = await cancelRoute.handler(cancelReq, emptyCtx);
+      expect(cancelRes.status).toBe(400);
+    });
   });
 });

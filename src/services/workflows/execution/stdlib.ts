@@ -317,7 +317,7 @@ export function createStdlib(options: StdlibOptions): AsyncStdlibResolver {
     },
 
     'text.url_encode': args => {
-      return encodeURIComponent(args[0] as string).replace(/%20/g, '%20');
+      return encodeURIComponent(args[0] as string).replace(/%20/g, '+');
     },
 
     // ── math module ──
@@ -453,11 +453,15 @@ async function executeHttpCall(
     const result = { body: responseBody, code: response.status, headers: responseHeaders };
 
     if (response.status >= 400) {
-      throw new WorkflowRuntimeError(
+      const error = new WorkflowRuntimeError(
         `HTTP request failed with status ${response.status}`,
         [ErrorTag.HttpError],
         response.status
       );
+
+      (error as WorkflowRuntimeError & { httpResponse: typeof result }).httpResponse = result;
+
+      throw error;
     }
 
     return result;

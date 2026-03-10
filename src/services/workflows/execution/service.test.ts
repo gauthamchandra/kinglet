@@ -73,8 +73,8 @@ describe('ExecutionService', () => {
     expect(execution.result).toBe('"hello"');
     expect(execution.name).toContain(`${workflowName}/executions/`);
     expect(execution.workflowRevisionId).toBe('000001-abc');
-    expect(execution.startTime).toBeTruthy();
-    expect(execution.endTime).toBeTruthy();
+    expect(execution.startTime).toBeTypeOf('string');
+    expect(execution.endTime).toBeTypeOf('string');
   });
 
   test('creates a failed execution when workflow raises', async () => {
@@ -144,10 +144,9 @@ main:
     );
 
     // Since execution is synchronous, the execution is already complete.
-    // Cancel should fail for completed executions.
+    // Cancel should return not_cancellable for completed executions.
     const result = await service.cancelExecution(created.name);
-    // Already completed — cannot cancel
-    expect(result).toBeNull();
+    expect(result).toEqual({ error: 'not_cancellable', state: 'SUCCEEDED' });
   });
 
   test('execution includes duration', async () => {
@@ -160,7 +159,6 @@ main:
       { input: { message: 'test' } }
     );
 
-    expect(execution.duration).toBeTruthy();
     expect(execution.duration).toMatch(/^\d+\.\d+s$/);
   });
 
