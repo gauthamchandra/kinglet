@@ -569,6 +569,24 @@ main:
       expect(result.output).toBe('test');
     });
 
+    test('main applies default param values when arg is missing', async () => {
+      const result = await run(
+        `
+main:
+  params:
+    - name
+    - {timeout: 30}
+  steps:
+    - done:
+        return:
+          name: \${name}
+          timeout: \${timeout}
+`,
+        { name: 'test' }
+      );
+      expect(result.output).toEqual({ name: 'test', timeout: 30 });
+    });
+
     test('main with no params and no args succeeds', async () => {
       const result = await run(`
 main:

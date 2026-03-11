@@ -82,13 +82,16 @@ export class WorkflowEngine {
       const scope = createScope();
 
       // Bind main params — main accepts a single map param
-      if (mainBlock.params && mainBlock.params.length > 0 && args) {
+      if (mainBlock.params && mainBlock.params.length > 0) {
         for (const param of mainBlock.params) {
-          const paramName =
-            typeof param === 'string' ? param : firstKey(param as Record<string, unknown>);
-
-          if (paramName in args) {
-            scope.variables[paramName] = args[paramName];
+          if (typeof param === 'string') {
+            if (args && param in args) {
+              scope.variables[param] = args[param];
+            }
+          } else {
+            const paramName = firstKey(param as Record<string, unknown>);
+            scope.variables[paramName] =
+              args && paramName in args ? args[paramName] : param[paramName];
           }
         }
       }
