@@ -425,7 +425,9 @@ async function executeHttpCall(
     if (body !== undefined && method !== 'GET') {
       fetchOptions.body = JSON.stringify(body);
 
-      if (!headers['Content-Type'] && !headers['content-type']) {
+      const hasContentType = Object.keys(headers).some(k => k.toLowerCase() === 'content-type');
+
+      if (!hasContentType) {
         headers['Content-Type'] = 'application/json';
       }
     }

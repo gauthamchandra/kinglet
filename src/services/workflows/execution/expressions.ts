@@ -489,16 +489,14 @@ class Parser {
       const op = this.advance().value;
       const right = this.parseUnary();
 
-      if (op === '/') {
+      if (op === '/' || op === '%') {
         if ((right as number) === 0) {
           throw new WorkflowRuntimeError('Division by zero', [ErrorTag.ZeroDivisionError], 0);
         }
 
-        left = (left as number) / (right as number);
-      } else if (op === '*') {
-        left = (left as number) * (right as number);
+        left = op === '/' ? (left as number) / (right as number) : (left as number) % (right as number);
       } else {
-        left = (left as number) % (right as number);
+        left = (left as number) * (right as number);
       }
     }
 
