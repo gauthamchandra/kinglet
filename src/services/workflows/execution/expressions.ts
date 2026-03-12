@@ -494,7 +494,8 @@ class Parser {
           throw new WorkflowRuntimeError('Division by zero', [ErrorTag.ZeroDivisionError], 0);
         }
 
-        left = op === '/' ? (left as number) / (right as number) : (left as number) % (right as number);
+        left =
+          op === '/' ? (left as number) / (right as number) : (left as number) % (right as number);
       } else {
         left = (left as number) * (right as number);
       }
