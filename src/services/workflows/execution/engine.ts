@@ -488,25 +488,25 @@ export class WorkflowEngine {
       }
     };
 
-    for (let idx = 0; idx < collection.length; idx++) {
-      scope.variables[valueVar] = collection[idx];
+    try {
+      for (let idx = 0; idx < collection.length; idx++) {
+        scope.variables[valueVar] = collection[idx];
 
-      if (indexVar) {
-        scope.variables[indexVar] = idx;
+        if (indexVar) {
+          scope.variables[indexVar] = idx;
+        }
+
+        const result = await this.executeBlock(steps, scope);
+
+        if (isControlSignal(result)) {
+          return result;
+        }
       }
 
-      const result = await this.executeBlock(steps, scope);
-
-      if (isControlSignal(result)) {
-        restoreLoopVars();
-
-        return result;
-      }
+      return undefined;
+    } finally {
+      restoreLoopVars();
     }
-
-    restoreLoopVars();
-
-    return undefined;
   }
 
   private async executeTry(
