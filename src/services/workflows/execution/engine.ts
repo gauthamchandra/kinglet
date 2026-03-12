@@ -344,6 +344,8 @@ export class WorkflowEngine {
     this.callDepth++;
 
     if (this.callDepth > CALL_STACK_DEPTH_LIMIT) {
+      this.callDepth--;
+
       throw new WorkflowRuntimeError(
         `Call stack depth limit exceeded (max ${CALL_STACK_DEPTH_LIMIT})`,
         [ErrorTag.RecursionError],
