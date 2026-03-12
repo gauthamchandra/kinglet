@@ -34,7 +34,7 @@ export class ExecutionHandlers {
       {
         id: 'executions.cancel',
         method: 'POST',
-        path: '/v1/projects/:project/locations/:location/workflows/:workflowId/executions/:executionId:cancel',
+        path: '/v1/projects/:project/locations/:location/workflows/:workflowId/executions/{executionId}:cancel',
         handler: (req, ctx) => this.handleCancelExecution(req, ctx),
       },
       {

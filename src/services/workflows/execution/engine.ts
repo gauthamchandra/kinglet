@@ -697,9 +697,6 @@ const ARG_MAPPINGS: Record<string, string[]> = {
   'math.abs': ['value'],
   'math.max': ['first', 'second'],
   'math.min': ['first', 'second'],
-  'http.get': ['url', 'headers', 'auth', 'timeout', 'body', 'query'],
-  'http.post': ['url', 'headers', 'auth', 'timeout', 'body', 'query'],
-  'http.request': ['url', 'method', 'headers', 'auth', 'timeout', 'body', 'query'],
 };
 
 function mapNamedToPositional(fnName: string, namedArgs: Record<string, unknown>): unknown[] {
