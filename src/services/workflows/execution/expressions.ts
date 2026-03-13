@@ -628,10 +628,16 @@ class Parser {
   }
 
   private reconstructNamespace(_value: unknown, method: string): string {
-    // Walk back through the token stream to find the namespace
-    // This is a fallback — in practice, identifiers that are stdlib namespaces
-    // are detected in parsePrimary
-    return method;
+    // Walk back through the token stream to find the namespace prefix.
+    // In practice, stdlib namespaces (map, text, sys, etc.) are detected in
+    // parsePrimary, so this path is only reached for chained calls on resolved
+    // values (e.g. someVar.method(...)). Throw rather than silently dropping
+    // the module prefix, which would cause a misleading "Unknown function" error.
+    throw new WorkflowRuntimeError(
+      `Cannot call method '${method}' on a resolved value — method calls on non-stdlib objects are not supported`,
+      [ErrorTag.TypeError],
+      0
+    );
   }
 
   private parsePrimary(): unknown {

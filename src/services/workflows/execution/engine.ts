@@ -24,6 +24,11 @@ import { CALL_STACK_DEPTH_LIMIT, ErrorTag, ExecutionState, WorkflowRuntimeError 
 const RETURN_SENTINEL = Symbol('RETURN');
 const NEXT_SENTINEL = Symbol('NEXT');
 const END_SENTINEL = Symbol('END');
+const SWITCH_MATCHED_SENTINEL = Symbol('SWITCH_MATCHED');
+
+interface SwitchMatchedSignal {
+  type: typeof SWITCH_MATCHED_SENTINEL;
+}
 
 interface ReturnSignal {
   type: typeof RETURN_SENTINEL;
@@ -234,8 +239,8 @@ export class WorkflowEngine {
         return switchResult;
       }
 
-      // If switch fell through (no match) and step has a sibling assign, execute it
-      if ('assign' in body) {
+      // Only run sibling assign when no case matched (fell through)
+      if (switchResult?.type !== SWITCH_MATCHED_SENTINEL && 'assign' in body) {
         this.executeAssign(body.assign as Array<Record<string, unknown>>, scope);
       }
 
@@ -387,7 +392,7 @@ export class WorkflowEngine {
   private async executeSwitch(
     cases: unknown[],
     scope: VariableScope
-  ): Promise<ControlSignal | undefined> {
+  ): Promise<ControlSignal | SwitchMatchedSignal | undefined> {
     for (const c of cases) {
       const caseObj = c as Record<string, unknown>;
       const condition = this.resolveValue(caseObj.condition, scope);
@@ -442,7 +447,7 @@ export class WorkflowEngine {
           return { type: NEXT_SENTINEL, target: caseObj.next as string };
         }
 
-        return undefined; // First true wins, stop
+        return { type: SWITCH_MATCHED_SENTINEL }; // First true wins, stop
       }
     }
 
