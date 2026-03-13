@@ -322,7 +322,7 @@ class Parser {
     while (this.peek()?.type === TokenType.Operator && this.peek()?.value === 'or') {
       this.advance();
       const right = this.parseAnd();
-      left = (left as boolean) || (right as boolean);
+      left = Boolean(left) || Boolean(right);
     }
 
     return left;
@@ -334,7 +334,7 @@ class Parser {
     while (this.peek()?.type === TokenType.Operator && this.peek()?.value === 'and') {
       this.advance();
       const right = this.parseNot();
-      left = (left as boolean) && (right as boolean);
+      left = Boolean(left) && Boolean(right);
     }
 
     return left;

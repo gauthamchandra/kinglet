@@ -214,7 +214,7 @@ export interface WorkflowDefinition {
 }
 
 export interface WorkflowBlock {
-  params?: string[] | Array<Record<string, unknown>>;
+  params?: Array<string | Record<string, unknown>>;
   steps: WorkflowStep[];
 }
 
