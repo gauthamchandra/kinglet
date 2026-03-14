@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/gauthamchandra/localstack-gcp/compare/v1.3.0...v1.4.0) (2026-03-14)
+
+
+### Features
+
+* **workflows:** add execution engine infrastructure and YAML parsing ([#28](https://github.com/gauthamchandra/localstack-gcp/issues/28)) ([9967e2b](https://github.com/gauthamchandra/localstack-gcp/commit/9967e2ba328145561c12e991f0643c8ce917d1bf))
+
 ## [1.3.0](https://github.com/gauthamchandra/localstack-gcp/compare/v1.2.0...v1.3.0) (2026-03-09)
 
 
