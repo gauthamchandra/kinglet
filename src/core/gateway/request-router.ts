@@ -648,7 +648,7 @@ export class RequestRouter {
     });
 
     // Replace :param style parameters with regex groups
-    pattern = pattern.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, (_match, paramName) => {
+    pattern = pattern.replace(/(?<=\/):([a-zA-Z_][a-zA-Z0-9_]*)/g, (_match, paramName) => {
       paramNames.push(paramName);
 
       return '([^/]+)';
