@@ -1079,6 +1079,14 @@ Each task is considered complete when:
   - Added test migration tasks for existing tests in tests/ directory
   - Updated testing strategy, dependencies, and success criteria
 
+### Backlog / Follow-Up
+
+- [ ] **Extract ancillary refactors from Pub/Sub branch into separate PR**
+  - Shared duration parser extracted to `src/shared/utils/duration.ts` (previously duplicated in scheduler/tasks)
+  - Expression evaluator recursion depth limit (max 100) in `src/services/workflows/execution/expressions.ts`
+  - Workflow engine `callDepth` reset between executions in `src/services/workflows/execution/engine.ts`
+  - These changes are currently bundled in the `audit-pubsub-compat` branch and should be split out for cleaner history
+
 ### Status
 
 - **Current Phase**: Phase 3 (Service Implementation) — In Progress

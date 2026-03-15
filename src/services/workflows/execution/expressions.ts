@@ -270,14 +270,33 @@ function isOperatorOrOpen(token: Token): boolean {
 
 // ── Parser (Pratt-style recursive descent) ──
 
+const EXPRESSION_DEPTH_LIMIT = 100;
+
 class Parser {
   pos = 0;
+  private depth = 0;
 
   constructor(
     private tokens: Token[],
     private scope: VariableScope,
     private stdlib: StdlibResolver
   ) {}
+
+  private enterDepth(): void {
+    this.depth++;
+
+    if (this.depth > EXPRESSION_DEPTH_LIMIT) {
+      throw new WorkflowRuntimeError(
+        `Expression nesting depth limit exceeded (max ${EXPRESSION_DEPTH_LIMIT})`,
+        [ErrorTag.RecursionError],
+        0
+      );
+    }
+  }
+
+  private leaveDepth(): void {
+    this.depth--;
+  }
 
   peek(): Token | undefined {
     return this.tokens[this.pos];
@@ -312,7 +331,13 @@ class Parser {
   // ── Precedence climbing ──
 
   parseExpression(): unknown {
-    return this.parseOr();
+    this.enterDepth();
+
+    try {
+      return this.parseOr();
+    } finally {
+      this.leaveDepth();
+    }
   }
 
   private parseOr(): unknown {

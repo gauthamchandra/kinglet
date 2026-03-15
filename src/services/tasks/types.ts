@@ -445,18 +445,8 @@ export function buildTaskName(
   return `projects/${project}/locations/${location}/queues/${queueId}/tasks/${taskId}`;
 }
 
-/**
- * Parse a GCP-style duration string (e.g., "5s", "0.100s") into seconds.
- */
-export function parseDurationSeconds(duration: string): number {
-  const match = duration.match(/^(\d+(?:\.\d+)?)s$/);
-
-  if (!match) {
-    throw new Error(`Invalid duration format: "${duration}". Expected format like "5s" or "3600s"`);
-  }
-
-  return parseFloat(match[1] as string);
-}
+// Re-export shared duration parser for backwards compatibility
+export { parseDurationSeconds } from '@/shared/utils/duration.ts';
 
 // ── Conversion Utilities ──
 
