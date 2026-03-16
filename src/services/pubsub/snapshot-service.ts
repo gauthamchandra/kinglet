@@ -46,7 +46,11 @@ export class SnapshotService {
     const sub = await this.subRepo.getSubscriptionByName(data.subscription);
 
     if (!sub) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${data.subscription} not found`);
+      throw new PubSubError(
+        'NOT_FOUND',
+        `Subscription ${data.subscription} not found`,
+        data.subscription
+      );
     }
 
     const name = buildSnapshotName(project, snapshot);
@@ -55,7 +59,7 @@ export class SnapshotService {
     const existing = await this.snapshotRepo.getSnapshotByName(name);
 
     if (existing) {
-      throw new PubSubError('ALREADY_EXISTS', `Snapshot ${name} already exists`);
+      throw new PubSubError('ALREADY_EXISTS', `Snapshot ${name} already exists`, name);
     }
 
     // Default expireTime: 7 days from now
@@ -75,7 +79,7 @@ export class SnapshotService {
     const record = await this.snapshotRepo.getSnapshotByName(name);
 
     if (!record) {
-      throw new PubSubError('NOT_FOUND', `Snapshot ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Snapshot ${name} not found`, name);
     }
 
     return this.toResponse(record);
@@ -130,7 +134,7 @@ export class SnapshotService {
     const updated = await this.snapshotRepo.updateSnapshot(name, updates);
 
     if (!updated) {
-      throw new PubSubError('NOT_FOUND', `Snapshot ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Snapshot ${name} not found`, name);
     }
 
     return this.toResponse(updated);
@@ -140,7 +144,7 @@ export class SnapshotService {
     const deleted = await this.snapshotRepo.deleteSnapshot(name);
 
     if (!deleted) {
-      throw new PubSubError('NOT_FOUND', `Snapshot ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Snapshot ${name} not found`, name);
     }
   }
 
@@ -148,7 +152,7 @@ export class SnapshotService {
     const topic = await this.topicRepo.getTopicByName(topicName);
 
     if (!topic) {
-      throw new PubSubError('NOT_FOUND', `Topic ${topicName} not found`);
+      throw new PubSubError('NOT_FOUND', `Topic ${topicName} not found`, topicName);
     }
 
     const snapshots = await this.snapshotRepo.listSnapshotsByTopic(topicName);

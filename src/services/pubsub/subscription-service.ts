@@ -61,7 +61,7 @@ export class SubscriptionService {
     const topic = await this.topicRepo.getTopicByName(data.topic);
 
     if (!topic) {
-      throw new PubSubError('NOT_FOUND', `Topic ${data.topic} not found`);
+      throw new PubSubError('NOT_FOUND', `Topic ${data.topic} not found`, data.topic);
     }
 
     const name = buildSubscriptionName(project, subscription);
@@ -70,7 +70,7 @@ export class SubscriptionService {
     const existing = await this.subRepo.getSubscriptionByName(name);
 
     if (existing) {
-      throw new PubSubError('ALREADY_EXISTS', `Subscription ${name} already exists`);
+      throw new PubSubError('ALREADY_EXISTS', `Subscription ${name} already exists`, name);
     }
 
     const record = await this.subRepo.createSubscription({
@@ -101,7 +101,7 @@ export class SubscriptionService {
     const record = await this.subRepo.getSubscriptionByName(name);
 
     if (!record) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`, name);
     }
 
     return subscriptionRecordToResponse(record);
@@ -181,7 +181,7 @@ export class SubscriptionService {
     const updated = await this.subRepo.updateSubscription(name, updates);
 
     if (!updated) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`, name);
     }
 
     return subscriptionRecordToResponse(updated);
@@ -191,7 +191,7 @@ export class SubscriptionService {
     const deleted = await this.subRepo.deleteSubscription(name);
 
     if (!deleted) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`, name);
     }
 
     // Clean up delivered messages
@@ -209,7 +209,7 @@ export class SubscriptionService {
     const topic = await this.topicRepo.getTopicByName(topicName);
 
     if (!topic) {
-      throw new PubSubError('NOT_FOUND', `Topic ${topicName} not found`);
+      throw new PubSubError('NOT_FOUND', `Topic ${topicName} not found`, topicName);
     }
 
     // Find all active (non-detached) subscriptions for this topic
@@ -233,7 +233,11 @@ export class SubscriptionService {
     const sub = await this.subRepo.getSubscriptionByName(subscriptionName);
 
     if (!sub) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${subscriptionName} not found`);
+      throw new PubSubError(
+        'NOT_FOUND',
+        `Subscription ${subscriptionName} not found`,
+        subscriptionName
+      );
     }
 
     if (sub.detached) {
@@ -256,7 +260,11 @@ export class SubscriptionService {
     const sub = await this.subRepo.getSubscriptionByName(subscriptionName);
 
     if (!sub) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${subscriptionName} not found`);
+      throw new PubSubError(
+        'NOT_FOUND',
+        `Subscription ${subscriptionName} not found`,
+        subscriptionName
+      );
     }
 
     await this.messageRepo.acknowledgeMessages(subscriptionName, ackBody.ackIds);
@@ -269,7 +277,11 @@ export class SubscriptionService {
     const sub = await this.subRepo.getSubscriptionByName(subscriptionName);
 
     if (!sub) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${subscriptionName} not found`);
+      throw new PubSubError(
+        'NOT_FOUND',
+        `Subscription ${subscriptionName} not found`,
+        subscriptionName
+      );
     }
 
     await this.messageRepo.modifyAckDeadline(
@@ -285,7 +297,11 @@ export class SubscriptionService {
     const sub = await this.subRepo.getSubscriptionByName(subscriptionName);
 
     if (!sub) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${subscriptionName} not found`);
+      throw new PubSubError(
+        'NOT_FOUND',
+        `Subscription ${subscriptionName} not found`,
+        subscriptionName
+      );
     }
 
     await this.subRepo.updateSubscription(subscriptionName, {
@@ -297,7 +313,11 @@ export class SubscriptionService {
     const sub = await this.subRepo.getSubscriptionByName(subscriptionName);
 
     if (!sub) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${subscriptionName} not found`);
+      throw new PubSubError(
+        'NOT_FOUND',
+        `Subscription ${subscriptionName} not found`,
+        subscriptionName
+      );
     }
 
     await this.subRepo.updateSubscription(subscriptionName, { detached: 1 });
@@ -309,7 +329,11 @@ export class SubscriptionService {
     const sub = await this.subRepo.getSubscriptionByName(subscriptionName);
 
     if (!sub) {
-      throw new PubSubError('NOT_FOUND', `Subscription ${subscriptionName} not found`);
+      throw new PubSubError(
+        'NOT_FOUND',
+        `Subscription ${subscriptionName} not found`,
+        subscriptionName
+      );
     }
 
     if (seekBody.time) {
@@ -318,7 +342,11 @@ export class SubscriptionService {
       const snapshot = await this.snapshotRepo.getSnapshotByName(seekBody.snapshot);
 
       if (!snapshot) {
-        throw new PubSubError('NOT_FOUND', `Snapshot ${seekBody.snapshot} not found`);
+        throw new PubSubError(
+          'NOT_FOUND',
+          `Snapshot ${seekBody.snapshot} not found`,
+          seekBody.snapshot
+        );
       }
 
       // Use snapshot creation time as the seek point
@@ -333,7 +361,7 @@ export class SubscriptionService {
     const topic = await this.topicRepo.getTopicByName(topicName);
 
     if (!topic) {
-      throw new PubSubError('NOT_FOUND', `Topic ${topicName} not found`);
+      throw new PubSubError('NOT_FOUND', `Topic ${topicName} not found`, topicName);
     }
 
     const subs = await this.subRepo.listSubscriptionsByTopic(topicName);

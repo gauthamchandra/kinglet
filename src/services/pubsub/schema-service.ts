@@ -28,7 +28,7 @@ export class SchemaService {
     const existing = await this.repo.getSchemaByName(name);
 
     if (existing) {
-      throw new PubSubError('ALREADY_EXISTS', `Schema ${name} already exists`);
+      throw new PubSubError('ALREADY_EXISTS', `Schema ${name} already exists`, name);
     }
 
     const revisionId = crypto.randomUUID();
@@ -49,7 +49,7 @@ export class SchemaService {
     const record = await this.repo.getSchemaByName(name);
 
     if (!record) {
-      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`, name);
     }
 
     const response = schemaRecordToResponse(record);
@@ -92,7 +92,7 @@ export class SchemaService {
     const deleted = await this.repo.deleteSchema(name);
 
     if (!deleted) {
-      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`, name);
     }
   }
 
@@ -102,7 +102,7 @@ export class SchemaService {
     const existing = await this.repo.getSchemaByName(name);
 
     if (!existing) {
-      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`, name);
     }
 
     const revisionId = crypto.randomUUID();
@@ -124,7 +124,7 @@ export class SchemaService {
     const updated = await this.repo.updateSchema(name, updates);
 
     if (!updated) {
-      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`, name);
     }
 
     return schemaRecordToResponse(updated);
@@ -135,7 +135,7 @@ export class SchemaService {
     const record = await this.repo.getSchemaByName(name);
 
     if (!record) {
-      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`, name);
     }
 
     return schemaRecordToResponse(record);
@@ -151,7 +151,7 @@ export class SchemaService {
     const record = await this.repo.getSchemaByName(name);
 
     if (!record) {
-      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`, name);
     }
 
     const response = schemaRecordToResponse(record);
@@ -168,7 +168,7 @@ export class SchemaService {
     const record = await this.repo.getSchemaByName(name);
 
     if (!record) {
-      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Schema ${name} not found`, name);
     }
 
     return schemaRecordToResponse(record);

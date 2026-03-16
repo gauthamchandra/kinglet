@@ -34,7 +34,7 @@ export class TopicService {
     const existing = await this.repo.getTopicByName(name);
 
     if (existing) {
-      throw new PubSubError('ALREADY_EXISTS', `Topic ${name} already exists`);
+      throw new PubSubError('ALREADY_EXISTS', `Topic ${name} already exists`, name);
     }
 
     const record = topicRequestToRecord(name, parsed.data as Record<string, unknown>);
@@ -47,7 +47,7 @@ export class TopicService {
     const record = await this.repo.getTopicByName(name);
 
     if (!record) {
-      throw new PubSubError('NOT_FOUND', `Topic ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Topic ${name} not found`, name);
     }
 
     return topicRecordToResponse(record);
@@ -116,7 +116,7 @@ export class TopicService {
     const updated = await this.repo.updateTopic(name, updates);
 
     if (!updated) {
-      throw new PubSubError('NOT_FOUND', `Topic ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Topic ${name} not found`, name);
     }
 
     return topicRecordToResponse(updated);
@@ -126,7 +126,7 @@ export class TopicService {
     const deleted = await this.repo.deleteTopic(name);
 
     if (!deleted) {
-      throw new PubSubError('NOT_FOUND', `Topic ${name} not found`);
+      throw new PubSubError('NOT_FOUND', `Topic ${name} not found`, name);
     }
 
     await this.messageRepo.deleteMessagesByTopic(name);

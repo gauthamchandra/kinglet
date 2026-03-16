@@ -39,11 +39,13 @@ export type PubSubErrorCode =
 
 export class PubSubError extends Error {
   readonly code: PubSubErrorCode;
+  readonly resourceName: string | undefined;
 
-  constructor(code: PubSubErrorCode, message: string) {
+  constructor(code: PubSubErrorCode, message: string, resourceName?: string) {
     super(message);
     this.name = 'PubSubError';
     this.code = code;
+    this.resourceName = resourceName;
   }
 }
 
@@ -55,9 +57,9 @@ export function handlePubSubError(
   if (err instanceof PubSubError) {
     switch (err.code) {
       case 'NOT_FOUND':
-        return responseUtils.notFound(resourceType, err.message);
+        return responseUtils.notFound(resourceType, err.resourceName);
       case 'ALREADY_EXISTS':
-        return responseUtils.alreadyExists(resourceType, err.message);
+        return responseUtils.alreadyExists(resourceType, err.resourceName ?? resourceType);
       case 'INVALID_ARGUMENT':
         return responseUtils.badRequest(err.message);
       case 'FAILED_PRECONDITION':
