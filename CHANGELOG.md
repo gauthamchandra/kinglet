@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/gauthamchandra/localstack-gcp/compare/v1.4.0...v1.5.0) (2026-03-16)
+
+
+### Features
+
+* **pubsub:** add Cloud Pub/Sub service emulation ([#33](https://github.com/gauthamchandra/localstack-gcp/issues/33)) ([8917178](https://github.com/gauthamchandra/localstack-gcp/commit/89171786a7595c2744ec2348e02097888ccd97e5))
+
 ## [1.4.0](https://github.com/gauthamchandra/localstack-gcp/compare/v1.3.0...v1.4.0) (2026-03-14)
 
 
