@@ -32,7 +32,7 @@ describe('SubscriptionService', () => {
     messageRepo = new MessageRepository(storage);
     await messageRepo.initialize();
 
-    topicService = new TopicService(topicRepo);
+    topicService = new TopicService(topicRepo, messageRepo);
     service = new SubscriptionService(subRepo, topicRepo, messageRepo);
 
     // Create a topic for subscriptions to attach to

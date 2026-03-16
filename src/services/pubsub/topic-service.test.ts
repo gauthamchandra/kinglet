@@ -4,6 +4,7 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { MessageRepository } from './message-repository.ts';
 import { TopicRepository } from './topic-repository.ts';
 import { TopicService } from './topic-service.ts';
 import { PubSubError } from './types.ts';
@@ -11,6 +12,7 @@ import { PubSubError } from './types.ts';
 describe('TopicService', () => {
   let storage: StorageManager;
   let repo: TopicRepository;
+  let messageRepo: MessageRepository;
   let service: TopicService;
 
   beforeEach(async () => {
@@ -18,7 +20,9 @@ describe('TopicService', () => {
     await storage.initialize({ type: 'memory' });
     repo = new TopicRepository(storage);
     await repo.initialize();
-    service = new TopicService(repo);
+    messageRepo = new MessageRepository(storage);
+    await messageRepo.initialize();
+    service = new TopicService(repo, messageRepo);
   });
 
   // ── createTopic ──

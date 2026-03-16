@@ -2,6 +2,7 @@
  * Topic Service - business logic for Pub/Sub topic CRUD
  */
 
+import type { MessageRepository } from './message-repository.ts';
 import type { TopicRepository } from './topic-repository.ts';
 import type { ListTopicsResponse, TopicResponse } from './types.ts';
 import {
@@ -14,9 +15,11 @@ import {
 
 export class TopicService {
   private repo: TopicRepository;
+  private messageRepo: MessageRepository;
 
-  constructor(repo: TopicRepository) {
+  constructor(repo: TopicRepository, messageRepo: MessageRepository) {
     this.repo = repo;
+    this.messageRepo = messageRepo;
   }
 
   async createTopic(project: string, topic: string, body: unknown): Promise<TopicResponse> {
@@ -125,5 +128,7 @@ export class TopicService {
     if (!deleted) {
       throw new PubSubError('NOT_FOUND', `Topic ${name} not found`);
     }
+
+    await this.messageRepo.deleteMessagesByTopic(name);
   }
 }

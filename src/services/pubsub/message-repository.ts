@@ -83,8 +83,7 @@ export class MessageRepository {
   ): Promise<ReceivedMessageResponse[]> {
     const now = new Date();
 
-    // Find PENDING messages that either haven't been pulled yet (deadline in the past)
-    // or whose ack deadline has expired
+    // Find PENDING messages whose ack deadline has expired (or never pulled)
     const delivered = await this.storage.find<DeliveredMessageRecord>(
       PUBSUB_DELIVERED_MESSAGES_TABLE,
       {
@@ -92,14 +91,14 @@ export class MessageRepository {
           conditions: [
             { field: 'subscriptionName', operator: 'eq', value: subscriptionName },
             { field: 'ackStatus', operator: 'eq', value: AckStatus.PENDING },
+            { field: 'ackDeadline', operator: 'lte', value: now.toISOString() },
           ],
         },
         pagination: { limit: maxMessages, offset: 0 },
       }
     );
 
-    // Filter to only messages with expired deadlines (or never pulled)
-    const eligible = delivered.data.filter(d => new Date(d.ackDeadline) <= now);
+    const eligible = delivered.data;
 
     const results: ReceivedMessageResponse[] = [];
 
@@ -205,14 +204,14 @@ export class MessageRepository {
           conditions: [
             { field: 'subscriptionName', operator: 'eq', value: subscriptionName },
             { field: 'ackStatus', operator: 'eq', value: AckStatus.PENDING },
+            { field: 'ackDeadline', operator: 'lte', value: now },
           ],
         },
         pagination: { limit, offset: 0 },
       }
     );
 
-    // Filter to only messages with expired deadlines (or never pulled)
-    const eligible = delivered.data.filter(d => d.ackDeadline <= now);
+    const eligible = delivered.data;
 
     const results: Array<{ delivered: DeliveredMessageRecord; message: MessageRecord }> = [];
 
