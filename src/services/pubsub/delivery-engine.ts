@@ -187,7 +187,15 @@ export class DeliveryEngine {
     delivered: { id: string; deliveryAttempt: number },
     retryPolicy: RetryPolicy | undefined
   ): Promise<void> {
-    const backoffSeconds = this.computeBackoff(delivered.deliveryAttempt, retryPolicy);
+    let backoffSeconds: number;
+
+    try {
+      backoffSeconds = this.computeBackoff(delivered.deliveryAttempt, retryPolicy);
+    } catch {
+      backoffSeconds = DEFAULT_MIN_BACKOFF_SECONDS * 2 ** delivered.deliveryAttempt;
+      backoffSeconds = Math.min(backoffSeconds, DEFAULT_MAX_BACKOFF_SECONDS);
+    }
+
     const newDeadline = new Date(Date.now() + backoffSeconds * 1000).toISOString();
 
     await this.messageRepo.incrementDeliveryAttempt(delivered.id, newDeadline);

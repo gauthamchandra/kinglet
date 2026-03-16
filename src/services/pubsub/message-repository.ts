@@ -324,12 +324,23 @@ export class MessageRepository {
   }
 
   async deleteMessagesByTopic(topicName: string): Promise<void> {
-    // Delete all message records for this topic
+    // Find all message IDs for this topic so we can clean up delivered messages
+    const messages = await this.storage.find<MessageRecord>(PUBSUB_MESSAGES_TABLE, {
+      filter: {
+        conditions: [{ field: 'topicName', operator: 'eq', value: topicName }],
+      },
+    });
+
+    // Delete delivered message records that reference these messages
+    for (const msg of messages.data) {
+      await this.storage.deleteMany(PUBSUB_DELIVERED_MESSAGES_TABLE, {
+        conditions: [{ field: 'messageId', operator: 'eq', value: msg.messageId }],
+      });
+    }
+
+    // Delete the message records themselves
     await this.storage.deleteMany(PUBSUB_MESSAGES_TABLE, {
       conditions: [{ field: 'topicName', operator: 'eq', value: topicName }],
     });
-
-    // Note: delivered_messages reference messageId, but we clean those up
-    // when subscriptions are deleted or via the delivery engine
   }
 }
