@@ -1,6 +1,6 @@
 {
   "name": "localstack-gcp",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "LocalStack GCP Emulator - Local emulation for Google Cloud Platform services",
   "main": "dist/index.js",
   "module": "src/index.ts",
