@@ -228,7 +228,11 @@ export class DeliveryEngine {
 
       this.logger.info(`Routed message to dead-letter topic ${deadLetterPolicy.deadLetterTopic}`);
     } catch (err) {
-      this.logger.error('Error routing to dead-letter topic', err);
+      this.logger.error(
+        'Error routing to dead-letter topic, acknowledging to prevent retry loop',
+        err
+      );
+      await this.messageRepo.acknowledgeMessages(subscriptionName, [ackId]);
     }
   }
 

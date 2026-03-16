@@ -402,5 +402,89 @@ describe('DeliveryEngine', () => {
 
       expect(data).toHaveLength(0);
     });
+
+    test('acknowledges message when dead-letter publish fails to prevent infinite retry', async () => {
+      const mockFetch = mock(() => Promise.resolve(new Response('Error', { status: 500 })));
+
+      await topicRepo.createTopic({
+        name: 'projects/p/topics/dead-letter-fail',
+        ...baseTopic,
+      });
+
+      await subRepo.createSubscription({
+        name: 'projects/p/subscriptions/push-dl-fail',
+        topic: 'projects/p/topics/t',
+        pushConfig: JSON.stringify({
+          pushEndpoint: 'https://example.com/push',
+        } satisfies PushConfig),
+        ...baseSub,
+        deadLetterPolicy: JSON.stringify({
+          deadLetterTopic: 'projects/p/topics/dead-letter-fail',
+          maxDeliveryAttempts: 1,
+        }),
+      });
+
+      await messageRepo.publishMessages(
+        'projects/p/topics/t',
+        [{ data: btoa('stuck-message') }],
+        ['projects/p/subscriptions/push-dl-fail']
+      );
+
+      // Set deliveryAttempt to max so dead-letter routing triggers
+      const delivered = await storage.find('pubsub_delivered_messages', {
+        filter: {
+          conditions: [
+            {
+              field: 'subscriptionName',
+              operator: 'eq',
+              value: 'projects/p/subscriptions/push-dl-fail',
+            },
+          ],
+        },
+      });
+
+      const record = delivered.data[0] as { id: string };
+
+      await storage.updateById('pubsub_delivered_messages', record.id, {
+        deliveryAttempt: 1,
+      });
+
+      // publishFn that throws to simulate dead-letter topic failure
+      const failingPublishFn = mock(async () => {
+        throw new Error('Dead-letter topic not found');
+      });
+
+      const engine = new DeliveryEngine(subRepo, messageRepo, logger, {
+        httpClient: mockFetch,
+        publishFn: failingPublishFn,
+      });
+
+      await engine.tick();
+
+      expect(failingPublishFn).toHaveBeenCalledTimes(1);
+
+      // Message should be acked (not stuck in infinite retry)
+      const afterTick = await storage.find('pubsub_delivered_messages', {
+        filter: {
+          conditions: [
+            {
+              field: 'subscriptionName',
+              operator: 'eq',
+              value: 'projects/p/subscriptions/push-dl-fail',
+            },
+          ],
+        },
+      });
+
+      const ackStatus = (afterTick.data[0] as unknown as { ackStatus: string }).ackStatus;
+
+      expect(ackStatus).toBe('ACKED');
+
+      // Second tick should NOT re-trigger dead-letter publish
+      failingPublishFn.mockReset();
+      await engine.tick();
+
+      expect(failingPublishFn).not.toHaveBeenCalled();
+    });
   });
 });

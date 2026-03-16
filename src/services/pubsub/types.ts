@@ -67,7 +67,7 @@ export function handlePubSubError(
     }
   }
 
-  return responseUtils.badRequest(err instanceof Error ? err.message : 'Unknown error');
+  return responseUtils.internalError(err instanceof Error ? err.message : 'Internal server error');
 }
 
 // ── Response Interfaces ──

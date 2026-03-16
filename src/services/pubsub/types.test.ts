@@ -2,7 +2,7 @@
  * Unit tests for Pub/Sub types, helpers, and Zod schemas
  */
 
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type { SchemaRecord, TopicRecord } from './types.ts';
 import {
@@ -10,6 +10,7 @@ import {
   buildSnapshotName,
   buildSubscriptionName,
   buildTopicName,
+  handlePubSubError,
   PubSubError,
   parseSchemaName,
   parseSnapshotName,
@@ -223,5 +224,64 @@ describe('PubSubError', () => {
     expect(new PubSubError('ALREADY_EXISTS', 'exists').code).toBe('ALREADY_EXISTS');
     expect(new PubSubError('INVALID_ARGUMENT', 'bad').code).toBe('INVALID_ARGUMENT');
     expect(new PubSubError('FAILED_PRECONDITION', 'fail').code).toBe('FAILED_PRECONDITION');
+  });
+});
+
+// ── handlePubSubError ──
+
+describe('handlePubSubError', () => {
+  const mockResponseUtils = {
+    notFound: mock((resource?: string, name?: string) => ({
+      status: 404,
+      body: { resource, name },
+    })),
+    alreadyExists: mock((resource: string, name: string) => ({
+      status: 409,
+      body: { resource, name },
+    })),
+    badRequest: mock((message: string) => ({
+      status: 400,
+      body: { message },
+    })),
+    failedPrecondition: mock((message: string) => ({
+      status: 400,
+      body: { message },
+    })),
+    internalError: mock((message: string) => ({
+      status: 500,
+      body: { message },
+    })),
+  };
+
+  test('returns 500 for unexpected errors instead of 400', () => {
+    const result = handlePubSubError(
+      new Error('database connection failed'),
+      'Topic',
+      mockResponseUtils as never
+    );
+
+    expect(result.status).toBe(500);
+    expect(mockResponseUtils.internalError).toHaveBeenCalledWith('database connection failed');
+  });
+
+  test('returns 500 for non-Error thrown values', () => {
+    const result = handlePubSubError('something broke', 'Topic', mockResponseUtils as never);
+
+    expect(result.status).toBe(500);
+    expect(mockResponseUtils.internalError).toHaveBeenCalledWith('Internal server error');
+  });
+
+  test('returns 404 for PubSubError NOT_FOUND', () => {
+    const err = new PubSubError('NOT_FOUND', 'not found', 'projects/p/topics/t');
+    const result = handlePubSubError(err, 'Topic', mockResponseUtils as never);
+
+    expect(result.status).toBe(404);
+  });
+
+  test('returns 400 for PubSubError INVALID_ARGUMENT', () => {
+    const err = new PubSubError('INVALID_ARGUMENT', 'bad field');
+    const result = handlePubSubError(err, 'Topic', mockResponseUtils as never);
+
+    expect(result.status).toBe(400);
   });
 });

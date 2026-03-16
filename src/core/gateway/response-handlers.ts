@@ -383,6 +383,10 @@ export class ResponseUtils {
   /**
    * Create a service unavailable error response
    */
+  internalError(message: string = 'Internal server error'): RouteResponse {
+    return this.formatter.formatGcpError(500, message, 'INTERNAL');
+  }
+
   serviceUnavailable(message: string = 'Service temporarily unavailable'): RouteResponse {
     return this.formatter.formatGcpError(503, message, 'UNAVAILABLE');
   }
