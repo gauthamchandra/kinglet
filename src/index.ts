@@ -8,6 +8,7 @@ import { getConfig } from '@/config/loader.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
@@ -21,6 +22,7 @@ let storageManager: StorageManager | null = null;
 let schedulerService: SchedulerService | null = null;
 let tasksService: CloudTasksService | null = null;
 let cloudStorageService: CloudStorageService | null = null;
+let pubsubService: PubSubService | null = null;
 let workflowsService: CloudWorkflowsService | null = null;
 
 async function main(): Promise<void> {
@@ -68,7 +70,15 @@ async function main(): Promise<void> {
     }
 
     if (config.services.pubsub.enabled) {
-      logger.info('Pub/Sub service enabled (stub - not yet implemented)');
+      pubsubService = new PubSubService(storageManager, new Logger('PubSub'));
+      await pubsubService.initialize();
+
+      for (const route of pubsubService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      pubsubService.start();
+      logger.info('Cloud Pub/Sub service enabled and started');
     }
 
     if (config.services.tasks.enabled) {
@@ -144,6 +154,11 @@ async function shutdown(signal: string): Promise<void> {
   if (tasksService) {
     await tasksService.stop();
     logger.info('Tasks service stopped');
+  }
+
+  if (pubsubService) {
+    await pubsubService.stop();
+    logger.info('Pub/Sub service stopped');
   }
 
   if (cloudStorageService) {

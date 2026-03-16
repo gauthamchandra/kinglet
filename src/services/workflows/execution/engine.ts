@@ -82,6 +82,9 @@ export class WorkflowEngine {
   }
 
   async execute(args?: Record<string, unknown>): Promise<EngineResult> {
+    // Reset call depth in case a prior execution threw mid-subworkflow
+    this.callDepth = 0;
+
     try {
       const mainBlock = this.definition.main;
       const scope = createScope();

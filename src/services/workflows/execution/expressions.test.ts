@@ -374,4 +374,22 @@ describe('Expression Evaluator', () => {
       expect(evaluateTemplate('price: $$5', makeScope({}), noopStdlib)).toBe('price: $5');
     });
   });
+
+  describe('recursion depth limit', () => {
+    test('throws on deeply nested parenthesized expressions', () => {
+      const depth = 150;
+      const expr = `${'('.repeat(depth)}1${')'.repeat(depth)}`;
+
+      expect(() => evaluateExpression(expr, makeScope({}), noopStdlib)).toThrow(
+        'Expression nesting depth limit exceeded'
+      );
+    });
+
+    test('allows reasonable nesting depth', () => {
+      const depth = 20;
+      const expr = `${'('.repeat(depth)}42${')'.repeat(depth)}`;
+
+      expect(evaluateExpression(expr, makeScope({}), noopStdlib)).toBe(42);
+    });
+  });
 });
