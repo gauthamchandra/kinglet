@@ -784,4 +784,100 @@ describe('RequestRouter', () => {
       expect(await response.text()).toBe('');
     });
   });
+
+  describe('GCP action-suffix route specificity', () => {
+    let router: RequestRouter;
+
+    const actionHandler = async (
+      req: RouteRequest,
+      _ctx: RouteContext
+    ): Promise<RouteResponse> => ({
+      status: 200,
+      body: { matched: 'action', params: req.params },
+    });
+
+    const crudHandler = async (req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> => ({
+      status: 200,
+      body: { matched: 'crud', params: req.params },
+    });
+
+    beforeEach(() => {
+      router = new RequestRouter(mockLogger);
+
+      // Register CRUD route first (same order as schema-handlers.ts)
+      router.addRoute(
+        createRoute.get('/v1/projects/:project/schemas/:schema', crudHandler, {
+          id: 'schemas.get',
+        })
+      );
+
+      router.addRoute(
+        createRoute.get('/v1/projects/:project/schemas/:schema:listRevisions', actionHandler, {
+          id: 'schemas.listRevisions',
+        })
+      );
+
+      router.addRoute(
+        createRoute.delete('/v1/projects/:project/schemas/:schema', crudHandler, {
+          id: 'schemas.delete',
+        })
+      );
+
+      router.addRoute(
+        createRoute.delete('/v1/projects/:project/schemas/:schema:deleteRevision', actionHandler, {
+          id: 'schemas.deleteRevision',
+        })
+      );
+    });
+
+    test('GET :listRevisions action route is not shadowed by :schema CRUD route', async () => {
+      const response = await router.route(
+        createMockRequest('GET', '/v1/projects/p1/schemas/s1:listRevisions')
+      );
+
+      expect(response.status).toBe(200);
+
+      const body = await response.json();
+
+      expect(body.matched).toBe('action');
+      expect(body.params.schema).toBe('s1');
+    });
+
+    test('DELETE :deleteRevision action route is not shadowed by :schema CRUD route', async () => {
+      const response = await router.route(
+        createMockRequest('DELETE', '/v1/projects/p1/schemas/s1:deleteRevision')
+      );
+
+      expect(response.status).toBe(200);
+
+      const body = await response.json();
+
+      expect(body.matched).toBe('action');
+      expect(body.params.schema).toBe('s1');
+    });
+
+    test('plain :schema CRUD routes still work correctly', async () => {
+      const getResponse = await router.route(
+        createMockRequest('GET', '/v1/projects/p1/schemas/s1')
+      );
+
+      expect(getResponse.status).toBe(200);
+
+      const getBody = await getResponse.json();
+
+      expect(getBody.matched).toBe('crud');
+      expect(getBody.params.schema).toBe('s1');
+
+      const deleteResponse = await router.route(
+        createMockRequest('DELETE', '/v1/projects/p1/schemas/s1')
+      );
+
+      expect(deleteResponse.status).toBe(200);
+
+      const deleteBody = await deleteResponse.json();
+
+      expect(deleteBody.matched).toBe('crud');
+      expect(deleteBody.params.schema).toBe('s1');
+    });
+  });
 });

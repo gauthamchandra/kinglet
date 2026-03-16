@@ -614,10 +614,15 @@ export class RequestRouter {
 
     // Calculate match score (higher score = better match)
     // Exact matches score higher than parameterized matches
-    const staticSegments = routePath.split('/').filter(segment => !segment.includes('{')).length;
-    const totalSegments = routePath.split('/').length;
+    const segments = routePath.split('/');
+    const totalSegments = segments.length;
+    const staticSegments = segments.filter(
+      segment => !segment.includes('{') && !segment.startsWith(':')
+    ).length;
 
-    const score = (staticSegments / totalSegments) * 100;
+    // Tiebreaker: longer route paths have more literal characters and are more specific.
+    // This ensures e.g. `:schema:listRevisions` (with literal suffix) beats `:schema`.
+    const score = (staticSegments / totalSegments) * 100 + routePath.length * 0.01;
 
     return { params, score };
   }
