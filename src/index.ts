@@ -10,6 +10,7 @@ import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
+import { SecretsManagerService } from '@/services/secrets/index.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
@@ -23,6 +24,7 @@ let schedulerService: SchedulerService | null = null;
 let tasksService: CloudTasksService | null = null;
 let cloudStorageService: CloudStorageService | null = null;
 let pubsubService: PubSubService | null = null;
+let secretsService: SecretsManagerService | null = null;
 let workflowsService: CloudWorkflowsService | null = null;
 
 async function main(): Promise<void> {
@@ -94,7 +96,15 @@ async function main(): Promise<void> {
     }
 
     if (config.services.secrets.enabled) {
-      logger.info('Secret Manager service enabled (stub - not yet implemented)');
+      secretsService = new SecretsManagerService(storageManager, new Logger('Secrets'));
+      await secretsService.initialize();
+
+      for (const route of secretsService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      secretsService.start();
+      logger.info('Secret Manager service enabled and started');
     }
 
     if (config.services.storage.enabled) {
@@ -159,6 +169,11 @@ async function shutdown(signal: string): Promise<void> {
   if (pubsubService) {
     await pubsubService.stop();
     logger.info('Pub/Sub service stopped');
+  }
+
+  if (secretsService) {
+    await secretsService.stop();
+    logger.info('Secrets service stopped');
   }
 
   if (cloudStorageService) {
