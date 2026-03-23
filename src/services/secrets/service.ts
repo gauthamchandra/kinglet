@@ -32,11 +32,13 @@ export type SecretsErrorCode =
 
 export class SecretsError extends Error {
   readonly code: SecretsErrorCode;
+  readonly resourceName?: string | undefined;
 
-  constructor(code: SecretsErrorCode, message: string) {
+  constructor(code: SecretsErrorCode, message: string, resourceName?: string) {
     super(message);
     this.name = 'SecretsError';
     this.code = code;
+    this.resourceName = resourceName;
   }
 }
 
@@ -96,7 +98,7 @@ export class SecretService {
     const record = await this.repo.getSecretByName(name);
 
     if (!record) {
-      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`, name);
     }
 
     return secretRecordToResponse(record);
@@ -127,7 +129,7 @@ export class SecretService {
     const existing = await this.repo.getSecretByName(name);
 
     if (!existing) {
-      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`, name);
     }
 
     const request = parsed.data;
@@ -177,7 +179,7 @@ export class SecretService {
     const updated = await this.repo.updateSecret(name, updates);
 
     if (!updated) {
-      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`, name);
     }
 
     return secretRecordToResponse(updated);
@@ -187,7 +189,7 @@ export class SecretService {
     const existing = await this.repo.getSecretByName(name);
 
     if (!existing) {
-      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`, name);
     }
 
     await this.repo.deleteSecretVersionsBySecretName(name);
@@ -195,7 +197,7 @@ export class SecretService {
     const deleted = await this.repo.deleteSecret(name);
 
     if (!deleted) {
-      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret ${name} not found`, name);
     }
   }
 
@@ -211,7 +213,7 @@ export class SecretService {
     const secret = await this.repo.getSecretByName(secretName);
 
     if (!secret) {
-      throw new SecretsError('NOT_FOUND', `Secret ${secretName} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret ${secretName} not found`, secretName);
     }
 
     const versionNumber = await this.repo.incrementVersionNumber(secretName);
@@ -291,7 +293,7 @@ export class SecretService {
     const secret = await this.repo.getSecretByName(secretName);
 
     if (!secret) {
-      throw new SecretsError('NOT_FOUND', `Secret ${secretName} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret ${secretName} not found`, secretName);
     }
 
     const result = await this.repo.listSecretVersions(secretName, pageSize, pageToken);
@@ -323,7 +325,7 @@ export class SecretService {
     });
 
     if (!updated) {
-      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`, record.name);
     }
 
     return secretVersionRecordToResponse(updated, replicationStatus);
@@ -348,7 +350,7 @@ export class SecretService {
     });
 
     if (!updated) {
-      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`, record.name);
     }
 
     return secretVersionRecordToResponse(updated, replicationStatus);
@@ -373,7 +375,7 @@ export class SecretService {
     });
 
     if (!updated) {
-      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`, record.name);
     }
 
     return secretVersionRecordToResponse(updated, replicationStatus);
@@ -408,7 +410,11 @@ export class SecretService {
       const latest = await this.repo.getLatestEnabledVersion(secretName);
 
       if (!latest) {
-        throw new SecretsError('NOT_FOUND', `No enabled version found for secret ${secretName}`);
+        throw new SecretsError(
+          'NOT_FOUND',
+          `No enabled version found for secret ${secretName}`,
+          secretName
+        );
       }
 
       return latest;
@@ -417,7 +423,7 @@ export class SecretService {
     const record = await this.repo.getSecretVersionByName(versionName);
 
     if (!record) {
-      throw new SecretsError('NOT_FOUND', `Secret version ${versionName} not found`);
+      throw new SecretsError('NOT_FOUND', `Secret version ${versionName} not found`, versionName);
     }
 
     return record;

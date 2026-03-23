@@ -431,7 +431,7 @@ export class SecretsHandlers {
     if (err instanceof SecretsError) {
       switch (err.code) {
         case 'NOT_FOUND':
-          return this.responseUtils.notFound('Secret', err.message);
+          return this.responseUtils.notFound('Secret', err.resourceName);
         case 'ALREADY_EXISTS':
           return this.responseUtils.alreadyExists('Secret', err.message);
         case 'INVALID_ARGUMENT':
@@ -443,6 +443,6 @@ export class SecretsHandlers {
 
     this.logger.error('Unexpected error in secrets handler', err);
 
-    return this.responseUtils.badRequest(err instanceof Error ? err.message : 'Unknown error');
+    return this.responseUtils.internalError(err instanceof Error ? err.message : 'Unknown error');
   }
 }

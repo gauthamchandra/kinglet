@@ -153,9 +153,7 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('7. Access specific version', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:access`)
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:access`));
 
     expect(response.status).toBe(200);
 
@@ -178,9 +176,7 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('9. Get version metadata', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1`)
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1`));
 
     expect(response.status).toBe(200);
 
@@ -192,9 +188,7 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('10. List versions', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions`)
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions`));
 
     expect(response.status).toBe(200);
 
@@ -205,13 +199,10 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('11. Disable a version', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:disable`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:disable`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
 
     expect(response.status).toBe(200);
 
@@ -221,9 +212,7 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('12. Accessing disabled version returns error', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:access`)
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:access`));
 
     expect(response.status).toBe(400);
 
@@ -233,13 +222,10 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('13. Enable the version back', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:enable`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:enable`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
 
     expect(response.status).toBe(200);
 
@@ -249,9 +235,7 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('14. Access works again after re-enabling', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:access`)
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:access`));
 
     expect(response.status).toBe(200);
 
@@ -261,13 +245,10 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('15. Destroy a version', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:destroy`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:destroy`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
 
     expect(response.status).toBe(200);
 
@@ -278,21 +259,16 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
   });
 
   test('16. Accessing destroyed version returns error', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:access`)
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:access`));
 
     expect(response.status).toBe(400);
   });
 
   test('17. Destroying already-destroyed version is idempotent', async () => {
-    const response = await fetch(
-      emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:destroy`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+    const response = await fetch(emulatorUrl(`${secretsBasePath}/${secretId}/versions/1:destroy`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
 
     expect(response.status).toBe(200);
 
@@ -386,32 +362,24 @@ describe('Secret Manager E2E: Raw HTTP API', () => {
     const regionalPath = `/v1/projects/${project}/locations/us-central1/secrets`;
 
     // Create
-    const createResp = await fetch(
-      emulatorUrl(`${regionalPath}?secretId=regional-secret`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ replication: { automatic: {} } }),
-      }
-    );
+    const createResp = await fetch(emulatorUrl(`${regionalPath}?secretId=regional-secret`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replication: { automatic: {} } }),
+    });
 
     expect(createResp.status).toBe(200);
 
     const secret = await createResp.json();
 
-    expect(secret.name).toBe(
-      `projects/${project}/locations/us-central1/secrets/regional-secret`
-    );
+    expect(secret.name).toBe(`projects/${project}/locations/us-central1/secrets/regional-secret`);
 
     // Add version
-    const addResp = await fetch(
-      emulatorUrl(`${regionalPath}/regional-secret:addVersion`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload: { data: btoa('regional-value') } }),
-      }
-    );
+    const addResp = await fetch(emulatorUrl(`${regionalPath}/regional-secret:addVersion`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload: { data: btoa('regional-value') } }),
+    });
 
     expect(addResp.status).toBe(200);
 
@@ -551,11 +519,12 @@ describe('Secret Manager E2E: Client Library', () => {
     expect(response.name).toBe(`${secretName}/versions/1`);
 
     const payload = response.payload?.data;
-    const value = payload instanceof Uint8Array
-      ? new TextDecoder().decode(payload)
-      : typeof payload === 'string'
-        ? payload
-        : '';
+    const value =
+      payload instanceof Uint8Array
+        ? new TextDecoder().decode(payload)
+        : typeof payload === 'string'
+          ? payload
+          : '';
 
     expect(value).toContain('client-lib-secret-v1');
   });
@@ -566,11 +535,12 @@ describe('Secret Manager E2E: Client Library', () => {
     });
 
     const payload = response.payload?.data;
-    const value = payload instanceof Uint8Array
-      ? new TextDecoder().decode(payload)
-      : typeof payload === 'string'
-        ? payload
-        : '';
+    const value =
+      payload instanceof Uint8Array
+        ? new TextDecoder().decode(payload)
+        : typeof payload === 'string'
+          ? payload
+          : '';
 
     expect(value).toContain('client-lib-secret-v2');
   });
