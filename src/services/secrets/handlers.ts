@@ -431,7 +431,7 @@ export class SecretsHandlers {
     if (err instanceof SecretsError) {
       switch (err.code) {
         case 'NOT_FOUND':
-          return this.responseUtils.notFound('Secret', err.resourceName);
+          return this.responseUtils.notFound(err.resourceType ?? 'Secret', err.resourceName);
         case 'ALREADY_EXISTS':
           return this.responseUtils.alreadyExists('Secret', err.message);
         case 'INVALID_ARGUMENT':

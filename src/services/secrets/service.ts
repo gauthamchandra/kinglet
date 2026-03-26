@@ -33,12 +33,19 @@ export type SecretsErrorCode =
 export class SecretsError extends Error {
   readonly code: SecretsErrorCode;
   readonly resourceName?: string | undefined;
+  readonly resourceType?: string | undefined;
 
-  constructor(code: SecretsErrorCode, message: string, resourceName?: string) {
+  constructor(
+    code: SecretsErrorCode,
+    message: string,
+    resourceName?: string,
+    resourceType?: string
+  ) {
     super(message);
     this.name = 'SecretsError';
     this.code = code;
     this.resourceName = resourceName;
+    this.resourceType = resourceType;
   }
 }
 
@@ -63,6 +70,14 @@ export class SecretService {
 
     if (!parsed.success) {
       throw new SecretsError('INVALID_ARGUMENT', `Invalid request: ${parsed.error.message}`);
+    }
+
+    if (!project) {
+      throw new SecretsError('INVALID_ARGUMENT', 'project is required');
+    }
+
+    if (!secretId) {
+      throw new SecretsError('INVALID_ARGUMENT', 'secretId is required');
     }
 
     const request = parsed.data;
@@ -325,7 +340,12 @@ export class SecretService {
     });
 
     if (!updated) {
-      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`, record.name);
+      throw new SecretsError(
+        'NOT_FOUND',
+        `Secret version ${record.name} not found`,
+        record.name,
+        'SecretVersion'
+      );
     }
 
     return secretVersionRecordToResponse(updated, replicationStatus);
@@ -350,7 +370,12 @@ export class SecretService {
     });
 
     if (!updated) {
-      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`, record.name);
+      throw new SecretsError(
+        'NOT_FOUND',
+        `Secret version ${record.name} not found`,
+        record.name,
+        'SecretVersion'
+      );
     }
 
     return secretVersionRecordToResponse(updated, replicationStatus);
@@ -375,7 +400,12 @@ export class SecretService {
     });
 
     if (!updated) {
-      throw new SecretsError('NOT_FOUND', `Secret version ${record.name} not found`, record.name);
+      throw new SecretsError(
+        'NOT_FOUND',
+        `Secret version ${record.name} not found`,
+        record.name,
+        'SecretVersion'
+      );
     }
 
     return secretVersionRecordToResponse(updated, replicationStatus);
@@ -413,7 +443,8 @@ export class SecretService {
         throw new SecretsError(
           'NOT_FOUND',
           `No enabled version found for secret ${secretName}`,
-          secretName
+          secretName,
+          'SecretVersion'
         );
       }
 
@@ -423,7 +454,12 @@ export class SecretService {
     const record = await this.repo.getSecretVersionByName(versionName);
 
     if (!record) {
-      throw new SecretsError('NOT_FOUND', `Secret version ${versionName} not found`, versionName);
+      throw new SecretsError(
+        'NOT_FOUND',
+        `Secret version ${versionName} not found`,
+        versionName,
+        'SecretVersion'
+      );
     }
 
     return record;
