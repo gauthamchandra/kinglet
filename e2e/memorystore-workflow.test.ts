@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { MemorystoreClient } from '@google-cloud/memorystore';
 import type { Server } from 'bun';
+import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
@@ -34,7 +35,7 @@ beforeAll(async () => {
   memorystoreService = new MemorystoreService(storage, logger, { enabled: false });
   await memorystoreService.initialize();
 
-  const router = buildRouter(memorystoreService.getRoutes());
+  const router = buildRouter([...createLocationRoutes(logger), ...memorystoreService.getRoutes()]);
 
   emulatorServer = Bun.serve({ port: emulatorPort, fetch: router });
 });

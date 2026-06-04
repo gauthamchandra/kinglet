@@ -27,7 +27,7 @@ describe('CloudWorkflowsService', () => {
 
     const routes = service.getRoutes();
 
-    expect(routes).toHaveLength(15);
+    expect(routes).toHaveLength(13);
 
     const ids = routes.map(r => r.id);
 
@@ -40,8 +40,6 @@ describe('CloudWorkflowsService', () => {
     expect(ids).toContain('workflows.operations.list');
     expect(ids).toContain('workflows.operations.get');
     expect(ids).toContain('workflows.operations.delete');
-    expect(ids).toContain('workflows.locations.list');
-    expect(ids).toContain('workflows.locations.get');
     expect(ids).toContain('executions.create');
     expect(ids).toContain('executions.get');
     expect(ids).toContain('executions.list');

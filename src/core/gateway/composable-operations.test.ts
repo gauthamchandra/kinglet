@@ -12,7 +12,10 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
-import { buildComposedOperationsRoutes } from './composable-operations.ts';
+import {
+  buildComposedOperationsRoutes,
+  isComposedOperationsPath,
+} from './composable-operations.ts';
 import { RequestRouter } from './request-router.ts';
 
 const PROJECT = 'p';
@@ -37,8 +40,9 @@ async function buildComposedRouter(): Promise<{
 
   const router = new RequestRouter(new Logger('test', 'error'));
 
-  // Registered first, exactly as src/index.ts does, so the composed routes
-  // win the router's tie-break over each service's own operations routes.
+  // Registered exactly as src/index.ts does: the composed routes own the shared
+  // operations paths, and each service's own copy is dropped rather than left to
+  // be shadowed — addRoute rejects a duplicate method+path outright.
   for (const route of buildComposedOperationsRoutes(
     [
       memorystoreService.getComposableOperationsStore(),
@@ -49,12 +53,12 @@ async function buildComposedRouter(): Promise<{
     router.addRoute(route);
   }
 
-  for (const route of workflowsService.getRoutes()) {
-    router.addRoute(route);
-  }
+  for (const service of [workflowsService, memorystoreService]) {
+    for (const route of service.getRoutes()) {
+      if (isComposedOperationsPath(route.path)) continue;
 
-  for (const route of memorystoreService.getRoutes()) {
-    router.addRoute(route);
+      router.addRoute(route);
+    }
   }
 
   return { router, memorystoreService, workflowsService };

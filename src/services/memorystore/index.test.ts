@@ -12,13 +12,12 @@ import { TokenAuthRepository } from './token-auth-repository.ts';
 
 const FAKE_VALKEY_SERVER = join(import.meta.dir, '__fixtures__', 'fake-valkey-server.ts');
 
-// All 38 method/path pairs the discovery document mandates (see the route
-// table in the memorystore implementation plan). Asserted verbatim so a
-// route with the wrong HTTP method or a missing `:verb` colon-suffix fails
-// this test, rather than only the route COUNT.
+// Every method/path pair the discovery document mandates that Memorystore
+// itself owns. Asserted verbatim so a route with the wrong HTTP method or a
+// missing `:verb` colon-suffix fails this test, rather than only the route
+// COUNT. The generic locations.list/get pair is excluded deliberately: it is
+// shared across services and owned by src/core/gateway/location-routes.ts.
 const EXPECTED_ROUTES = [
-  ['GET', '/v1/projects/:project/locations'],
-  ['GET', '/v1/projects/:project/locations/:location'],
   ['GET', '/v1/projects/:project/locations/:location/sharedRegionalCertificateAuthority'],
 
   ['GET', '/v1/projects/:project/locations/:location/operations'],
@@ -126,15 +125,15 @@ describe('MemorystoreService', () => {
     expect(() => service.getRoutes()).toThrow();
   });
 
-  test('getRoutes_afterInitialize_returnsExactlyThirtyEightUniqueRouteIds', async () => {
+  test('getRoutes_afterInitialize_returnsExactlyThirtySixUniqueRouteIds', async () => {
     const service = new MemorystoreService(storage, logger, { enabled: false });
 
     await service.initialize();
 
     const routes = service.getRoutes();
 
-    expect(routes).toHaveLength(38);
-    expect(new Set(routes.map(r => r.id)).size).toBe(38);
+    expect(routes).toHaveLength(36);
+    expect(new Set(routes.map(r => r.id)).size).toBe(36);
   });
 
   test('getRoutes_everyRouteIdIsPrefixedWithMemorystore', async () => {

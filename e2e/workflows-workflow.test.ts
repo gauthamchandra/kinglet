@@ -4,12 +4,13 @@
  * Black-box tests validating the full workflow lifecycle through HTTP.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import type { Server } from 'bun';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { WorkflowsClient } from '@google-cloud/workflows';
+import type { Server } from 'bun';
+import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
-import { Logger } from '@/shared/utils/logger.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
+import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
 import { buildRouter, createFakeAuth } from './e2e-helpers.ts';
 
@@ -35,7 +36,7 @@ beforeAll(async () => {
   workflowsService = new CloudWorkflowsService(storage, logger);
   await workflowsService.initialize();
 
-  const routes = workflowsService.getRoutes();
+  const routes = [...createLocationRoutes(logger), ...workflowsService.getRoutes()];
   const router = buildRouter(routes);
 
   emulatorServer = Bun.serve({

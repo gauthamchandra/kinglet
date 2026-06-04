@@ -83,9 +83,14 @@ describe('getRoutes', () => {
     expect(ids).toContain('workflows.operations.list');
     expect(ids).toContain('workflows.operations.get');
     expect(ids).toContain('workflows.operations.delete');
-    expect(ids).toContain('workflows.locations.list');
-    expect(ids).toContain('workflows.locations.get');
-    expect(routes).toHaveLength(11);
+    expect(routes).toHaveLength(9);
+  });
+
+  test('leaves the shared v1 locations paths to the service-neutral handler', () => {
+    const paths = handlers.getRoutes().map(r => r.path);
+
+    expect(paths).not.toContain('/v1/projects/:project/locations');
+    expect(paths).not.toContain('/v1/projects/:project/locations/:location');
   });
 });
 
@@ -270,48 +275,6 @@ describe('operations handlers', () => {
 
     const res = await route.handler(
       makeRequest('DELETE', { project, location, operationId: 'nonexistent' }),
-      emptyCtx
-    );
-
-    expect(res.status).toBe(404);
-  });
-});
-
-describe('locations handlers', () => {
-  test('list locations returns all GCP regions', async () => {
-    const route = findRoute('workflows.locations.list');
-
-    const res = await route.handler(makeRequest('GET', { project }), emptyCtx);
-
-    expect(res.status).toBe(200);
-
-    const body = res.body as Record<string, unknown>;
-    const locations = body.locations as unknown[];
-
-    expect(locations.length).toBeGreaterThan(0);
-  });
-
-  test('get location returns known location', async () => {
-    const route = findRoute('workflows.locations.get');
-
-    const res = await route.handler(
-      makeRequest('GET', { project, location: 'us-central1' }),
-      emptyCtx
-    );
-
-    expect(res.status).toBe(200);
-
-    const body = res.body as Record<string, unknown>;
-
-    expect(body.locationId).toBe('us-central1');
-    expect(body.displayName).toBe('Council Bluffs, Iowa, USA');
-  });
-
-  test('get unknown location returns 404', async () => {
-    const route = findRoute('workflows.locations.get');
-
-    const res = await route.handler(
-      makeRequest('GET', { project, location: 'antarctica-south1' }),
       emptyCtx
     );
 

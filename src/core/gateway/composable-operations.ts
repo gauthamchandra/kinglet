@@ -3,17 +3,16 @@
  *
  * Cloud Workflows and Memorystore for Valkey each expose their own
  * `/v1/projects/:project/locations/:location/operations[/:operationId]`
- * routes. `RequestRouter` picks exactly one winner per path when two
- * services register routes of the same shape (see `matchPath`'s
- * static-segment/length scoring), so composing both services on one router
- * silently shadows one service's LRO endpoints behind the other's.
+ * routes. Only one route may own a given method+path, so composing both
+ * services on one router would otherwise mean one service's LRO endpoints
+ * are simply absent.
  *
  * This builds a single shared route set that tries each store in priority
  * order, so an operation is reachable regardless of which service created
- * it. Callers must register these routes before the individual services'
- * own operations routes so ties (e.g. identical `list` paths) resolve in
- * favor of this composed handler rather than whichever service happened to
- * register second.
+ * it. `addRoute` rejects a duplicate method+path outright, so callers must
+ * register these routes *instead of* the individual services' own operations
+ * routes, not merely before them — see `isComposedOperationsPath` and
+ * docs/adrs/009-shared-route-namespace.md.
  */
 
 import type { Logger } from '@/shared/utils/logger.ts';
@@ -23,6 +22,7 @@ import {
   parsePageSize,
 } from '@/shared/utils/pagination.ts';
 import type { RouteDefinition, RouteRequest } from './request-router.ts';
+import { stripRouteParamNames } from './request-router.ts';
 import { ResponseUtils, StandardResponseFormatter } from './response-handlers.ts';
 
 export interface ComposableOperationsListResult {
@@ -55,6 +55,22 @@ const UNBOUNDED_STORE_PAGE_SIZE = 1_000_000;
 
 function compareOperationsByName(a: Record<string, unknown>, b: Record<string, unknown>): number {
   return String(a.name ?? '').localeCompare(String(b.name ?? ''));
+}
+
+const COMPOSED_OPERATIONS_PATHS = [
+  '/v1/projects/:project/locations/:location/operations',
+  '/v1/projects/:project/locations/:location/operations/:operationId',
+].map(stripRouteParamNames);
+
+/**
+ * True when a service's own route would land on a path the composed set owns.
+ *
+ * <p>Services spell the parameter differently (`:operation` vs `:operationId`), so
+ * the comparison has to ignore parameter names. Memorystore's `:cancel` verb keeps
+ * its literal suffix and is therefore left to Memorystore.
+ */
+export function isComposedOperationsPath(path: string): boolean {
+  return COMPOSED_OPERATIONS_PATHS.includes(stripRouteParamNames(path));
 }
 
 export function buildComposedOperationsRoutes(

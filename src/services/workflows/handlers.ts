@@ -15,32 +15,6 @@ import type { WorkflowService } from './service.ts';
 import { WorkflowsError } from './service.ts';
 import { buildOperationName, buildWorkflowName, parseWorkflowName } from './types.ts';
 
-// ── Hardcoded GCP locations for the locations endpoint ──
-
-const GCP_LOCATIONS = [
-  { locationId: 'us-central1', displayName: 'Council Bluffs, Iowa, USA' },
-  { locationId: 'us-east1', displayName: 'Moncks Corner, South Carolina, USA' },
-  { locationId: 'us-east4', displayName: 'Ashburn, Virginia, USA' },
-  { locationId: 'us-west1', displayName: 'The Dalles, Oregon, USA' },
-  { locationId: 'us-west2', displayName: 'Los Angeles, California, USA' },
-  { locationId: 'us-west3', displayName: 'Salt Lake City, Utah, USA' },
-  { locationId: 'us-west4', displayName: 'Las Vegas, Nevada, USA' },
-  { locationId: 'europe-west1', displayName: 'St. Ghislain, Belgium' },
-  { locationId: 'europe-west2', displayName: 'London, England, UK' },
-  { locationId: 'europe-west3', displayName: 'Frankfurt, Germany' },
-  { locationId: 'europe-west4', displayName: 'Eemshaven, Netherlands' },
-  { locationId: 'europe-west6', displayName: 'Zurich, Switzerland' },
-  { locationId: 'asia-east1', displayName: 'Changhua County, Taiwan' },
-  { locationId: 'asia-east2', displayName: 'Hong Kong' },
-  { locationId: 'asia-northeast1', displayName: 'Tokyo, Japan' },
-  { locationId: 'asia-northeast2', displayName: 'Osaka, Japan' },
-  { locationId: 'asia-southeast1', displayName: 'Jurong West, Singapore' },
-  { locationId: 'australia-southeast1', displayName: 'Sydney, Australia' },
-  { locationId: 'northamerica-northeast1', displayName: 'Montreal, Quebec, Canada' },
-  { locationId: 'southamerica-east1', displayName: 'Osasco, Sao Paulo, Brazil' },
-  { locationId: 'me-west1', displayName: 'Tel Aviv, Israel' },
-];
-
 export class WorkflowHandlers {
   private service: WorkflowService;
   private operationsStore: OperationsStore;
@@ -115,19 +89,6 @@ export class WorkflowHandlers {
         method: 'DELETE',
         path: '/v1/projects/:project/locations/:location/operations/:operationId',
         handler: (req, ctx) => this.handleDeleteOperation(req, ctx),
-      },
-      // Locations
-      {
-        id: 'workflows.locations.list',
-        method: 'GET',
-        path: '/v1/projects/:project/locations',
-        handler: (req, ctx) => this.handleListLocations(req, ctx),
-      },
-      {
-        id: 'workflows.locations.get',
-        method: 'GET',
-        path: '/v1/projects/:project/locations/:location',
-        handler: (req, ctx) => this.handleGetLocation(req, ctx),
       },
     ];
   }
@@ -341,43 +302,6 @@ export class WorkflowHandlers {
     } catch (err) {
       return this.handleError(err);
     }
-  }
-
-  // ── Locations Handlers ──
-
-  private async handleListLocations(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
-    const { project } = req.params;
-
-    const locations = GCP_LOCATIONS.map(loc => ({
-      name: `projects/${project}/locations/${loc.locationId}`,
-      locationId: loc.locationId,
-      displayName: loc.displayName,
-      labels: {},
-      metadata: {
-        '@type': 'type.googleapis.com/google.cloud.location.Location',
-      },
-    }));
-
-    return this.responseUtils.success({ locations });
-  }
-
-  private async handleGetLocation(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
-    const { project, location: locationId } = req.params;
-    const loc = GCP_LOCATIONS.find(l => l.locationId === locationId);
-
-    if (!loc) {
-      return this.responseUtils.notFound('Location', locationId ?? '');
-    }
-
-    return this.responseUtils.success({
-      name: `projects/${project}/locations/${loc.locationId}`,
-      locationId: loc.locationId,
-      displayName: loc.displayName,
-      labels: {},
-      metadata: {
-        '@type': 'type.googleapis.com/google.cloud.location.Location',
-      },
-    });
   }
 
   // ── Helpers ──

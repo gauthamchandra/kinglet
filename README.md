@@ -155,6 +155,7 @@ curl -X POST http://localhost:8765/v2/projects/test-project/locations/us-central
 | Cloud Pub/Sub | Implemented | v1 | Topics, subscriptions, publish/pull, ack, snapshots, schemas, seek |
 | Cloud Storage | Experimental | v1 | Bucket CRUD, object upload/download, copy, compose, rewrite |
 | Cloud Workflows | Experimental | v1 | Workflow CRUD, revisions, LRO operations |
+| Cloud KMS | Implemented | v1 | Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decrypt, MAC, random bytes (IAM & importJobs deferred) |
 | Memorystore for Valkey | Experimental | v1 | Instance/ACL/backup/token-auth CRUD, real `valkey-server` data plane on by default (token-auth is metadata only — the data plane is unauthenticated) |
 | Secret Manager | Planned | — | Not yet implemented — the config flag exists but the service is a stub |
 
@@ -191,6 +192,7 @@ All configuration is via environment variables. Defaults are shown below.
 | `ENABLE_SECRETS` | `true` | Enable Secret Manager service |
 | `ENABLE_STORAGE` | `true` | Enable Cloud Storage service (experimental) |
 | `ENABLE_WORKFLOWS` | `true` | Enable Cloud Workflows service |
+| `ENABLE_KMS` | `true` | Enable Cloud KMS service |
 | `ENABLE_MEMORYSTORE` | `true` | Enable Memorystore for Valkey service |
 | `MEMORYSTORE_DATA_PLANE` | `true` | Spawn a real `valkey-server` per instance; `false` for metadata-only endpoints |
 | `MEMORYSTORE_VALKEY_BINARY` | — | Override the resolved `valkey-server` binary path |
@@ -379,7 +381,56 @@ docker run -d \
 | `GET` | `/v1/projects/{project}/locations/{location}/operations/{operationId}` | Get operation |
 | `DELETE` | `/v1/projects/{project}/locations/{location}/operations/{operationId}` | Delete operation |
 
-**Locations**
+### Cloud KMS (v1)
+
+**Key Rings**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/locations/{location}/keyRings?keyRingId=` | Create key ring |
+| `GET` | `/v1/projects/{project}/locations/{location}/keyRings` | List key rings |
+| `GET` | `/v1/projects/{project}/locations/{location}/keyRings/{keyRing}` | Get key ring |
+
+**Crypto Keys**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `.../keyRings/{keyRing}/cryptoKeys?cryptoKeyId=` | Create crypto key (auto-creates version 1) |
+| `GET` | `.../keyRings/{keyRing}/cryptoKeys` | List crypto keys |
+| `GET` | `.../cryptoKeys/{cryptoKey}` | Get crypto key |
+| `PATCH` | `.../cryptoKeys/{cryptoKey}` | Update crypto key (labels, rotation, versionTemplate) |
+| `POST` | `.../cryptoKeys/{cryptoKey}:updatePrimaryVersion` | Set primary version |
+| `POST` | `.../cryptoKeys/{cryptoKey}:encrypt` | Encrypt (symmetric) |
+| `POST` | `.../cryptoKeys/{cryptoKey}:decrypt` | Decrypt (symmetric) |
+
+**Crypto Key Versions**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `.../cryptoKeys/{cryptoKey}/cryptoKeyVersions` | Create version (rotate) |
+| `GET` | `.../cryptoKeys/{cryptoKey}/cryptoKeyVersions` | List versions |
+| `GET` | `.../cryptoKeyVersions/{version}` | Get version |
+| `PATCH` | `.../cryptoKeyVersions/{version}` | Enable/disable version |
+| `POST` | `.../cryptoKeyVersions/{version}:destroy` | Schedule destruction |
+| `POST` | `.../cryptoKeyVersions/{version}:restore` | Restore a scheduled-destroy version |
+| `GET` | `.../cryptoKeyVersions/{version}/publicKey` | Get public key (asymmetric) |
+| `POST` | `.../cryptoKeyVersions/{version}:asymmetricSign` | Asymmetric sign |
+| `POST` | `.../cryptoKeyVersions/{version}:asymmetricDecrypt` | Asymmetric decrypt |
+| `POST` | `.../cryptoKeyVersions/{version}:macSign` | MAC sign |
+| `POST` | `.../cryptoKeyVersions/{version}:macVerify` | MAC verify |
+
+**Random**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/locations/{location}:generateRandomBytes` | Generate random bytes |
+
+> IAM policy methods, `importJobs`, `rawEncrypt`/`rawDecrypt`, and precomputed-digest signing for EC keys are not yet implemented. All operations use the `SOFTWARE` protection level. See [ADR-008](docs/adrs/008-kms-crypto-emulation.md).
+
+### Locations (v1)
+
+Served for every v1 service, independently of which services are enabled. Cloud Tasks
+has its own `/v2` locations routes.
 
 | Method | Path | Description |
 |--------|------|-------------|

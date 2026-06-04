@@ -117,12 +117,27 @@ export const DEFAULT_ROUTER_CONFIG: RouterConfig = {
 };
 
 /**
+ * Strip parameter names from a route path.
+ *
+ * <p>Parameter names do not narrow what a path matches — `/topics/:topic` and
+ * `/topics/:topicId` accept exactly the same requests — so collapsing them yields a
+ * key two routes share when one would shadow the other. A `{name=pattern}` parameter
+ * is left alone; its pattern does narrow the match.
+ */
+export function stripRouteParamNames(path: string): string {
+  return path
+    .replace(/(?<=\/):[a-zA-Z_][a-zA-Z0-9_]*/g, ':param')
+    .replace(/\{[a-zA-Z_][a-zA-Z0-9_]*\}/g, '{param}');
+}
+
+/**
  * Intelligent Request Router
  */
 export class RequestRouter {
   private logger: Logger;
   private config: RouterConfig;
   private routes: Map<string, RouteDefinition> = new Map();
+  private routeIdsByPathKey: Map<string, string> = new Map();
   private methodRoutes: Map<HttpMethod, RouteDefinition[]> = new Map();
   private pathTrie: PathTrieNode = new PathTrieNode();
   private metrics: RouterMetrics;
@@ -150,8 +165,10 @@ export class RequestRouter {
 
     // Normalize path if enabled
     const normalizedPath = this.config.enablePathNormalization
-      ? this.normalizePath(route.path)
+      ? this.normalizeRoutePath(route.path)
       : route.path;
+
+    this.validateNoPathConflict(route, normalizedPath);
 
     const normalizedRoute = {
       ...route,
@@ -160,6 +177,7 @@ export class RequestRouter {
 
     // Store route
     this.routes.set(route.id, normalizedRoute);
+    this.routeIdsByPathKey.set(this.pathKey(route.method, normalizedPath), route.id);
 
     // Add to method-specific index
     if (!this.methodRoutes.has(route.method)) {
@@ -198,6 +216,7 @@ export class RequestRouter {
 
     // Remove from main registry
     this.routes.delete(routeId);
+    this.routeIdsByPathKey.delete(this.pathKey(route.method, route.path));
 
     // Remove from method index
     const methodRoutes = this.methodRoutes.get(route.method);
@@ -330,6 +349,7 @@ export class RequestRouter {
    */
   clear(): void {
     this.routes.clear();
+    this.routeIdsByPathKey.clear();
     this.methodRoutes.clear();
 
     for (const method of [
@@ -449,33 +469,75 @@ export class RequestRouter {
   }
 
   /**
-   * Normalize path
+   * Reject a route whose method and path are already claimed by another route.
+   *
+   * <p>Every emulated service registers into one router on a single port, so two
+   * services declaring the same GCP path (`/v1/projects/{project}/locations` is shared
+   * by several APIs) would otherwise leave whichever registered second permanently
+   * unreachable — {@link findRoute} keeps the first route on a score tie.
    */
-  private normalizePath(path: string): string {
+  private validateNoPathConflict(route: RouteDefinition, normalizedPath: string): void {
+    const existingRouteId = this.routeIdsByPathKey.get(this.pathKey(route.method, normalizedPath));
+
+    if (existingRouteId) {
+      throw new Error(
+        `Route '${route.id}' conflicts with '${existingRouteId}': ` +
+          `${route.method} ${normalizedPath} is already registered`
+      );
+    }
+  }
+
+  /**
+   * Build the key two routes share when one would shadow the other.
+   *
+   * <p>See {@link stripRouteParamNames} for why parameter names are collapsed.
+   */
+  private pathKey(method: HttpMethod, path: string): string {
+    const withoutParamNames = stripRouteParamNames(path);
+
+    return `${method} ${this.config.caseSensitive ? withoutParamNames : withoutParamNames.toLowerCase()}`;
+  }
+
+  /**
+   * Normalize a route template for registration.
+   *
+   * <p>Static segments are case-folded when the router is case-insensitive so that two
+   * spellings of the same path collide in {@link pathKey}; parameter markers keep their
+   * original case because handlers read them by name.
+   */
+  private normalizeRoutePath(path: string): string {
+    const normalized = this.normalizeRequestPath(path);
+
+    if (this.config.caseSensitive) {
+      return normalized;
+    }
+
+    // Only normalize static path segments, preserve parameter names
+    return normalized.replace(/\/([^/{}]+)/g, (match, segment) => {
+      // Preserve :paramName style parameter names from case normalization
+      if (segment.startsWith(':')) {
+        return match;
+      }
+
+      return `/${segment.toLowerCase()}`;
+    });
+  }
+
+  /**
+   * Normalize an incoming request path.
+   *
+   * <p><b>IMPORTANT:</b> structural normalization only — segment case is preserved
+   * because path segments carry resource ids, and GCP ids are case-sensitive (a Cloud
+   * KMS key ring may legally be named `MyRing`). Case-insensitive matching against the
+   * case-folded route templates is handled by the regex flag in {@link pathToRegex}.
+   */
+  private normalizeRequestPath(path: string): string {
     // Remove duplicate slashes
-    let normalized = path.replace(/\/+/g, '/');
+    const normalized = path.replace(/\/+/g, '/');
 
     // Remove trailing slash unless it's the root
     if (normalized.length > 1 && normalized.endsWith('/') && !this.config.strictTrailingSlash) {
-      normalized = normalized.slice(0, -1);
-    }
-
-    // Convert to lowercase if not case sensitive
-    if (!this.config.caseSensitive) {
-      // Only normalize static path segments, preserve parameter names
-      normalized = normalized.replace(/\/([^/{}]+)/g, (match, segment) => {
-        // Don't lowercase segments that are parameter values (this is for route templates)
-        if (segment.includes('{') || segment.includes('}')) {
-          return match;
-        }
-
-        // Preserve :paramName style parameter names from case normalization
-        if (segment.startsWith(':')) {
-          return match;
-        }
-
-        return `/${segment.toLowerCase()}`;
-      });
+      return normalized.slice(0, -1);
     }
 
     return normalized;
@@ -533,7 +595,9 @@ export class RequestRouter {
 
     return {
       method: request.method.toUpperCase(),
-      path: this.config.enablePathNormalization ? this.normalizePath(url.pathname) : url.pathname,
+      path: this.config.enablePathNormalization
+        ? this.normalizeRequestPath(url.pathname)
+        : url.pathname,
       query,
       headers,
       params: {}, // Will be populated by route matching

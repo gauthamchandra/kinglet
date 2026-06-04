@@ -5,8 +5,9 @@
  * callback recording, and fake auth for GCP client libraries.
  */
 
-import { Logger } from '@/shared/utils/logger.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
+import { RequestRouter } from '@/core/gateway/request-router.ts';
+import { Logger } from '@/shared/utils/logger.ts';
 
 // ── Types ──
 
@@ -97,6 +98,24 @@ export function buildRouter(routes: RouteDefinition[]) {
       }
     );
   };
+}
+
+/**
+ * Build a Bun.serve fetch handler backed by the production {@link RequestRouter}.
+ *
+ * <p><b>NOTE:</b> {@link buildRouter} is a simplified matcher that skips path
+ * normalization and match scoring, so it cannot catch routing regressions. Reach for
+ * this instead whenever a service carries resource ids in the URL path, or when route
+ * shadowing between services is a risk.
+ */
+export function buildProductionRouter(routes: RouteDefinition[]) {
+  const router = new RequestRouter(new Logger('e2e', 'error'));
+
+  for (const route of routes) {
+    router.addRoute(route);
+  }
+
+  return (request: Request): Promise<Response> => router.route(request);
 }
 
 /**

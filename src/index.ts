@@ -8,10 +8,13 @@ import { getConfig } from '@/config/loader.ts';
 import {
   buildComposedOperationsRoutes,
   type ComposableOperationsStore,
+  isComposedOperationsPath,
 } from '@/core/gateway/composable-operations.ts';
+import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
@@ -30,6 +33,7 @@ let cloudStorageService: CloudStorageService | null = null;
 let pubsubService: PubSubService | null = null;
 let workflowsService: CloudWorkflowsService | null = null;
 let memorystoreService: MemorystoreService | null = null;
+let kmsService: CloudKmsService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -62,6 +66,12 @@ async function main(): Promise<void> {
     };
 
     router.addRoute(healthRoute);
+
+    // Several GCP APIs share the v1 locations endpoint, so it is owned here rather
+    // than by any one service — see src/core/gateway/location-routes.ts
+    for (const route of createLocationRoutes(logger)) {
+      router.addRoute(route);
+    }
 
     if (config.services.scheduler.enabled) {
       schedulerService = new SchedulerService(storageManager, new Logger('Scheduler'));
@@ -122,6 +132,18 @@ async function main(): Promise<void> {
       logger.info('Cloud Workflows service enabled');
     }
 
+    if (config.services.kms.enabled) {
+      kmsService = new CloudKmsService(storageManager, new Logger('KMS'));
+      await kmsService.initialize();
+
+      for (const route of kmsService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      kmsService.start();
+      logger.info('Cloud KMS service enabled and started');
+    }
+
     if (config.services.memorystore.enabled) {
       memorystoreService = new MemorystoreService(
         storageManager,
@@ -134,12 +156,11 @@ async function main(): Promise<void> {
       logger.info('Memorystore for Valkey service enabled and started');
     }
 
-    // Workflows and Memorystore both expose `/operations` routes of the same
-    // shape; RequestRouter can only pick one winner per path (see
-    // docs/adrs/007-memorystore-valkey-data-plane.md). Registering a composed
-    // route set first lets it win that tie-break, so an LRO is retrievable
-    // regardless of which service created it, instead of one service's
-    // operations silently shadowing the other's.
+    // Workflows and Memorystore both expose `/operations` routes of the same shape
+    // (see docs/adrs/007-memorystore-valkey-data-plane.md). A composed route set
+    // queries both stores, so an LRO is retrievable regardless of which service
+    // created it, and each service's own copy is then dropped below — one owner per
+    // path, per docs/adrs/009-shared-route-namespace.md.
     const composableOperationsStores: ComposableOperationsStore[] = [];
 
     if (memorystoreService) {
@@ -150,7 +171,9 @@ async function main(): Promise<void> {
       composableOperationsStores.push(workflowsService.getComposableOperationsStore());
     }
 
-    if (composableOperationsStores.length > 1) {
+    const composedOperationsRegistered = composableOperationsStores.length > 1;
+
+    if (composedOperationsRegistered) {
       for (const route of buildComposedOperationsRoutes(
         composableOperationsStores,
         new Logger('Operations')
@@ -159,16 +182,24 @@ async function main(): Promise<void> {
       }
     }
 
-    if (workflowsService) {
-      for (const route of workflowsService.getRoutes()) {
+    // addRoute rejects a duplicate method+path outright, so a service's own
+    // operations routes have to be dropped once the composed set owns them.
+    const registerServiceRoutes = (routes: RouteDefinition[]): void => {
+      for (const route of routes) {
+        if (composedOperationsRegistered && isComposedOperationsPath(route.path)) {
+          continue;
+        }
+
         router.addRoute(route);
       }
+    };
+
+    if (workflowsService) {
+      registerServiceRoutes(workflowsService.getRoutes());
     }
 
     if (memorystoreService) {
-      for (const route of memorystoreService.getRoutes()) {
-        router.addRoute(route);
-      }
+      registerServiceRoutes(memorystoreService.getRoutes());
     }
 
     server = Bun.serve({
@@ -249,6 +280,11 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     if (memorystoreService) {
       await memorystoreService.stop();
       logger.info('Memorystore service stopped');
+    }
+
+    if (kmsService) {
+      await kmsService.stop();
+      logger.info('KMS service stopped');
     }
 
     if (storageManager) {

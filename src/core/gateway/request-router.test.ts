@@ -127,6 +127,59 @@ describe('RequestRouter', () => {
       expect(() => router.addRoute(route2)).toThrow("Route with ID 'duplicate' already exists");
     });
 
+    test('should reject a second route on the same method and path', () => {
+      const first = createRoute.get('/v1/projects/:project/locations', simpleHandler, {
+        id: 'workflows.locations.list',
+      });
+      const second = createRoute.get('/v1/projects/:project/locations', simpleHandler, {
+        id: 'kms.locations.list',
+      });
+
+      router.addRoute(first);
+
+      expect(() => router.addRoute(second)).toThrow(
+        "Route 'kms.locations.list' conflicts with 'workflows.locations.list': GET /v1/projects/:project/locations is already registered"
+      );
+    });
+
+    test('should treat paths differing only in case as the same route', () => {
+      router.addRoute(createRoute.get('/v1/keyRings', simpleHandler, { id: 'camel' }));
+
+      expect(() =>
+        router.addRoute(createRoute.get('/v1/keyrings', simpleHandler, { id: 'lower' }))
+      ).toThrow("conflicts with 'camel'");
+    });
+
+    test('should treat paths differing only in parameter name as the same route', () => {
+      router.addRoute(createRoute.get('/v1/topics/:topic', simpleHandler, { id: 'colon' }));
+      router.addRoute(createRoute.get('/v2/topics/{topic}', simpleHandler, { id: 'brace' }));
+
+      expect(() =>
+        router.addRoute(createRoute.get('/v1/topics/:topicId', simpleHandler, { id: 'colon-alt' }))
+      ).toThrow("conflicts with 'colon'");
+      expect(() =>
+        router.addRoute(createRoute.get('/v2/topics/{topicId}', simpleHandler, { id: 'brace-alt' }))
+      ).toThrow("conflicts with 'brace'");
+    });
+
+    test('should not conflate a constrained parameter with a plain one', () => {
+      router.addRoute(
+        createRoute.get('/v1/projects/{projectId=projects/*}', simpleHandler, { id: 'patterned' })
+      );
+
+      expect(() =>
+        router.addRoute(createRoute.get('/v1/projects/{projectId}', simpleHandler, { id: 'plain' }))
+      ).not.toThrow();
+    });
+
+    test('should allow the same path on different methods', () => {
+      router.addRoute(createRoute.get('/v1/keyRings/:keyRing', simpleHandler, { id: 'get' }));
+
+      expect(() =>
+        router.addRoute(createRoute.patch('/v1/keyRings/:keyRing', simpleHandler, { id: 'patch' }))
+      ).not.toThrow();
+    });
+
     test('should validate required route fields', () => {
       const invalidRoutes = [
         { method: 'GET', path: '/test', handler: simpleHandler }, // Missing id
@@ -335,6 +388,49 @@ describe('RequestRouter', () => {
 
       expect(getResponse.status).toBe(404); // No GET handler for /users
       expect(postResponse.status).toBe(200); // POST handler exists
+    });
+  });
+
+  describe('Path Parameter Case', () => {
+    beforeEach(() => {
+      router.addRoute(
+        createRoute.get(
+          '/v1/projects/:project/locations/:location/keyRings/:keyRing',
+          paramHandler,
+          { id: 'kms.keyRings.get' }
+        )
+      );
+    });
+
+    test('should preserve the case of extracted path parameters', async () => {
+      const request = createMockRequest(
+        'GET',
+        '/v1/projects/My-Project/locations/us-central1/keyRings/MyRing'
+      );
+
+      const response = await router.route(request);
+
+      expect(response.status).toBe(200);
+
+      const body = await response.json();
+
+      expect(body.params.project).toBe('My-Project');
+      expect(body.params.keyRing).toBe('MyRing');
+    });
+
+    test('should still match static segments that differ in case from the template', async () => {
+      const request = createMockRequest(
+        'GET',
+        '/v1/Projects/p/Locations/us-central1/keyrings/MyRing'
+      );
+
+      const response = await router.route(request);
+
+      expect(response.status).toBe(200);
+
+      const body = await response.json();
+
+      expect(body.params.keyRing).toBe('MyRing');
     });
   });
 
