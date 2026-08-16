@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/gauthamchandra/localstack-gcp/compare/v1.5.0...v2.0.0) (2026-08-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* the container image moves from ghcr.io/gauthamchandra/localstack-gcp to ghcr.io/gauthamchandra/kinglet, the npm package name changes from `localstack-gcp` to `kinglet`, and the license changes from MPL-2.0 to Apache-2.0. The default mock project ID and service account also change from `localstack-project` to `kinglet-project`.
+
+### Miscellaneous
+
+* rename to kinglet, relicense Apache-2.0, add contributor docs ([#37](https://github.com/gauthamchandra/localstack-gcp/issues/37)) ([d1519f4](https://github.com/gauthamchandra/localstack-gcp/commit/d1519f431ed2cc6c7233df227091f993362ae00c))
+
 ## [1.5.0](https://github.com/gauthamchandra/localstack-gcp/compare/v1.4.0...v1.5.0) (2026-03-16)
 
 
