@@ -153,5 +153,4 @@ This decision should be reviewed if we encounter actual (not theoretical) issues
 
 - [Bun Test Documentation](https://bun.sh/docs/cli/test)
 - [Vitest Documentation](https://vitest.dev/)
-- [TASKS.md Phase 4: Integration Testing](../../TASKS.md#phase-4-integration--testing)
 - [ADR-001: Bun Runtime Choice](001-bun-runtime-choice.md)

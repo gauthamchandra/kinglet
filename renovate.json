@@ -1,0 +1,62 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommits"],
+  "semanticCommitType": "deps",
+  "timezone": "America/New_York",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"],
+    "automerge": true
+  },
+  "packageRules": [
+    {
+      "description": "Auto-merge devDependency minor and patch updates once CI and E2E are green. These cannot affect the shipped runtime.",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Auto-merge GitHub Actions minor and patch updates. Pinned by digest via config:recommended.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Runtime dependencies ship to users and can change emulated behaviour. Always review, never auto-merge.",
+      "matchDepTypes": ["dependencies"],
+      "automerge": false,
+      "addLabels": ["needs-review"]
+    },
+    {
+      "description": "Major updates always need a human, regardless of dep type.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": ["needs-review"]
+    },
+    {
+      "description": "Bun itself is pinned in .tool-versions, the Dockerfile, and CI. A bump has to land in all three together, so review it.",
+      "matchPackageNames": ["oven/bun", "oven-sh/setup-bun"],
+      "automerge": false,
+      "addLabels": ["needs-review"]
+    },
+    {
+      "description": "GCP client libraries are how API fidelity is verified. A bump can legitimately surface a real incompatibility, which is a signal worth reading rather than merging past.",
+      "matchPackageNames": ["@google-cloud/**"],
+      "automerge": false,
+      "addLabels": ["needs-review", "fidelity"]
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": false
+  }
+}

@@ -8,6 +8,10 @@ export default {
         'build',
         'ci',
         'chore',
+        // Renovate raises dependency PRs with a `deps:` prefix, and release-please-config.json
+        // defines a matching "Dependencies" changelog section. Omitting it here would reject
+        // every automated dependency PR.
+        'deps',
         'docs',
         'feat',
         'fix',

@@ -10,6 +10,14 @@ RUN bun install --frozen-lockfile --production --ignore-scripts
 FROM base
 WORKDIR /app
 
+# org.opencontainers.image.source is what links the GHCR package to this repo and
+# lets GHCR inherit the repository's README and visibility settings.
+LABEL org.opencontainers.image.title="kinglet" \
+      org.opencontainers.image.description="A local emulator for Google Cloud Platform services" \
+      org.opencontainers.image.source="https://github.com/gauthamchandra/kinglet" \
+      org.opencontainers.image.url="https://github.com/gauthamchandra/kinglet" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 COPY --from=install /app/node_modules ./node_modules
 COPY package.json bun.lock tsconfig.json LICENSE ./
 COPY src/ ./src/

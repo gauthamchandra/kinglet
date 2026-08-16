@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(bun install)",
+      "Bash(bun install --frozen-lockfile)",
+      "Bash(bun test:*)",
+      "Bash(bun run build:*)",
+      "Bash(bun run dev:*)",
+      "Bash(bun run format:*)",
+      "Bash(bun run healthcheck:*)",
+      "Bash(bun run knip:*)",
+      "Bash(bun run lint:*)",
+      "Bash(bun run start:*)",
+      "Bash(bun run test:*)",
+      "Bash(bun run scripts/check-coverage.ts)",
+      "Bash(bunx biome:*)",
+      "Bash(bunx commitlint:*)",
+      "Bash(bunx knip:*)",
+      "Bash(bunx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git status:*)",
+      "WebFetch(domain:*.googleapis.com)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

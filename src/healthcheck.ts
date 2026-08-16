@@ -8,7 +8,7 @@ async function healthCheck(): Promise<void> {
     const response = await fetch('http://localhost:8765/health', {
       method: 'GET',
       headers: {
-        'User-Agent': 'LocalStack-GCP-Healthcheck/1.0',
+        'User-Agent': 'kinglet-Healthcheck/1.0',
       },
     });
 

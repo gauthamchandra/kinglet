@@ -24,8 +24,8 @@ const AuthConfigSchema = z.object({
   mode: z.enum(['bypass', 'mock', 'validate']).default('bypass'),
   mockCredentials: z
     .object({
-      projectId: z.string().default('localstack-project'),
-      serviceAccount: z.string().default('localstack@localstack-project.iam.gserviceaccount.com'),
+      projectId: z.string().default('kinglet-project'),
+      serviceAccount: z.string().default('kinglet@kinglet-project.iam.gserviceaccount.com'),
     })
     .optional(),
 });
@@ -166,9 +166,9 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.AUTH_MODE !== undefined) config.auth.mode = env.AUTH_MODE;
     if (env.MOCK_PROJECT_ID !== undefined || env.MOCK_SERVICE_ACCOUNT !== undefined) {
       config.auth.mockCredentials = {
-        projectId: env.MOCK_PROJECT_ID || 'localstack-project',
+        projectId: env.MOCK_PROJECT_ID || 'kinglet-project',
         serviceAccount:
-          env.MOCK_SERVICE_ACCOUNT || 'localstack@localstack-project.iam.gserviceaccount.com',
+          env.MOCK_SERVICE_ACCOUNT || 'kinglet@kinglet-project.iam.gserviceaccount.com',
       };
     }
   }

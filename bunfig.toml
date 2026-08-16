@@ -2,9 +2,14 @@
 # Test configuration for Bun
 preload = ["./test-utils/setup.ts"]
 coverage = true
-coverageThreshold = 0.8
-coverageReporter = "text"
+coverageReporter = ["text", "lcov"]
 coverageDir = "./coverage"
+
+# NOTE: deliberately no `coverageThreshold` here. Bun applies it PER FILE, not to the
+# aggregate, so any value meaningful for the project as a whole (80%+) fails on individual
+# low-function-count files like src/config/schema.ts. That made plain `bun test` exit
+# non-zero for every developer even with all tests passing. The 80% AGGREGATE gate this
+# project actually enforces lives in scripts/check-coverage.ts and runs in CI.
 
 # Exclude test files from coverage reports
 coverageExclude = [

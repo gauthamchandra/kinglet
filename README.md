@@ -1,8 +1,18 @@
-# LocalStack GCP Emulator
+# kinglet
 
-A local emulation environment for Google Cloud Platform services, built with [Bun](https://bun.sh) and TypeScript. Run GCP services on your machine for development and testing — no cloud account required.
+[![CI](https://github.com/gauthamchandra/kinglet/actions/workflows/ci.yml/badge.svg)](https://github.com/gauthamchandra/kinglet/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Container](https://img.shields.io/badge/ghcr.io-kinglet-blue)](https://github.com/gauthamchandra/kinglet/pkgs/container/kinglet)
 
-The project aims for **full REST API compatibility** with each GCP service. Support is being added incrementally.
+**A local emulator for Google Cloud Platform services.** Built with [Bun](https://bun.sh) and TypeScript. Run GCP services on your machine for development and testing — no cloud account required.
+
+The project aims for **full REST API compatibility** with each GCP service: if your code works against kinglet, it should work against real GCP. Support is being added incrementally.
+
+- **Contributing?** Start with [CONTRIBUTING.md](CONTRIBUTING.md) — especially the [API fidelity contract](CONTRIBUTING.md#the-fidelity-contract).
+- **Adding a service?** See [docs/adding-a-service.md](docs/adding-a-service.md).
+- **Found a security issue?** See [SECURITY.md](SECURITY.md) — please don't open a public issue.
+
+> kinglet is a development and testing tool. It is not authenticated, not hardened, and not intended for production or for real secrets. See the [threat model](SECURITY.md#threat-model--please-read-before-reporting).
 
 ## Quick Start
 
@@ -11,8 +21,8 @@ The project aims for **full REST API compatibility** with each GCP service. Supp
 ```bash
 docker run -d \
   -p 8765:8765 \
-  --name localstack-gcp \
-  ghcr.io/gauthamchandra/localstack-gcp:latest
+  --name kinglet \
+  ghcr.io/gauthamchandra/kinglet:latest
 ```
 
 Verify it's running:
@@ -26,17 +36,17 @@ curl http://localhost:8765/health
 
 ```yaml
 services:
-  localstack-gcp:
-    image: ghcr.io/gauthamchandra/localstack-gcp:latest
+  kinglet:
+    image: ghcr.io/gauthamchandra/kinglet:latest
     ports:
       - "8765:8765"
     volumes:
-      - localstack-data:/app/data  # persist state across restarts
+      - kinglet-data:/app/data  # persist state across restarts
     environment:
       LOG_LEVEL: info
 
 volumes:
-  localstack-data:
+  kinglet-data:
 ```
 
 ## Connecting GCP Client Libraries
@@ -135,10 +145,10 @@ curl -X POST http://localhost:8765/v2/projects/test-project/locations/us-central
 |---------|--------|-------------|-------|
 | Cloud Scheduler | Implemented | v1 | Job CRUD, pause/resume, cron execution |
 | Cloud Tasks | Implemented | v2 | Queue lifecycle, task CRUD, HTTP dispatch |
+| Cloud Pub/Sub | Implemented | v1 | Topics, subscriptions, publish/pull, ack, snapshots, schemas, seek |
 | Cloud Storage | Experimental | v1 | Bucket CRUD, object upload/download, copy, compose, rewrite |
 | Cloud Workflows | Experimental | v1 | Workflow CRUD, revisions, LRO operations |
-| Pub/Sub | Planned | — | Not yet implemented |
-| Secret Manager | Planned | — | Not yet implemented |
+| Secret Manager | Planned | — | Not yet implemented — the config flag exists but the service is a stub |
 
 > **Experimental** means the service API is implemented but has not yet been validated against production use cases or official GCP client libraries. Breaking changes may occur.
 
@@ -187,7 +197,7 @@ All configuration is via environment variables. Defaults are shown below.
 |----------|---------|-------------|
 | `AUTH_ENABLED` | `false` | Enable authentication |
 | `AUTH_MODE` | `bypass` | `bypass`, `mock`, or `validate` |
-| `MOCK_PROJECT_ID` | `localstack-project` | Default project ID |
+| `MOCK_PROJECT_ID` | `kinglet-project` | Default project ID |
 
 ### Example: custom configuration
 
@@ -199,7 +209,7 @@ docker run -d \
   -e LOG_LEVEL=debug \
   -e LOG_FORMAT=pretty \
   -e SERVICES=scheduler,tasks \
-  ghcr.io/gauthamchandra/localstack-gcp:latest
+  ghcr.io/gauthamchandra/kinglet:latest
 ```
 
 ## API Endpoints
@@ -247,6 +257,66 @@ docker run -d \
 | `POST` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks` | Create task |
 | `DELETE` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks/{taskId}` | Delete task |
 | `POST` | `/v2/projects/{project}/locations/{location}/queues/{queueId}/tasks/{taskId}:run` | Run task immediately |
+
+### Cloud Pub/Sub (v1)
+
+**Topics**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/topics` | List topics |
+| `GET` | `/v1/projects/{project}/topics/{topic}` | Get topic |
+| `PUT` | `/v1/projects/{project}/topics/{topic}` | Create topic |
+| `PATCH` | `/v1/projects/{project}/topics/{topic}` | Update topic |
+| `DELETE` | `/v1/projects/{project}/topics/{topic}` | Delete topic |
+| `POST` | `/v1/projects/{project}/topics/{topic}:publish` | Publish messages |
+| `GET` | `/v1/projects/{project}/topics/{topic}/subscriptions` | List a topic's subscriptions |
+| `GET` | `/v1/projects/{project}/topics/{topic}/snapshots` | List a topic's snapshots |
+
+**Subscriptions**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/subscriptions` | List subscriptions |
+| `GET` | `/v1/projects/{project}/subscriptions/{subscription}` | Get subscription |
+| `PUT` | `/v1/projects/{project}/subscriptions/{subscription}` | Create subscription |
+| `PATCH` | `/v1/projects/{project}/subscriptions/{subscription}` | Update subscription |
+| `DELETE` | `/v1/projects/{project}/subscriptions/{subscription}` | Delete subscription |
+| `POST` | `/v1/projects/{project}/subscriptions/{subscription}:pull` | Pull messages |
+| `POST` | `/v1/projects/{project}/subscriptions/{subscription}:acknowledge` | Acknowledge messages |
+| `POST` | `/v1/projects/{project}/subscriptions/{subscription}:modifyAckDeadline` | Modify ack deadline |
+| `POST` | `/v1/projects/{project}/subscriptions/{subscription}:modifyPushConfig` | Modify push config |
+| `POST` | `/v1/projects/{project}/subscriptions/{subscription}:seek` | Seek to time or snapshot |
+| `POST` | `/v1/projects/{project}/subscriptions/{subscription}:detach` | Detach subscription |
+
+**Snapshots**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/snapshots` | List snapshots |
+| `GET` | `/v1/projects/{project}/snapshots/{snapshot}` | Get snapshot |
+| `PUT` | `/v1/projects/{project}/snapshots/{snapshot}` | Create snapshot |
+| `PATCH` | `/v1/projects/{project}/snapshots/{snapshot}` | Update snapshot |
+| `DELETE` | `/v1/projects/{project}/snapshots/{snapshot}` | Delete snapshot |
+
+**Schemas**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/schemas` | List schemas |
+| `GET` | `/v1/projects/{project}/schemas/{schema}` | Get schema |
+| `POST` | `/v1/projects/{project}/schemas` | Create schema |
+| `DELETE` | `/v1/projects/{project}/schemas/{schema}` | Delete schema |
+| `POST` | `/v1/projects/{project}/schemas/{schema}:commit` | Commit a schema revision |
+| `GET` | `/v1/projects/{project}/schemas/{schema}:listRevisions` | List schema revisions |
+| `POST` | `/v1/projects/{project}/schemas/{schema}:rollback` | Roll back to a revision |
+| `DELETE` | `/v1/projects/{project}/schemas/{schema}:deleteRevision` | Delete a schema revision |
+| `POST` | `/v1/projects/{project}/schemas:validate` | Validate a schema |
+| `POST` | `/v1/projects/{project}/schemas:validateMessage` | Validate a message against a schema |
+
+> **Not implemented:** streaming pull (the gRPC `StreamingPull` API) and the IAM policy methods (`setIamPolicy`, `getIamPolicy`, `testIamPermissions`).
+>
+> Pull delivery, push subscriptions, message ordering (`orderingKey` / `enableMessageOrdering`), and dead-letter forwarding all work.
 
 ### Cloud Storage (v1) — Experimental
 
@@ -314,7 +384,7 @@ The emulator supports three storage modes via the `STORAGE_TYPE` variable:
 To persist data across container restarts, mount the data directory:
 
 ```bash
-docker run -d -p 8765:8765 -v ./data:/app/data ghcr.io/gauthamchandra/localstack-gcp:latest
+docker run -d -p 8765:8765 -v ./data:/app/data ghcr.io/gauthamchandra/kinglet:latest
 ```
 
 ## Versioning and Releases
@@ -343,10 +413,10 @@ This project uses [semantic versioning](https://semver.org/) with automated rele
 
 ```bash
 # Pin to exact version (recommended for CI/CD)
-docker pull ghcr.io/gauthamchandra/localstack-gcp:1.2.3
+docker pull ghcr.io/gauthamchandra/kinglet:1.2.3
 
 # Track latest within major version
-docker pull ghcr.io/gauthamchandra/localstack-gcp:1
+docker pull ghcr.io/gauthamchandra/kinglet:1
 ```
 
 ### Commit message format
@@ -368,20 +438,42 @@ No manual steps are needed beyond merging the release PR that release-please ope
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) >= 1.1.0
+- [Bun](https://bun.sh) >= 1.1.0 (this repo pins **1.3.4** in `.tool-versions`)
 
 ### Setup
 
 ```bash
 bun install
-bun run dev      # start with hot reload
-bun test         # run all tests
-bun run lint     # typecheck + biome + knip
+bun run dev       # start with hot reload
+bun test          # unit + integration tests
+bun run test:e2e  # end-to-end suite
+bun run lint      # typecheck + biome + knip
 ```
 
-See [CLAUDE.md](CLAUDE.md) for coding conventions and architecture details.
-See [docs/adrs/](docs/adrs/) for architectural decision records.
+### Where to go next
+
+| I want to… | Read |
+|---|---|
+| Contribute anything | **[CONTRIBUTING.md](CONTRIBUTING.md)** — scope, fidelity contract, quality bar, DCO, AI policy |
+| Add a new GCP service | [docs/adding-a-service.md](docs/adding-a-service.md) |
+| Understand why it's built this way | [docs/adrs/](docs/adrs/) |
+| Configure an AI agent | [AGENTS.md](AGENTS.md) (`CLAUDE.md` is a symlink to it) |
+
+## Contributing
+
+Contributions are welcome — new service emulations, missing endpoints, fidelity fixes, and docs.
+
+**Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.** Two things to know up front:
+
+1. **New services and API gaps need an accepted issue before you write code.** Declining a finished PR is expensive for you, and the issue takes five minutes.
+2. **kinglet only emulates what real GCP actually does.** Every emulated endpoint is checked against the official [Google Discovery Document](discovery-document-registry.json) for that API.
+
+kinglet has one maintainer and no response-time commitment — see [support expectations](CONTRIBUTING.md#support-expectations).
+
+By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-MIT
+[Apache License 2.0](LICENSE).
+
+kinglet is not affiliated with, endorsed by, or sponsored by Google LLC. "Google Cloud", "Google Cloud Platform", "GCP", and the service names above are trademarks of Google LLC, used here only to describe which APIs this software emulates.

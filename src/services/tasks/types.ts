@@ -597,8 +597,9 @@ export function requestToTaskRecord(
   },
   defaults: { taskTtl: string; tombstoneTtl: string }
 ): Omit<TaskRecord, keyof BaseRecord> {
-  // TODO(task-ttl): Use defaults.taskTtl and defaults.tombstoneTtl to enforce
-  // per-task TTL expiration. See TASKS.md task 11.6 for tracking.
+  // TODO(task-ttl): Neither defaults.taskTtl nor defaults.tombstoneTtl is applied yet, so
+  // task records and tombstones never expire. Real Cloud Tasks purges completed tasks after
+  // the queue's retention window; until this is wired up, storage grows without bound.
   void defaults;
 
   return {

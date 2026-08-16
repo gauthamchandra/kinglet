@@ -86,4 +86,3 @@ compatibility issues arise.
 
 - [Bun Documentation](https://bun.sh/docs)
 - [Performance Benchmarks](https://bun.sh/docs/benchmark)
-- [LocalStack GCP Design Document](../DESIGN.md)

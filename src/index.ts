@@ -1,5 +1,5 @@
 /**
- * LocalStack GCP Emulator
+ * kinglet
  * Entry point for the application
  */
 
@@ -27,7 +27,7 @@ let workflowsService: CloudWorkflowsService | null = null;
 
 async function main(): Promise<void> {
   try {
-    logger.info('Starting LocalStack GCP Emulator...');
+    logger.info('Starting kinglet...');
     logger.info('Bun version:', Bun.version);
 
     const config = await getConfig();
@@ -130,9 +130,9 @@ async function main(): Promise<void> {
       },
     });
 
-    logger.info(`LocalStack GCP Emulator started on port ${server.port}`);
+    logger.info(`kinglet started on port ${server.port}`);
   } catch (error) {
-    logger.error('Failed to start LocalStack GCP Emulator:', error);
+    logger.error('Failed to start kinglet:', error);
     process.exit(1);
   }
 }

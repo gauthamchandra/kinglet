@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or general discussion
+    url: https://github.com/gauthamchandra/kinglet/discussions
+    about: Questions about using kinglet, ideas, and anything that isn't a bug or a concrete proposal.
+  - name: Report a security vulnerability
+    url: https://github.com/gauthamchandra/kinglet/security/advisories/new
+    about: Please report vulnerabilities privately, never in a public issue. See SECURITY.md.
+  - name: How to contribute
+    url: https://github.com/gauthamchandra/kinglet/blob/main/CONTRIBUTING.md
+    about: What this project accepts, the API-fidelity contract, and the quality bar. Read before opening a PR.
