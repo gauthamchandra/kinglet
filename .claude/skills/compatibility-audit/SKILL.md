@@ -36,7 +36,11 @@ You are auditing the "{DISPLAY_NAME}" ({VERSION}) implementation in kinglet, a l
 Compare our implementation against the official GCP REST discovery document and write a compatibility report.
 
 ## Step 1: Fetch the Discovery Document
-Use WebFetch to fetch: {DISCOVERY_URL}
+If {DISCOVERY_URL} starts with `http://` or `https://`, use WebFetch to fetch it. Otherwise, treat
+it as a path relative to the repo root and use the Read tool instead. If the Read fails because the
+file is absent (this happens for discovery documents GCP gates behind authentication, which are
+gitignored on purpose — see .gitignore), write "discovery document unavailable locally (gitignored)"
+as this service's report and continue the run for the remaining services rather than failing it.
 Ask it to extract and return:
 - All methods found by recursively walking the `resources` object tree. Each resource can contain `methods` (a map of method objects) and nested `resources`.
 - For each method: its `id`, `httpMethod`, `path`, `parameters` (with required flag and location), `request.$ref`, `response.$ref`

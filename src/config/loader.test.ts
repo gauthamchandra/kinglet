@@ -254,4 +254,42 @@ describe('Configuration Loader', () => {
       expect(config.logging.level).toBe('info'); // Default value
     });
   });
+
+  describe('memorystore configuration', () => {
+    test('load() defaults the memorystore service to enabled with the data plane on', async () => {
+      const loader = new ConfigLoader();
+      const config = await loader.load();
+
+      expect(config.services.memorystore.enabled).toBe(true);
+      expect(config.services.memorystore.dataPlane.enabled).toBe(true);
+    });
+
+    test('loadConfigFromEnv enables the memorystore data plane via env vars', async () => {
+      const config = await loadConfigFromEnv({
+        MEMORYSTORE_DATA_PLANE: 'true',
+        MEMORYSTORE_PORT_RANGE_START: '7500',
+        MEMORYSTORE_PORT_RANGE_END: '7600',
+      });
+
+      expect(config.services.memorystore.dataPlane.enabled).toBe(true);
+      expect(config.services.memorystore.dataPlane.portRangeStart).toBe(7500);
+      expect(config.services.memorystore.dataPlane.portRangeEnd).toBe(7600);
+    });
+
+    test('loadConfigFromEnv omitting memorystore env vars still parses with the data plane on', async () => {
+      const config = await loadConfigFromEnv({});
+
+      expect(config.services.memorystore.enabled).toBe(true);
+      expect(config.services.memorystore.dataPlane.enabled).toBe(true);
+    });
+
+    test('loadConfigFromEnv disables the memorystore data plane when MEMORYSTORE_DATA_PLANE is false', async () => {
+      const config = await loadConfigFromEnv({ MEMORYSTORE_DATA_PLANE: 'false' });
+
+      // The opt-out is the only way back to metadata-only endpoints now that
+      // the data plane defaults on, so it has to survive the env parse.
+      expect(config.services.memorystore.enabled).toBe(true);
+      expect(config.services.memorystore.dataPlane.enabled).toBe(false);
+    });
+  });
 });

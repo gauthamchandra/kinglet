@@ -5,6 +5,7 @@
  * workflow service, and handlers.
  */
 
+import type { ComposableOperationsStore } from '@/core/gateway/composable-operations.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
@@ -67,5 +68,28 @@ export class CloudWorkflowsService {
     }
 
     return this.workflowService;
+  }
+
+  /**
+   * Expose this service's operations store in the shape `buildComposedOperationsRoutes`
+   * needs so a composed router (see src/index.ts) can serve Workflows LROs even
+   * when another service's `/operations` routes would otherwise shadow this one's.
+   */
+  getComposableOperationsStore(): ComposableOperationsStore {
+    if (!this.operationsStore) {
+      throw new Error('CloudWorkflowsService not initialized. Call initialize() first.');
+    }
+
+    const store = this.operationsStore;
+
+    return {
+      getOperation: name => store.getOperation(name) as Promise<Record<string, unknown> | null>,
+      listOperations: (project, location, pageSize, pageToken) =>
+        store.listOperations(project, location, pageSize, pageToken) as unknown as Promise<{
+          operations: Record<string, unknown>[];
+          nextPageToken?: string;
+        }>,
+      deleteOperation: name => store.deleteOperation(name),
+    };
   }
 }

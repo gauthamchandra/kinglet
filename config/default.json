@@ -21,7 +21,8 @@
     "pubsub": { "enabled": true },
     "scheduler": { "enabled": true },
     "tasks": { "enabled": true },
-    "secrets": { "enabled": true }
+    "secrets": { "enabled": true },
+    "memorystore": { "enabled": true }
   },
   "logging": {
     "level": "info",

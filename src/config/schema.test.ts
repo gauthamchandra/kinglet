@@ -119,6 +119,132 @@ describe('Configuration Schema', () => {
     });
   });
 
+  describe('Memorystore configuration', () => {
+    test('ConfigSchema applies memorystore defaults when services.memorystore is omitted', () => {
+      const config = ConfigSchema.parse({
+        server: {},
+        storage: {},
+        auth: {},
+        services: {
+          pubsub: {},
+          scheduler: {},
+          tasks: {},
+          secrets: {},
+          storage: {},
+          workflows: {},
+        },
+        logging: {},
+      });
+
+      expect(config.services.memorystore.enabled).toBe(true);
+      expect(config.services.memorystore.dataPlane.enabled).toBe(true);
+      expect(config.services.memorystore.dataPlane.portRangeStart).toBe(6380);
+      expect(config.services.memorystore.dataPlane.portRangeEnd).toBe(6479);
+    });
+
+    test('ConfigSchema accepts an explicit memorystore data plane configuration', () => {
+      const config = ConfigSchema.parse({
+        server: {},
+        storage: {},
+        auth: {},
+        services: {
+          pubsub: {},
+          scheduler: {},
+          tasks: {},
+          secrets: {},
+          storage: {},
+          workflows: {},
+          memorystore: {
+            enabled: true,
+            dataPlane: {
+              enabled: true,
+              binaryPath: '/usr/bin/valkey-server',
+              portRangeStart: 8000,
+              portRangeEnd: 8050,
+            },
+          },
+        },
+        logging: {},
+      });
+
+      expect(config.services.memorystore.dataPlane.enabled).toBe(true);
+      expect(config.services.memorystore.dataPlane.binaryPath).toBe('/usr/bin/valkey-server');
+      expect(config.services.memorystore.dataPlane.portRangeStart).toBe(8000);
+      expect(config.services.memorystore.dataPlane.portRangeEnd).toBe(8050);
+    });
+
+    test('ConfigSchema rejects a memorystore data plane port range where portRangeStart exceeds portRangeEnd', () => {
+      expect(() => {
+        ConfigSchema.parse({
+          server: {},
+          storage: {},
+          auth: {},
+          services: {
+            pubsub: {},
+            scheduler: {},
+            tasks: {},
+            secrets: {},
+            storage: {},
+            workflows: {},
+            memorystore: {
+              enabled: true,
+              dataPlane: {
+                enabled: true,
+                portRangeStart: 8050,
+                portRangeEnd: 8000,
+              },
+            },
+          },
+          logging: {},
+        });
+      }).toThrow();
+    });
+
+    test('EnvConfigSchema parses the memorystore env vars', () => {
+      const env = EnvConfigSchema.parse({
+        ENABLE_MEMORYSTORE: 'true',
+        MEMORYSTORE_DATA_PLANE: 'true',
+        MEMORYSTORE_VALKEY_BINARY: '/opt/valkey/bin/valkey-server',
+        MEMORYSTORE_PORT_RANGE_START: '7100',
+        MEMORYSTORE_PORT_RANGE_END: '7150',
+      });
+
+      expect(env.ENABLE_MEMORYSTORE).toBe(true);
+      expect(env.MEMORYSTORE_DATA_PLANE).toBe(true);
+      expect(env.MEMORYSTORE_VALKEY_BINARY).toBe('/opt/valkey/bin/valkey-server');
+      expect(env.MEMORYSTORE_PORT_RANGE_START).toBe(7100);
+      expect(env.MEMORYSTORE_PORT_RANGE_END).toBe(7150);
+    });
+
+    test('mapEnvToConfig maps ENABLE_MEMORYSTORE as an individual service flag', () => {
+      const config = mapEnvToConfig({ ENABLE_MEMORYSTORE: true });
+
+      expect(config.services?.memorystore?.enabled).toBe(true);
+    });
+
+    test('mapEnvToConfig maps the memorystore data-plane env vars into a nested dataPlane object', () => {
+      const config = mapEnvToConfig({
+        MEMORYSTORE_DATA_PLANE: true,
+        MEMORYSTORE_VALKEY_BINARY: '/opt/valkey-server',
+        MEMORYSTORE_PORT_RANGE_START: 7500,
+        MEMORYSTORE_PORT_RANGE_END: 7600,
+      });
+
+      expect(config.services?.memorystore?.dataPlane?.enabled).toBe(true);
+      expect(config.services?.memorystore?.dataPlane?.binaryPath).toBe('/opt/valkey-server');
+      expect(config.services?.memorystore?.dataPlane?.portRangeStart).toBe(7500);
+      expect(config.services?.memorystore?.dataPlane?.portRangeEnd).toBe(7600);
+    });
+
+    test('mapEnvToConfig maps SERVICES= comma-list to include memorystore alongside other services', () => {
+      const config = mapEnvToConfig({ SERVICES: 'pubsub,memorystore' });
+
+      expect(config.services?.memorystore?.enabled).toBe(true);
+      expect(config.services?.pubsub?.enabled).toBe(true);
+      expect(config.services?.scheduler?.enabled).toBe(false);
+    });
+  });
+
   describe('EnvConfigSchema', () => {
     test('should parse environment variables correctly', () => {
       const env = EnvConfigSchema.parse({

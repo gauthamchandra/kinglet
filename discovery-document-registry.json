@@ -15,6 +15,13 @@
       "implementationPath": "src/services/scheduler/"
     },
     {
+      "name": "memorystore",
+      "displayName": "Memorystore for Valkey",
+      "discoveryUrl": "./memorystore.discovery-document.private.json",
+      "version": "v1",
+      "implementationPath": "src/services/memorystore/"
+    },
+    {
       "name": "secret-manager",
       "displayName": "Secret Manager",
       "discoveryUrl": "https://secretmanager.googleapis.com/$discovery/rest?version=v1",

@@ -367,6 +367,19 @@ export class ResponseUtils {
   }
 
   /**
+   * Create an aborted error response (HTTP 409).
+   *
+   * <p>Distinct from {@link conflict}: both are 409, but this reports
+   * `ABORTED` (gRPC code 10) rather than `FAILED_PRECONDITION` (9). Callers
+   * that implement optimistic concurrency — a mismatched etag, say — must use
+   * this one, because client retry policies and `error.code` checks key off
+   * the status string and only ABORTED signals "retry the read-modify-write".
+   */
+  aborted(message: string = 'Aborted'): RouteResponse {
+    return this.formatter.formatGcpError(409, message, 'ABORTED');
+  }
+
+  /**
    * Create an unauthorized error response
    */
   unauthorized(message: string = 'Authentication required'): RouteResponse {
