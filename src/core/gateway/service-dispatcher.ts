@@ -2,7 +2,7 @@
  * Service Dispatcher
  *
  * Implements reliable service dispatch with service lookup, load balancing,
- * circuit breaker pattern, and retry logic for the LocalStack GCP emulator.
+ * circuit breaker pattern, and retry logic for kinglet.
  */
 
 import type {
@@ -506,7 +506,7 @@ export class ServiceDispatcher {
     const headers = new Headers(request.headers);
 
     headers.set('X-Request-ID', context.requestId);
-    headers.set('X-Forwarded-For', 'localstack-gcp-emulator');
+    headers.set('X-Forwarded-For', 'kinglet');
 
     // Prepare request body
     let body: BodyInit | undefined;

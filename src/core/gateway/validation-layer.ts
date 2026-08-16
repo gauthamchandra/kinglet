@@ -2,7 +2,7 @@
  * Validation Layer
  *
  * Comprehensive request validation with Zod integration, custom validators,
- * request sanitization, and quota checking for the LocalStack GCP emulator.
+ * request sanitization, and quota checking for kinglet.
  */
 
 import { z } from 'zod';

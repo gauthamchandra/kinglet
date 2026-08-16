@@ -66,3 +66,11 @@ data/
 # Compatibility audit reports (generated)
 .compatibility-reports/*
 !.compatibility-reports/.gitkeep
+
+# Agent scratch space (Conductor workspaces, session notes)
+.context/
+
+# Per-developer Claude Code overrides. The shared allowlist that contributors
+# inherit lives in the checked-in .claude/settings.json; this file is where your
+# own additions accumulate and is personal by convention.
+.claude/settings.local.json

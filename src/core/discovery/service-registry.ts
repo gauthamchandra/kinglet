@@ -2,7 +2,7 @@
  * Service Registry
  *
  * Manages dynamic service registration, version management, health checking,
- * and service discovery for the LocalStack GCP emulator.
+ * and service discovery for kinglet.
  */
 
 import type { Logger } from '@/shared/utils/logger.ts';
@@ -622,7 +622,7 @@ export class ServiceRegistry {
         method: 'GET',
         signal: AbortSignal.timeout(this.config.healthCheckTimeout),
         headers: {
-          'User-Agent': 'LocalStack-GCP-ServiceRegistry/1.0',
+          'User-Agent': 'kinglet-ServiceRegistry/1.0',
         },
       });
 

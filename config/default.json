@@ -13,8 +13,8 @@
     "enabled": false,
     "mode": "bypass",
     "mockCredentials": {
-      "projectId": "localstack-project",
-      "serviceAccount": "localstack@localstack-project.iam.gserviceaccount.com"
+      "projectId": "kinglet-project",
+      "serviceAccount": "kinglet@kinglet-project.iam.gserviceaccount.com"
     }
   },
   "services": {

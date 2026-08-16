@@ -15,7 +15,7 @@ let E2E_TEST_CONFIG: Partial<Config>;
 let testServer: any = null;
 
 /**
- * Global setup for E2E tests - starts the full LocalStack GCP server
+ * Global setup for E2E tests - starts the full kinglet server
  */
 beforeAll(async () => {
   console.log('🚀 Setting up E2E test environment...');

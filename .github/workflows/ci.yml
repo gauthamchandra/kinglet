@@ -6,7 +6,98 @@ on:
   pull_request:
     branches: [main, develop]
 
+# Supersede in-flight runs for the same PR. Pushes to main are never cancelled — build-docker
+# publishes a sha-tagged image, and cancelling would leave that commit with no image at all.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
 jobs:
+  commitlint:
+    name: Commit messages
+    runs-on: ubuntu-latest
+    # Only meaningful on PRs — on push to main the commits are already merged.
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # commitlint needs the full range between base and head.
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: '1.3.4'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The local husky commit-msg hook is bypassed by --no-verify and is absent entirely
+      # in forks that skip `bun install`. This is the enforcement that actually holds.
+      - name: Lint commit messages
+        run: |
+          bunx commitlint \
+            --from "${{ github.event.pull_request.base.sha }}" \
+            --to "${{ github.event.pull_request.head.sha }}" \
+            --verbose
+
+      # Squash-merging makes the PR title the commit subject, and release-please parses it
+      # to decide the version bump. A malformed title breaks the release, not just the log.
+      - name: Lint PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$PR_TITLE" | bunx commitlint --verbose
+
+  dco:
+    name: DCO sign-off
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Needed to walk every commit between base and head.
+          fetch-depth: 0
+
+      # CONTRIBUTING.md makes the sign-off carry the AI-responsibility attestation, not just
+      # provenance, so it has to be enforced server-side — nothing local can be relied on.
+      #
+      # release-please authors its release commits as an app, and an app cannot certify the
+      # DCO on anyone's behalf, so bot authors are skipped.
+      - name: Verify every commit is signed off
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=0
+
+          while read -r sha; do
+            author="$(git show -s --format='%an <%ae>' "$sha")"
+
+            case "$author" in
+              *"[bot]"*) continue ;;
+            esac
+
+            if ! git show -s --format='%B' "$sha" | grep -qiF "Signed-off-by: $author"; then
+              echo "::error::$(git show -s --format='%h %s' "$sha") is missing \"Signed-off-by: $author\""
+              missing=1
+            fi
+          done < <(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA")
+
+          if [ "$missing" -ne 0 ]; then
+            echo "Fix the last commit with:  git commit --amend -s --no-edit"
+            echo "Fix the whole branch with: git rebase --signoff main"
+            exit 1
+          fi
+
+          echo "All commits are signed off."
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -29,39 +120,41 @@ jobs:
       - name: Check formatting
         run: bunx biome format .
 
+      # `bun test` fails the job by itself if any test fails. The 80% AGGREGATE coverage gate
+      # is separate: scripts/check-coverage.ts reads the machine-readable lcov report, because
+      # bunfig's own coverageThreshold is applied per-file and the text table it prints has no
+      # stable format to parse.
       - name: Run tests with coverage
-        run: bun test --coverage 2>&1 | tee coverage-output.txt || true
-
-      - name: Check test results and coverage threshold
-        run: |
-          # Fail if any tests failed
-          if grep -qE "^ +[1-9][0-9]* fail$" coverage-output.txt; then
-            echo "::error::Tests failed"
-            exit 1
-          fi
-
-          # Check coverage threshold
-          THRESHOLD=80
-          LINE=$(grep "All files" coverage-output.txt)
-          FUNCS=$(echo "$LINE" | awk -F'|' '{gsub(/ /, "", $2); print $2}')
-          LINES=$(echo "$LINE" | awk -F'|' '{gsub(/ /, "", $3); print $3}')
-          echo "Function coverage: ${FUNCS}%"
-          echo "Line coverage: ${LINES}%"
-          FUNCS_OK=$(awk "BEGIN {print ($FUNCS >= $THRESHOLD) ? 1 : 0}")
-          LINES_OK=$(awk "BEGIN {print ($LINES >= $THRESHOLD) ? 1 : 0}")
-          if [ "$FUNCS_OK" -eq 0 ] || [ "$LINES_OK" -eq 0 ]; then
-            echo "::error::Coverage below ${THRESHOLD}% threshold. Functions: ${FUNCS}%, Lines: ${LINES}%"
-            exit 1
-          fi
-          echo "Coverage check passed."
+        run: bun run test:coverage:check
 
       - name: Build project
         run: bun run build
 
+  e2e:
+    name: E2E
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: '1.3.4'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # e2e/ is excluded from the default `bun test` run by bunfig.toml's `include`,
+      # so it needs its own job or it never runs at all.
+      - name: Run E2E tests
+        run: bun run test:e2e
+
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, e2e]
     permissions:
       contents: read
       packages: write

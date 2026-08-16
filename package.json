@@ -1,8 +1,16 @@
 {
-  "name": "localstack-gcp",
+  "name": "kinglet",
   "version": "1.5.0",
-  "description": "LocalStack GCP Emulator - Local emulation for Google Cloud Platform services",
+  "description": "kinglet - a local emulator for Google Cloud Platform services",
   "main": "dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gauthamchandra/kinglet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gauthamchandra/kinglet/issues"
+  },
+  "homepage": "https://github.com/gauthamchandra/kinglet#readme",
   "module": "src/index.ts",
   "type": "module",
   "private": true,
@@ -13,6 +21,7 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
+    "test:coverage:check": "bun test --coverage && bun run scripts/check-coverage.ts",
     "test:e2e": "cd e2e && bun test",
     "lint": "bunx tsc --noEmit && biome check src/ && knip",
     "lint:fix": "bunx tsc --noEmit && biome check --write src/",
@@ -33,8 +42,8 @@
     "typescript",
     "bun"
   ],
-  "author": "LocalStack Team",
-  "license": "MPL-2.0",
+  "author": "Gautham Chandra",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
     "@commitlint/cli": "^20.0.0",

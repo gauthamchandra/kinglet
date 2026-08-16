@@ -30,7 +30,7 @@ Launch one subagent per service in the filtered list **in parallel** (all in a s
 **Subagent prompt template** (fill in `{SERVICE_NAME}`, `{DISPLAY_NAME}`, `{DISCOVERY_URL}`, `{VERSION}`, `{IMPL_PATH}`):
 
 ```
-You are auditing the "{DISPLAY_NAME}" ({VERSION}) implementation in a LocalStack GCP emulator.
+You are auditing the "{DISPLAY_NAME}" ({VERSION}) implementation in kinglet, a local emulator for Google Cloud Platform services.
 
 ## Your Task
 Compare our implementation against the official GCP REST discovery document and write a compatibility report.

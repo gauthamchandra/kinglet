@@ -1,0 +1,7 @@
+# kinglet is maintained by a single person, who reviews and merges everything.
+# See CONTRIBUTING.md for what that means for review latency.
+#
+# NOTE: CODEOWNERS is advisory unless branch protection on `main` is configured to
+# require review from code owners.
+
+* @gauthamchandra

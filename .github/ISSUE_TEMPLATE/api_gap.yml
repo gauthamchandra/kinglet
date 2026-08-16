@@ -1,0 +1,57 @@
+name: API gap
+description: An endpoint or field is missing from a service kinglet already supports
+title: "[gap]: "
+labels: ["api-gap", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when kinglet supports a service but is missing part of its API surface.
+
+        If an endpoint exists but *behaves differently* from real GCP, that's a fidelity bug —
+        please use the Bug report template instead.
+
+  - type: input
+    id: service
+    attributes:
+      label: Service
+      placeholder: Cloud Pub/Sub
+    validations:
+      required: true
+
+  - type: textarea
+    id: missing
+    attributes:
+      label: What's missing?
+      description: The specific method or field, named as the discovery document names it.
+      placeholder: |
+        projects.subscriptions.seek — not implemented, returns 404.
+    validations:
+      required: true
+
+  - type: input
+    id: discovery
+    attributes:
+      label: Discovery document URL
+      placeholder: https://pubsub.googleapis.com/$discovery/rest?version=v1
+    validations:
+      required: true
+
+  - type: textarea
+    id: blocked
+    attributes:
+      label: What does this block?
+      description: What are you trying to test locally that this prevents?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: implementing
+    attributes:
+      label: Are you planning to implement this?
+      options:
+        - "Yes — I'll open the PR"
+        - "Yes, but I'd like guidance first"
+        - "No — I'm reporting it"
+    validations:
+      required: true

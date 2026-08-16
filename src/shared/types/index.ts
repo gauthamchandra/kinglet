@@ -1,5 +1,5 @@
 /**
- * Shared type definitions for LocalStack GCP Emulator
+ * Shared type definitions for kinglet
  */
 
 // Core service interfaces

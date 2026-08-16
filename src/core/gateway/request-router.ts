@@ -2,7 +2,7 @@
  * Request Router
  *
  * Intelligent request routing with path matching, parameter extraction,
- * method routing, and wildcard support for the LocalStack GCP emulator.
+ * method routing, and wildcard support for kinglet.
  */
 
 import type { Logger } from '@/shared/utils/logger.ts';

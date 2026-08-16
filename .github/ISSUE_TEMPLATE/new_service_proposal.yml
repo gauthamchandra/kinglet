@@ -1,0 +1,97 @@
+name: New service proposal
+description: Propose emulating a GCP service kinglet doesn't support yet
+title: "[service]: "
+labels: ["new-service", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please open this before writing code.**
+
+        A complete, unsolicited service implementation is the most expensive kind of PR to
+        decline — for you far more than for the maintainer. This issue exists so we can agree
+        on scope first.
+
+        Getting a proposal accepted is not a high bar. It mostly means: the service is real,
+        the scope is bounded, and someone intends to finish it.
+
+  - type: input
+    id: service
+    attributes:
+      label: Which GCP service?
+      placeholder: Cloud KMS
+    validations:
+      required: true
+
+  - type: input
+    id: discovery
+    attributes:
+      label: Discovery document URL
+      description: The official Google REST discovery document. This is the specification everything else follows from.
+      placeholder: https://cloudkms.googleapis.com/$discovery/rest?version=v1
+    validations:
+      required: true
+
+  - type: textarea
+    id: endpoints
+    attributes:
+      label: Scope (optional)
+      description: |
+        Only fill this in if you're deliberately covering a subset. Implementing a whole
+        service in one pass is entirely reasonable — agentic workflows make that cheap now,
+        and a complete service is often less work than arguing about where to cut it.
+
+        What's worth writing down either way is what you're *not* covering, so the README
+        can say so honestly rather than implying full support.
+      placeholder: |
+        Planning to cover the full KeyRings + CryptoKeys surface.
+
+        Not covering:
+        - encrypt / decrypt (needs real key material)
+        - all IAM methods
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: What are you trying to do locally that you can't today?
+      description: |
+        The concrete problem, not the abstract capability. "I have a service that publishes to
+        Pub/Sub and encrypts payloads with KMS, and I can't run its tests without network
+        access" is a great answer.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: implementing
+    attributes:
+      label: Are you planning to implement this?
+      options:
+        - "Yes — I'll open the PR"
+        - "Yes, but I'd like guidance first"
+        - "No — I'm requesting it"
+    validations:
+      required: true
+
+  - type: textarea
+    id: quirks
+    attributes:
+      label: Known API quirks
+      description: |
+        Optional, but a strong signal you've read the discovery document. Things like: an ID
+        passed as a query parameter rather than in the body, an operation the API deliberately
+        doesn't support, a non-obvious error code.
+      placeholder: |
+        - createKeyRing takes keyRingId as a query param, not in the body
+        - KeyRings cannot be deleted — there is no delete method, so kinglet must not add one
+
+  - type: checkboxes
+    id: acks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I've read [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md), including the fidelity contract
+          required: true
+        - label: I've checked this service isn't already implemented or already proposed
+          required: true
+        - label: I understand kinglet only emulates behaviour that real GCP has
+          required: true

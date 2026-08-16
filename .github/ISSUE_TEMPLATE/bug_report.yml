@@ -1,0 +1,89 @@
+name: Bug report
+description: Something is broken, or kinglet behaves differently from real GCP
+title: "[bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Fidelity bugs are the most valuable reports this project gets.** If kinglet returns
+        something real GCP wouldn't, that's exactly the class of problem kinglet exists to
+        avoid — please report it even if it seems minor.
+
+  - type: input
+    id: version
+    attributes:
+      label: kinglet version
+      description: Image tag, release version, or commit SHA.
+      placeholder: v1.5.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of bug?
+      options:
+        - "Fidelity — kinglet's behaviour differs from real GCP"
+        - "Crash or error"
+        - "Client library incompatibility"
+        - "Configuration / startup"
+        - "Other"
+    validations:
+      required: true
+
+  - type: input
+    id: service
+    attributes:
+      label: Which service?
+      placeholder: Cloud Scheduler
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What does real GCP do?
+      description: |
+        For a fidelity bug this is the crux. Include the discovery document reference, real
+        response, or client-library behaviour you're comparing against — it's what makes the
+        report actionable rather than a difference of opinion.
+      placeholder: |
+        Real Cloud Scheduler returns HTTP 409 with status ALREADY_EXISTS when creating a job
+        whose name is taken.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What does kinglet do instead?
+      placeholder: |
+        Returns HTTP 400 with status INVALID_ARGUMENT, which makes the client library give up
+        instead of surfacing the conflict.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: |
+        Smallest thing that shows the problem — a curl command, a client-library snippet, or a
+        failing test. Please include the config if it isn't the default.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Please redact anything sensitive. Reminder — never put real credentials in kinglet.
+      render: shell
+
+  - type: input
+    id: client
+    attributes:
+      label: Client library and version (if applicable)
+      placeholder: "@google-cloud/scheduler 5.3.1"
