@@ -181,6 +181,11 @@ skipped outright.
   `expireTime` is always persisted as `null`, so backups are retained
   indefinitely rather than expiring as they would on real Memorystore. Backup
   expiry is not yet modeled.
+- A backup captures no data: the emulator never snapshots the spawned
+  `valkey-server`'s keyspace, so every `Backup` carries `totalSizeBytes: "0"` and
+  an empty `backupFiles`. The parent collection's `totalBackupCount` and
+  `lastBackupTime` do track its backups, but `totalBackupSizeBytes` is a sum of
+  zeroes and therefore stays `"0"` no matter how much data the instance holds.
 
 ## Implementation Notes
 

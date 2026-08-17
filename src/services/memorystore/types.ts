@@ -1007,6 +1007,32 @@ export function buildAuthTokenName(
   return `projects/${project}/locations/${location}/instances/${instance}/tokenAuthUsers/${tokenAuthUser}/authTokens/${authToken}`;
 }
 
+export function parseAuthTokenName(name: string): {
+  project: string;
+  location: string;
+  instance: string;
+  tokenAuthUser: string;
+  authToken: string;
+} {
+  const match = name.match(
+    /^projects\/([^/]+)\/locations\/([^/]+)\/instances\/([^/]+)\/tokenAuthUsers\/([^/]+)\/authTokens\/([^/]+)$/
+  );
+
+  if (!match) {
+    throw new Error(
+      `Invalid auth token resource name: "${name}". Expected format: projects/{project}/locations/{location}/instances/{instance}/tokenAuthUsers/{tokenAuthUser}/authTokens/{authToken}`
+    );
+  }
+
+  return {
+    project: match[1] as string,
+    location: match[2] as string,
+    instance: match[3] as string,
+    tokenAuthUser: match[4] as string,
+    authToken: match[5] as string,
+  };
+}
+
 // ── LRO Operations ──
 
 export interface OperationMetadata {

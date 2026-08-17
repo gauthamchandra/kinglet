@@ -22,6 +22,7 @@ import { InstanceRepository } from './instance-repository.ts';
 import { InstanceService } from './instance-service.ts';
 import { LocationHandlers } from './location-handlers.ts';
 import { OperationsStore } from './operations.ts';
+import { ResourceMutex } from './resource-mutex.ts';
 import { TokenAuthHandlers } from './token-auth-handlers.ts';
 import { TokenAuthRepository } from './token-auth-repository.ts';
 import { TokenAuthService } from './token-auth-service.ts';
@@ -86,16 +87,27 @@ export class MemorystoreService {
 
     this.valkeyProcessManager = new ValkeyProcessManager(this.logger, this.dataPlaneOptions);
 
+    // One mutex for both services that mutate an instance's subtree: deleting
+    // an instance purges its token users and their auth tokens, so those writes
+    // have to exclude each other across the service boundary. Two mutexes would
+    // type-check and buy nothing.
+    const instanceMutex = new ResourceMutex();
+
     const instanceService = new InstanceService(
       this.instanceRepository,
       this.operationsStore,
       this.valkeyProcessManager,
       backupRepository,
-      tokenAuthRepository
+      tokenAuthRepository,
+      instanceMutex
     );
     const backupService = new BackupService(backupRepository, this.operationsStore);
     const aclPolicyService = new AclPolicyService(aclPolicyRepository, this.operationsStore);
-    const tokenAuthService = new TokenAuthService(tokenAuthRepository, this.operationsStore);
+    const tokenAuthService = new TokenAuthService(
+      tokenAuthRepository,
+      this.operationsStore,
+      instanceMutex
+    );
 
     this.instanceHandlers = new InstanceHandlers(instanceService, this.logger);
     this.backupHandlers = new BackupHandlers(backupService, this.logger);
@@ -251,17 +263,16 @@ export class MemorystoreService {
   }
 
   private async respawnPersistedActiveInstances(): Promise<void> {
-    if (!this.instanceRepository || !this.valkeyProcessManager) return;
+    const repository = this.instanceRepository;
+    const processManager = this.valkeyProcessManager;
 
-    const instances = await this.instanceRepository.listAllInstances();
+    if (!repository || !processManager) return;
+
+    const instances = await repository.listAllInstances();
 
     for (const instance of instances.filter(i => i.state === 'ACTIVE')) {
       try {
-        const endpoint = await this.valkeyProcessManager.startServerForInstance(instance.name);
-
-        await this.instanceRepository.updateInstance(instance.name, {
-          discoveryEndpoints: JSON.stringify([endpoint]),
-        });
+        await this.respawnDataPlaneForInstance(instance.name, repository, processManager);
       } catch (error) {
         // One instance that cannot acquire a data-plane port (an exhausted
         // range, a readiness timeout) must degrade only itself, not take down
@@ -271,6 +282,41 @@ export class MemorystoreService {
           error
         );
       }
+    }
+  }
+
+  /**
+   * Spawn a replacement `valkey-server` for a persisted instance and publish
+   * the port it landed on.
+   *
+   * <p>The spawn is undone when that port cannot be persisted: an instance
+   * whose row still advertises its dead pre-restart endpoint can never be
+   * pointed at the replacement process, so leaving it running would only hold
+   * a data-plane port hostage until shutdown. Undoing it here also keeps the
+   * teardown inside the caller's per-instance catch, so a failure to stop the
+   * process still degrades one instance rather than aborting startup.
+   */
+  private async respawnDataPlaneForInstance(
+    instanceName: string,
+    repository: InstanceRepository,
+    processManager: ValkeyProcessManager
+  ): Promise<void> {
+    const endpoint = await processManager.startServerForInstance(instanceName);
+
+    try {
+      const updated = await repository.updateInstance(instanceName, {
+        discoveryEndpoints: JSON.stringify([endpoint]),
+      });
+
+      if (!updated) {
+        throw new Error(
+          `Instance ${instanceName} disappeared before its restored data-plane endpoint could be persisted`
+        );
+      }
+    } catch (error) {
+      await processManager.stopServerForInstance(instanceName);
+
+      throw error;
     }
   }
 }

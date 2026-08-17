@@ -2,11 +2,13 @@
  * Unit tests for MemorystoreService
  */
 
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { MemorystoreService } from './index.ts';
+import { InstanceRepository } from './instance-repository.ts';
+import { TokenAuthRepository } from './token-auth-repository.ts';
 
 const FAKE_VALKEY_SERVER = join(import.meta.dir, '__fixtures__', 'fake-valkey-server.ts');
 
@@ -315,6 +317,179 @@ describe('MemorystoreService', () => {
     expect(body.instances.length).toBe(2);
 
     await restarted.stop();
+  });
+
+  test('initialize_whenTheRestoredEndpointCannotBePersisted_stopsTheReplacementServerInsteadOfLeakingItsPort', async () => {
+    const ctx = { routeId: 'test', startTime: Date.now(), metadata: {}, logger };
+    const dataPlaneOptions = {
+      enabled: true,
+      binaryPath: FAKE_VALKEY_SERVER,
+      portRangeStart: 19100,
+      portRangeEnd: 19102,
+    };
+
+    const seed = new MemorystoreService(storage, logger, dataPlaneOptions);
+
+    await seed.initialize();
+
+    const createRoute = seed.getRoutes().find(r => r.id === 'memorystore.instances.create');
+
+    if (!createRoute) throw new Error('memorystore.instances.create route not found');
+
+    await createRoute.handler(
+      {
+        method: 'POST',
+        path: '/v1/projects/p/locations/us-central1/instances',
+        query: { instanceId: 'unpersistable' },
+        headers: {},
+        params: { project: 'p', location: 'us-central1' },
+        body: {},
+        originalRequest: new Request('http://localhost'),
+      },
+      ctx
+    );
+
+    await seed.stop();
+
+    const updateInstance = spyOn(InstanceRepository.prototype, 'updateInstance').mockImplementation(
+      () => Promise.reject(new Error('storage down'))
+    );
+
+    const restarted = new MemorystoreService(storage, logger, dataPlaneOptions);
+
+    try {
+      await restarted.initialize();
+
+      const portsInRange = [19100, 19101, 19102];
+      const listening = await Promise.all(portsInRange.map(port => isPortListening(port)));
+
+      // An instance whose row still advertises its dead pre-restart port can
+      // never be pointed at the replacement process, so keeping that process
+      // alive only holds a data-plane port hostage until shutdown.
+      expect(listening).toEqual([false, false, false]);
+    } finally {
+      updateInstance.mockRestore();
+      await restarted.stop();
+    }
+  });
+
+  test('initialize_sharesOneInstanceMutexAcrossServices_soADeletingInstanceCannotAcceptANewAuthToken', async () => {
+    const ctx = { routeId: 'test', startTime: Date.now(), metadata: {}, logger };
+    const service = new MemorystoreService(storage, logger, { enabled: false });
+
+    await service.initialize();
+
+    const routes = service.getRoutes();
+    const createRoute = routes.find(r => r.id === 'memorystore.instances.create');
+    const addUserRoute = routes.find(r => r.id === 'memorystore.instances.addTokenAuthUser');
+    const deleteRoute = routes.find(r => r.id === 'memorystore.instances.delete');
+    const addTokenRoute = routes.find(r => r.id === 'memorystore.tokenAuthUsers.addAuthToken');
+
+    if (!createRoute || !addUserRoute || !deleteRoute || !addTokenRoute) {
+      throw new Error('required routes not found');
+    }
+
+    const instanceParams = { project: 'p', location: 'us-central1', instance: 'racy' };
+
+    await createRoute.handler(
+      {
+        method: 'POST',
+        path: '/v1/projects/p/locations/us-central1/instances',
+        query: { instanceId: 'racy' },
+        headers: {},
+        params: { project: 'p', location: 'us-central1' },
+        body: {},
+        originalRequest: new Request('http://localhost'),
+      },
+      ctx
+    );
+    await addUserRoute.handler(
+      {
+        method: 'POST',
+        path: '/v1/projects/p/locations/us-central1/instances/racy:addTokenAuthUser',
+        query: {},
+        headers: {},
+        params: instanceParams,
+        body: { tokenAuthUser: 'u' },
+        originalRequest: new Request('http://localhost'),
+      },
+      ctx
+    );
+
+    let signalPurgeReached = () => {};
+    let releasePurge = () => {};
+
+    const purgeReached = new Promise<void>(resolve => {
+      signalPurgeReached = resolve;
+    });
+    const purgeReleased = new Promise<void>(resolve => {
+      releasePurge = resolve;
+    });
+
+    // Parks the instance delete inside the child cleanup that removes the
+    // instance's token users and their tokens, then lets the real purge run —
+    // stubbing it out would delete the very thing that makes the racing add
+    // fail, and the test would pass for the wrong reason.
+    const realPurge = TokenAuthRepository.prototype.deleteTokenAuthUsersForInstance;
+    const purge = spyOn(
+      TokenAuthRepository.prototype,
+      'deleteTokenAuthUsersForInstance'
+    ).mockImplementation(async function (this: TokenAuthRepository, instance: string) {
+      signalPurgeReached();
+      await purgeReleased;
+
+      return realPurge.call(this, instance);
+    });
+    const createAuthToken = spyOn(TokenAuthRepository.prototype, 'createAuthToken');
+
+    try {
+      const remove = deleteRoute.handler(
+        {
+          method: 'DELETE',
+          path: '/v1/projects/p/locations/us-central1/instances/racy',
+          query: {},
+          headers: {},
+          params: instanceParams,
+          body: undefined,
+          originalRequest: new Request('http://localhost'),
+        },
+        ctx
+      );
+
+      await purgeReached;
+
+      const addToken = addTokenRoute.handler(
+        {
+          method: 'POST',
+          path: '/v1/projects/p/locations/us-central1/instances/racy/tokenAuthUsers/u:addAuthToken',
+          query: {},
+          headers: {},
+          params: { ...instanceParams, tokenAuthUser: 'u' },
+          body: { authToken: { name: 't' } },
+          originalRequest: new Request('http://localhost'),
+        },
+        ctx
+      );
+
+      await Bun.sleep(5);
+
+      expect(createAuthToken).not.toHaveBeenCalled();
+
+      releasePurge();
+      await remove;
+
+      const addTokenResponse = await addToken;
+
+      // The user is gone by the time the add gets its turn, so the request 404s
+      // and no token row survives to be resurrected by recreating the same
+      // instance and user names. Two separate mutexes would type-check here and
+      // buy nothing, which is exactly what this asserts against.
+      expect(addTokenResponse.status).toBe(404);
+      expect(createAuthToken).not.toHaveBeenCalled();
+    } finally {
+      purge.mockRestore();
+      createAuthToken.mockRestore();
+    }
   });
 
   test('handleListOperations_givenANegativePageSize_returnsAllOperationsWithNoBogusNextPageToken', async () => {

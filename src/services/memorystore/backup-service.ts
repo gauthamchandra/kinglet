@@ -109,6 +109,13 @@ export class BackupService {
 
     const { project, location } = parseBackupName(name);
 
-    return this.operationsStore.createOperation(project, location, name, 'export', 'Backup');
+    return this.operationsStore.createOperation(
+      project,
+      location,
+      name,
+      'export',
+      'Backup',
+      backupRecordToResponse(existing) as unknown as Record<string, unknown>
+    );
   }
 }

@@ -4,6 +4,7 @@
 
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { OperationsStore } from './operations.ts';
+import { ResourceMutex } from './resource-mutex.ts';
 import type { TokenAuthRepository } from './token-auth-repository.ts';
 import { TokenAuthService } from './token-auth-service.ts';
 import { MemoryStoreError } from './types.ts';
@@ -36,6 +37,7 @@ function makeAuthTokenRecord(overrides: Record<string, unknown> = {}) {
 describe('TokenAuthService', () => {
   let repo: TokenAuthRepository;
   let operationsStore: OperationsStore;
+  let instanceMutex: ResourceMutex;
   let service: TokenAuthService;
 
   beforeEach(() => {
@@ -48,7 +50,9 @@ describe('TokenAuthService', () => {
       countAuthTokensForUser: mock(() => Promise.resolve(0)),
       deleteAuthTokensForUser: mock(() => Promise.resolve(0)),
       deleteTokenAuthUsersForInstance: mock(() => Promise.resolve([])),
-      createAuthToken: mock(() => Promise.resolve(makeAuthTokenRecord())),
+      createAuthToken: mock((data: Record<string, unknown>) =>
+        Promise.resolve(makeAuthTokenRecord(data))
+      ),
       getAuthTokenByName: mock(() => Promise.resolve(null)),
       listAuthTokens: mock(() =>
         Promise.resolve({ authTokens: [makeAuthTokenRecord()], nextPageToken: '1' })
@@ -57,23 +61,33 @@ describe('TokenAuthService', () => {
     } as unknown as TokenAuthRepository;
 
     operationsStore = {
-      createOperation: mock((_p: string, _l: string, target: string, verb: string) =>
-        Promise.resolve({
-          name: 'projects/p/locations/us-central1/operations/op-1',
-          metadata: {
-            '@type': 'type.googleapis.com/google.cloud.memorystore.v1.OperationMetadata',
-            createTime: '2026-01-01T00:00:00.000Z',
-            endTime: '2026-01-01T00:00:00.000Z',
-            target,
-            verb,
-            apiVersion: 'v1',
-          },
-          done: true,
-        })
+      createOperation: mock(
+        (
+          _p: string,
+          _l: string,
+          target: string,
+          verb: string,
+          _resourceType: string,
+          response?: Record<string, unknown>
+        ) =>
+          Promise.resolve({
+            name: 'projects/p/locations/us-central1/operations/op-1',
+            metadata: {
+              '@type': 'type.googleapis.com/google.cloud.memorystore.v1.OperationMetadata',
+              createTime: '2026-01-01T00:00:00.000Z',
+              endTime: '2026-01-01T00:00:00.000Z',
+              target,
+              verb,
+              apiVersion: 'v1',
+            },
+            done: true,
+            ...(response ? { response } : {}),
+          })
       ),
     } as unknown as OperationsStore;
 
-    service = new TokenAuthService(repo, operationsStore);
+    instanceMutex = new ResourceMutex();
+    service = new TokenAuthService(repo, operationsStore, instanceMutex);
   });
 
   test('listTokenAuthUsers_mapsRecordsToTheTokenAuthUsersEnvelopeKey', async () => {
@@ -200,6 +214,129 @@ describe('TokenAuthService', () => {
     );
     expect(op.done).toBe(true);
     expect(op.metadata.verb).toBe('addAuthToken');
+  });
+
+  test('addAuthToken_returnsTheMintedTokenOnTheOperationResponse', async () => {
+    (repo.getTokenAuthUserByName as ReturnType<typeof mock>).mockImplementation(() =>
+      Promise.resolve(makeTokenAuthUserRecord())
+    );
+
+    const op = await service.addAuthToken(
+      'projects/p/locations/us-central1/instances/i/tokenAuthUsers/u',
+      { authToken: { name: 't' } }
+    );
+
+    const createAuthTokenSpy = repo.createAuthToken as ReturnType<typeof mock>;
+    const persisted = createAuthTokenSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+
+    // The token is server-generated, so an operation with no response leaves the
+    // create path unable to hand back the one thing the caller asked for.
+    expect(op.response?.name).toBe(
+      'projects/p/locations/us-central1/instances/i/tokenAuthUsers/u/authTokens/t'
+    );
+    expect(op.response?.token).toBe(persisted.token);
+  });
+
+  test('addAuthToken_whileTheInstancesLifecycleLockIsHeld_waitsInsteadOfWritingUnderneathIt', async () => {
+    (repo.getTokenAuthUserByName as ReturnType<typeof mock>).mockImplementation(() =>
+      Promise.resolve(makeTokenAuthUserRecord())
+    );
+
+    let releaseInstanceWork = () => {};
+    const instanceWorkReleased = new Promise<void>(resolve => {
+      releaseInstanceWork = resolve;
+    });
+
+    // Stands in for an in-flight deleteInstance: it holds the INSTANCE's key in
+    // the shared mutex while purging the instance's token users and their
+    // tokens. A token written during that window survives as an orphan and
+    // becomes readable again once the same instance and user names are
+    // recreated.
+    const instanceWork = instanceMutex.runExclusively(
+      'projects/p/locations/us-central1/instances/i',
+      () => instanceWorkReleased
+    );
+
+    const addToken = service.addAuthToken(
+      'projects/p/locations/us-central1/instances/i/tokenAuthUsers/u',
+      { authToken: { name: 't' } }
+    );
+
+    await Bun.sleep(5);
+
+    expect(repo.createAuthToken).not.toHaveBeenCalled();
+
+    releaseInstanceWork();
+    await instanceWork;
+    await addToken;
+
+    expect(repo.createAuthToken).toHaveBeenCalled();
+  });
+
+  test('deleteTokenAuthUser_whileTheInstancesLifecycleLockIsHeld_waitsInsteadOfDeletingUnderneathIt', async () => {
+    (repo.getTokenAuthUserByName as ReturnType<typeof mock>).mockImplementation(() =>
+      Promise.resolve(makeTokenAuthUserRecord())
+    );
+
+    let releaseInstanceWork = () => {};
+    const instanceWorkReleased = new Promise<void>(resolve => {
+      releaseInstanceWork = resolve;
+    });
+
+    const instanceWork = instanceMutex.runExclusively(
+      'projects/p/locations/us-central1/instances/i',
+      () => instanceWorkReleased
+    );
+
+    const remove = service.deleteTokenAuthUser(
+      'projects/p/locations/us-central1/instances/i/tokenAuthUsers/u'
+    );
+
+    await Bun.sleep(5);
+
+    // Removing a user mid-instance-mutation races the same way round: an
+    // addAuthToken already past its parent-user check would leave its token
+    // behind with no user to hang off.
+    expect(repo.deleteTokenAuthUser).not.toHaveBeenCalled();
+
+    releaseInstanceWork();
+    await instanceWork;
+    await remove;
+
+    expect(repo.deleteTokenAuthUser).toHaveBeenCalled();
+  });
+
+  test('deleteAuthToken_whileTheInstancesLifecycleLockIsHeld_waitsInsteadOfDeletingUnderneathIt', async () => {
+    (repo.getAuthTokenByName as ReturnType<typeof mock>).mockImplementation(() =>
+      Promise.resolve(makeAuthTokenRecord())
+    );
+
+    let releaseInstanceWork = () => {};
+    const instanceWorkReleased = new Promise<void>(resolve => {
+      releaseInstanceWork = resolve;
+    });
+
+    const instanceWork = instanceMutex.runExclusively(
+      'projects/p/locations/us-central1/instances/i',
+      () => instanceWorkReleased
+    );
+
+    const remove = service.deleteAuthToken(
+      'projects/p/locations/us-central1/instances/i/tokenAuthUsers/u/authTokens/t'
+    );
+
+    await Bun.sleep(5);
+
+    // Every mutation of an instance's subtree holds the instance's key, with no
+    // "deletes converge anyway" exception — an invariant with a hole in it is
+    // one every future reader has to re-derive.
+    expect(repo.deleteAuthToken).not.toHaveBeenCalled();
+
+    releaseInstanceWork();
+    await instanceWork;
+    await remove;
+
+    expect(repo.deleteAuthToken).toHaveBeenCalled();
   });
 
   test('addAuthToken_givenMissingTokenAuthUser_throwsNotFound', async () => {

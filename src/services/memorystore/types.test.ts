@@ -19,6 +19,7 @@ import {
   instanceRequestToRecord,
   MemoryStoreError,
   parseAclPolicyName,
+  parseAuthTokenName,
   parseBackupCollectionName,
   parseBackupName,
   parseInstanceName,
@@ -114,6 +115,24 @@ describe('resource name helpers', () => {
     expect(name).toBe(
       'projects/p/locations/us-central1/instances/my-instance/tokenAuthUsers/my-user/authTokens/token-1'
     );
+  });
+
+  test('buildAuthTokenName_roundTripsThroughParse', () => {
+    const name = buildAuthTokenName('p', 'us-central1', 'my-instance', 'my-user', 'token-1');
+
+    expect(parseAuthTokenName(name)).toEqual({
+      project: 'p',
+      location: 'us-central1',
+      instance: 'my-instance',
+      tokenAuthUser: 'my-user',
+      authToken: 'token-1',
+    });
+  });
+
+  test('parseAuthTokenName_givenATokenAuthUserName_throwsInsteadOfReturningAPartialMatch', () => {
+    const userName = buildTokenAuthUserName('p', 'us-central1', 'my-instance', 'my-user');
+
+    expect(() => parseAuthTokenName(userName)).toThrow(/Invalid auth token resource name/);
   });
 });
 

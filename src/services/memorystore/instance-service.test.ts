@@ -7,6 +7,7 @@ import type { BackupRepository } from './backup-repository.ts';
 import type { InstanceRepository } from './instance-repository.ts';
 import { InstanceService } from './instance-service.ts';
 import type { OperationsStore } from './operations.ts';
+import { ResourceMutex } from './resource-mutex.ts';
 import type { TokenAuthRepository } from './token-auth-repository.ts';
 import { MemoryStoreError } from './types.ts';
 import type { ValkeyProcessManager } from './valkey-process-manager.ts';
@@ -54,6 +55,27 @@ function makeInstanceRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Stands in for what the repository hands back after a write: the caller's own
+// payload plus the columns storage owns, which is what the service turns into
+// the operation's `response`.
+function makeBackupRecord(data: Record<string, unknown>) {
+  return {
+    id: 'backup-row-1',
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...data,
+  };
+}
+
+function makeTokenAuthUserRecord(data: Record<string, unknown>) {
+  return {
+    id: 'token-auth-user-row-1',
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...data,
+  };
+}
+
 describe('InstanceService', () => {
   let repo: InstanceRepository;
   let operationsStore: OperationsStore;
@@ -72,19 +94,28 @@ describe('InstanceService', () => {
     } as unknown as InstanceRepository;
 
     operationsStore = {
-      createOperation: mock((_p: string, _l: string, target: string, verb: string) =>
-        Promise.resolve({
-          name: 'projects/p/locations/us-central1/operations/op-1',
-          metadata: {
-            '@type': 'type.googleapis.com/google.cloud.memorystore.v1.OperationMetadata',
-            createTime: '2026-01-01T00:00:00.000Z',
-            endTime: '2026-01-01T00:00:00.000Z',
-            target,
-            verb,
-            apiVersion: 'v1',
-          },
-          done: true,
-        })
+      createOperation: mock(
+        (
+          _p: string,
+          _l: string,
+          target: string,
+          verb: string,
+          _resourceType: string,
+          response?: Record<string, unknown>
+        ) =>
+          Promise.resolve({
+            name: 'projects/p/locations/us-central1/operations/op-1',
+            metadata: {
+              '@type': 'type.googleapis.com/google.cloud.memorystore.v1.OperationMetadata',
+              createTime: '2026-01-01T00:00:00.000Z',
+              endTime: '2026-01-01T00:00:00.000Z',
+              target,
+              verb,
+              apiVersion: 'v1',
+            },
+            done: true,
+            ...(response ? { response } : {}),
+          })
       ),
     } as unknown as OperationsStore;
 
@@ -96,12 +127,16 @@ describe('InstanceService', () => {
     backupRepository = {
       createBackupCollectionIfMissing: mock(() => Promise.resolve(true)),
       deleteBackupCollection: mock(() => Promise.resolve(true)),
-      createBackup: mock(() => Promise.resolve()),
+      createBackup: mock((data: Record<string, unknown>) =>
+        Promise.resolve(makeBackupRecord(data))
+      ),
       getBackupByName: mock(() => Promise.resolve(null)),
     } as unknown as BackupRepository;
 
     tokenAuthRepository = {
-      createTokenAuthUser: mock(() => Promise.resolve()),
+      createTokenAuthUser: mock((data: Record<string, unknown>) =>
+        Promise.resolve(makeTokenAuthUserRecord(data))
+      ),
       deleteTokenAuthUsersForInstance: mock(() => Promise.resolve([])),
       getTokenAuthUserByName: mock(() => Promise.resolve(null)),
     } as unknown as TokenAuthRepository;
@@ -111,7 +146,8 @@ describe('InstanceService', () => {
       operationsStore,
       valkeyProcessManager,
       backupRepository,
-      tokenAuthRepository
+      tokenAuthRepository,
+      new ResourceMutex()
     );
   });
 
@@ -622,6 +658,91 @@ describe('InstanceService', () => {
       expect(valkeyProcessManager.stopServerForInstance).not.toHaveBeenCalled();
       expect(repo.deleteInstance).not.toHaveBeenCalled();
     });
+
+    test('deleteInstance_whenRemovingTheRowFails_leavesTheDataPlaneRunningSoTheSurvivingInstanceStillMatchesItsEndpoint', async () => {
+      (repo.getInstanceByName as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(makeInstanceRecord())
+      );
+      (repo.deleteInstance as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.reject(new Error('storage down'))
+      );
+
+      const promise = service.deleteInstance('projects/p/locations/us-central1/instances/i');
+
+      await expect(promise).rejects.toThrow('storage down');
+
+      // A failed delete must not leave an ACTIVE row advertising a port nothing
+      // is listening on: the endpoint is a promise to whoever reads the instance
+      // next, and a retry cannot un-tell them.
+      expect(valkeyProcessManager.stopServerForInstance).not.toHaveBeenCalled();
+    });
+
+    test('deleteInstance_whenTokenAuthCleanupFails_leavesTheDataPlaneRunningAndTheInstanceIntact', async () => {
+      (repo.getInstanceByName as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(makeInstanceRecord())
+      );
+      (
+        tokenAuthRepository.deleteTokenAuthUsersForInstance as ReturnType<typeof mock>
+      ).mockImplementation(() => Promise.reject(new Error('token cleanup failed')));
+
+      const promise = service.deleteInstance('projects/p/locations/us-central1/instances/i');
+
+      await expect(promise).rejects.toThrow('token cleanup failed');
+      expect(valkeyProcessManager.stopServerForInstance).not.toHaveBeenCalled();
+      expect(repo.deleteInstance).not.toHaveBeenCalled();
+    });
+
+    test('deleteInstance_whenACreateForTheSameNameIsStillInFlight_waitsForThatCreateToFinishFirst', async () => {
+      let persisted: unknown = null;
+      let signalCreateIsPersisting = () => {};
+      let releaseCreate = () => {};
+
+      const createIsPersisting = new Promise<void>(resolve => {
+        signalCreateIsPersisting = resolve;
+      });
+      const createReleased = new Promise<void>(resolve => {
+        releaseCreate = resolve;
+      });
+
+      (repo.getInstanceByName as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(persisted)
+      );
+      // Parks the create with its row already persisted and its server already
+      // spawned — exactly the window a concurrent delete used to slip into.
+      (repo.createInstance as ReturnType<typeof mock>).mockImplementation(async () => {
+        persisted = makeInstanceRecord({
+          name: 'projects/p/locations/us-central1/instances/cache1',
+        });
+        signalCreateIsPersisting();
+        await createReleased;
+
+        return persisted;
+      });
+
+      const create = service.createInstance('p', 'us-central1', 'cache1', {});
+
+      await createIsPersisting;
+
+      const remove = service.deleteInstance('projects/p/locations/us-central1/instances/cache1');
+
+      // A macrotask, so every microtask an unserialized delete would need to
+      // reach the repository has already had its chance to run.
+      await Bun.sleep(5);
+
+      expect(repo.deleteInstance).not.toHaveBeenCalled();
+      expect(valkeyProcessManager.stopServerForInstance).not.toHaveBeenCalled();
+
+      releaseCreate();
+
+      const operation = await create;
+
+      await remove;
+
+      expect(operation.metadata.verb).toBe('create');
+      expect(repo.deleteInstance).toHaveBeenCalledWith(
+        'projects/p/locations/us-central1/instances/cache1'
+      );
+    });
   });
 
   describe('backupInstance', () => {
@@ -685,6 +806,56 @@ describe('InstanceService', () => {
       expect(backupRepository.createBackup).not.toHaveBeenCalled();
       expect(backupRepository.createBackupCollectionIfMissing).not.toHaveBeenCalled();
     });
+
+    test('backupInstance_returnsTheCreatedBackupAsTheOperationResponse', async () => {
+      (repo.getInstanceByName as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(makeInstanceRecord())
+      );
+
+      const op = await service.backupInstance('projects/p/locations/us-central1/instances/i', {
+        backupId: 'b',
+      });
+
+      // Awaiting a done LRO is how a client learns what was created; without the
+      // resource on `response` the Backup's name and uid are unreachable from
+      // the create path.
+      expect(op.response?.name).toBe(
+        'projects/p/locations/us-central1/backupCollections/i/backups/b'
+      );
+      expect(op.response?.instance).toBe('projects/p/locations/us-central1/instances/i');
+    });
+  });
+
+  describe('startMigration, finishMigration and rescheduleMaintenance', () => {
+    beforeEach(() => {
+      (repo.getInstanceByName as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(makeInstanceRecord())
+      );
+    });
+
+    test('startMigration_returnsTheInstanceAsTheOperationResponse', async () => {
+      const op = await service.startMigration('projects/p/locations/us-central1/instances/i', {});
+
+      expect(op.metadata.verb).toBe('startMigration');
+      expect(op.response?.name).toBe('projects/p/locations/us-central1/instances/i');
+    });
+
+    test('finishMigration_returnsTheInstanceAsTheOperationResponse', async () => {
+      const op = await service.finishMigration('projects/p/locations/us-central1/instances/i', {});
+
+      expect(op.metadata.verb).toBe('finishMigration');
+      expect(op.response?.name).toBe('projects/p/locations/us-central1/instances/i');
+    });
+
+    test('rescheduleMaintenance_returnsTheInstanceAsTheOperationResponse', async () => {
+      const op = await service.rescheduleMaintenance(
+        'projects/p/locations/us-central1/instances/i',
+        { rescheduleType: 'IMMEDIATE' }
+      );
+
+      expect(op.metadata.verb).toBe('rescheduleMaintenance');
+      expect(op.response?.name).toBe('projects/p/locations/us-central1/instances/i');
+    });
   });
 
   describe('addTokenAuthUser', () => {
@@ -708,6 +879,21 @@ describe('InstanceService', () => {
       expect(persisted.name).toBe('projects/p/locations/us-central1/instances/i/tokenAuthUsers/u');
       expect(op.done).toBe(true);
       expect(op.metadata.verb).toBe('addTokenAuthUser');
+    });
+
+    test('addTokenAuthUser_returnsTheCreatedTokenAuthUserAsTheOperationResponse', async () => {
+      (repo.getInstanceByName as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(makeInstanceRecord())
+      );
+
+      const op = await service.addTokenAuthUser('projects/p/locations/us-central1/instances/i', {
+        tokenAuthUser: 'u',
+      });
+
+      expect(op.response?.name).toBe(
+        'projects/p/locations/us-central1/instances/i/tokenAuthUsers/u'
+      );
+      expect(op.response?.state).toBe('ACTIVE');
     });
 
     test('addTokenAuthUser_givenAnEmptyBody_rejectsWithInvalidArgumentInsteadOfALeakedTypeError', async () => {
@@ -749,6 +935,59 @@ describe('InstanceService', () => {
       await expect(promise).rejects.toBeInstanceOf(MemoryStoreError);
       await expect(promise).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
       await expect(promise).rejects.toHaveProperty('resourceType', 'TokenAuthUser');
+      expect(tokenAuthRepository.createTokenAuthUser).not.toHaveBeenCalled();
+    });
+
+    test('addTokenAuthUser_whenTheInstanceIsBeingDeleted_failsInsteadOfOrphaningAUserUnderTheDeletedInstance', async () => {
+      let doesInstanceExist = true;
+      let signalDeleteIsPurgingUsers = () => {};
+      let releaseDelete = () => {};
+
+      const deleteIsPurgingUsers = new Promise<void>(resolve => {
+        signalDeleteIsPurgingUsers = resolve;
+      });
+      const deleteReleased = new Promise<void>(resolve => {
+        releaseDelete = resolve;
+      });
+
+      (repo.getInstanceByName as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(doesInstanceExist ? makeInstanceRecord() : null)
+      );
+      // Parks the delete midway through its child cleanup, which is the window
+      // an unserialized addTokenAuthUser used to write into.
+      (
+        tokenAuthRepository.deleteTokenAuthUsersForInstance as ReturnType<typeof mock>
+      ).mockImplementation(async () => {
+        signalDeleteIsPurgingUsers();
+        await deleteReleased;
+
+        return [];
+      });
+      (repo.deleteInstance as ReturnType<typeof mock>).mockImplementation(() => {
+        doesInstanceExist = false;
+
+        return Promise.resolve(true);
+      });
+
+      const remove = service.deleteInstance('projects/p/locations/us-central1/instances/i');
+
+      await deleteIsPurgingUsers;
+
+      const addUser = service.addTokenAuthUser('projects/p/locations/us-central1/instances/i', {
+        tokenAuthUser: 'u',
+      });
+
+      await Bun.sleep(5);
+
+      expect(tokenAuthRepository.createTokenAuthUser).not.toHaveBeenCalled();
+
+      releaseDelete();
+      await remove;
+
+      // The instance is gone by the time the add gets its turn, so it must 404
+      // rather than persist a user whose parent no longer exists — one a later
+      // instance created under the same id would inherit.
+      await expect(addUser).rejects.toHaveProperty('code', 'NOT_FOUND');
       expect(tokenAuthRepository.createTokenAuthUser).not.toHaveBeenCalled();
     });
   });

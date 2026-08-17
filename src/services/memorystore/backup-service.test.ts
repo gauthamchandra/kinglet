@@ -68,19 +68,28 @@ describe('BackupService', () => {
     } as unknown as BackupRepository;
 
     operationsStore = {
-      createOperation: mock((_p: string, _l: string, target: string, verb: string) =>
-        Promise.resolve({
-          name: 'projects/p/locations/us-central1/operations/op-1',
-          metadata: {
-            '@type': 'type.googleapis.com/google.cloud.memorystore.v1.OperationMetadata',
-            createTime: '2026-01-01T00:00:00.000Z',
-            endTime: '2026-01-01T00:00:00.000Z',
-            target,
-            verb,
-            apiVersion: 'v1',
-          },
-          done: true,
-        })
+      createOperation: mock(
+        (
+          _p: string,
+          _l: string,
+          target: string,
+          verb: string,
+          _resourceType: string,
+          response?: Record<string, unknown>
+        ) =>
+          Promise.resolve({
+            name: 'projects/p/locations/us-central1/operations/op-1',
+            metadata: {
+              '@type': 'type.googleapis.com/google.cloud.memorystore.v1.OperationMetadata',
+              createTime: '2026-01-01T00:00:00.000Z',
+              endTime: '2026-01-01T00:00:00.000Z',
+              target,
+              verb,
+              apiVersion: 'v1',
+            },
+            done: true,
+            ...(response ? { response } : {}),
+          })
       ),
     } as unknown as OperationsStore;
 
@@ -195,6 +204,22 @@ describe('BackupService', () => {
 
     expect(op.done).toBe(true);
     expect(op.metadata.verb).toBe('export');
+  });
+
+  test('exportBackup_returnsTheExportedBackupAsTheOperationResponse', async () => {
+    (repo.getBackupByName as ReturnType<typeof mock>).mockImplementation(() =>
+      Promise.resolve(makeBackupRecord())
+    );
+
+    const op = await service.exportBackup(
+      'projects/p/locations/us-central1/backupCollections/i/backups/20260101000000_abcd',
+      { gcsBucket: 'gs://my-bucket' }
+    );
+
+    expect(op.response?.name).toBe(
+      'projects/p/locations/us-central1/backupCollections/i/backups/20260101000000_abcd'
+    );
+    expect(op.response?.state).toBe('ACTIVE');
   });
 
   test('exportBackup_givenMissingBackup_throwsNotFound', async () => {

@@ -15,15 +15,18 @@
  */
 
 import type { OperationsStore } from './operations.ts';
+import type { ResourceMutex } from './resource-mutex.ts';
 import type { TokenAuthRepository } from './token-auth-repository.ts';
 import {
   AddAuthTokenRequestSchema,
   type AuthTokenResponse,
   authTokenRecordToResponse,
   buildAuthTokenName,
+  buildInstanceName,
   extractResourceId,
   MemoryStoreError,
   type OperationResponse,
+  parseAuthTokenName,
   parseTokenAuthUserName,
   type TokenAuthUserResponse,
   tokenAuthUserRecordToResponse,
@@ -42,10 +45,33 @@ export interface ListAuthTokensResponse {
 export class TokenAuthService {
   private repo: TokenAuthRepository;
   private operationsStore: OperationsStore;
+  private instanceMutex: ResourceMutex;
 
-  constructor(repo: TokenAuthRepository, operationsStore: OperationsStore) {
+  constructor(
+    repo: TokenAuthRepository,
+    operationsStore: OperationsStore,
+    instanceMutex: ResourceMutex
+  ) {
     this.repo = repo;
     this.operationsStore = operationsStore;
+    this.instanceMutex = instanceMutex;
+  }
+
+  /**
+   * Resource name of the instance a token user or auth token hangs off.
+   *
+   * <p>Token users and auth tokens live inside an instance whose deletion
+   * purges them, so every mutation here serializes on the INSTANCE's name —
+   * see {@link ResourceMutex}. Keying on the user's or the token's own name
+   * would leave those mutations free to run inside an in-flight instance
+   * delete, which is the whole thing the mutex exists to prevent.
+   */
+  private resolveInstanceLockKey(parsedName: {
+    project: string;
+    location: string;
+    instance: string;
+  }): string {
+    return buildInstanceName(parsedName.project, parsedName.location, parsedName.instance);
   }
 
   async listTokenAuthUsers(
@@ -84,6 +110,16 @@ export class TokenAuthService {
     force?: boolean,
     _requestId?: string
   ): Promise<OperationResponse> {
+    return this.instanceMutex.runExclusively(
+      this.resolveInstanceLockKey(parseTokenAuthUserName(name)),
+      () => this.deleteTokenAuthUserExclusively(name, force)
+    );
+  }
+
+  private async deleteTokenAuthUserExclusively(
+    name: string,
+    force?: boolean
+  ): Promise<OperationResponse> {
     await this.getExistingTokenAuthUserOrThrow(name);
 
     const authTokenCount = await this.repo.countAuthTokensForUser(name);
@@ -114,6 +150,17 @@ export class TokenAuthService {
       );
     }
 
+    // A malformed request is rejected above, before taking a turn in the queue.
+    return this.instanceMutex.runExclusively(
+      this.resolveInstanceLockKey(parseTokenAuthUserName(tokenAuthUserName)),
+      () => this.addAuthTokenExclusively(tokenAuthUserName, parsed.data.authToken.name)
+    );
+  }
+
+  private async addAuthTokenExclusively(
+    tokenAuthUserName: string,
+    authTokenId: string
+  ): Promise<OperationResponse> {
     await this.getExistingTokenAuthUserOrThrow(tokenAuthUserName);
 
     const { project, location, instance, tokenAuthUser } =
@@ -123,7 +170,7 @@ export class TokenAuthService {
       location,
       instance,
       tokenAuthUser,
-      extractResourceId(parsed.data.authToken.name)
+      extractResourceId(authTokenId)
     );
 
     const existing = await this.repo.getAuthTokenByName(authTokenName);
@@ -137,19 +184,22 @@ export class TokenAuthService {
       );
     }
 
-    await this.repo.createAuthToken({
+    const created = await this.repo.createAuthToken({
       name: authTokenName,
       tokenAuthUser: tokenAuthUserName,
       token: crypto.randomUUID(),
       state: 'ACTIVE',
     });
 
+    // The token itself is server-generated, so it reaches the caller only via
+    // this operation's response — `authTokens.get` is the only other way to it.
     return this.operationsStore.createOperation(
       project,
       location,
       authTokenName,
       'addAuthToken',
-      'AuthToken'
+      'AuthToken',
+      authTokenRecordToResponse(created) as unknown as Record<string, unknown>
     );
   }
 
@@ -180,6 +230,17 @@ export class TokenAuthService {
   }
 
   async deleteAuthToken(name: string): Promise<OperationResponse> {
+    const parsedName = parseAuthTokenName(name);
+
+    return this.instanceMutex.runExclusively(this.resolveInstanceLockKey(parsedName), () =>
+      this.deleteAuthTokenExclusively(name, parsedName)
+    );
+  }
+
+  private async deleteAuthTokenExclusively(
+    name: string,
+    parsedName: { project: string; location: string }
+  ): Promise<OperationResponse> {
     const existing = await this.repo.getAuthTokenByName(name);
 
     if (!existing) {
@@ -188,9 +249,13 @@ export class TokenAuthService {
 
     await this.repo.deleteAuthToken(name);
 
-    const { project, location } = parseTokenAuthUserName(existing.tokenAuthUser);
-
-    return this.operationsStore.createOperation(project, location, name, 'delete', 'AuthToken');
+    return this.operationsStore.createOperation(
+      parsedName.project,
+      parsedName.location,
+      name,
+      'delete',
+      'AuthToken'
+    );
   }
 
   private async getExistingTokenAuthUserOrThrow(name: string) {

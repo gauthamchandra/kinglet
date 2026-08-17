@@ -283,4 +283,76 @@ describe('BackupRepository', () => {
       expect(deleted).toBe(false);
     });
   });
+
+  describe('backup collection statistics', () => {
+    beforeEach(async () => {
+      await repo.createBackupCollectionIfMissing(
+        'projects/p/locations/us-central1/backupCollections/i',
+        'projects/p/locations/us-central1/instances/i',
+        'uid-instance'
+      );
+    });
+
+    test('createBackup_updatesTheParentCollectionsCountSizeAndLastBackupTime', async () => {
+      await repo.createBackup(backupData({ totalSizeBytes: '1024' }));
+
+      const collection = await repo.getBackupCollectionByName(
+        'projects/p/locations/us-central1/backupCollections/i'
+      );
+
+      expect(collection?.totalBackupCount).toBe(1);
+      expect(collection?.totalBackupSizeBytes).toBe('1024');
+      expect(collection?.lastBackupTime).toBeTypeOf('string');
+    });
+
+    test('createBackup_calledASecondTime_accumulatesTheCountAndTheSummedSize', async () => {
+      await repo.createBackup(backupData({ totalSizeBytes: '1024' }));
+      await repo.createBackup(
+        backupData({
+          name: 'projects/p/locations/us-central1/backupCollections/i/backups/20260102000000_efgh',
+          totalSizeBytes: '2048',
+        })
+      );
+
+      const collection = await repo.getBackupCollectionByName(
+        'projects/p/locations/us-central1/backupCollections/i'
+      );
+
+      expect(collection?.totalBackupCount).toBe(2);
+      expect(collection?.totalBackupSizeBytes).toBe('3072');
+    });
+
+    test('deleteBackup_removingTheOnlyBackup_returnsTheCollectionToEmptyWithNoLastBackupTime', async () => {
+      await repo.createBackup(backupData({ totalSizeBytes: '1024' }));
+
+      await repo.deleteBackup(
+        'projects/p/locations/us-central1/backupCollections/i/backups/20260101000000_abcd'
+      );
+
+      const collection = await repo.getBackupCollectionByName(
+        'projects/p/locations/us-central1/backupCollections/i'
+      );
+
+      expect(collection?.totalBackupCount).toBe(0);
+      expect(collection?.totalBackupSizeBytes).toBe('0');
+      expect(collection?.lastBackupTime).toBeNull();
+    });
+
+    test('createBackup_leavesADifferentCollectionsStatisticsAlone', async () => {
+      await repo.createBackupCollectionIfMissing(
+        'projects/p/locations/us-central1/backupCollections/other',
+        'projects/p/locations/us-central1/instances/other',
+        'uid-instance-other'
+      );
+
+      await repo.createBackup(backupData({ totalSizeBytes: '1024' }));
+
+      const otherCollection = await repo.getBackupCollectionByName(
+        'projects/p/locations/us-central1/backupCollections/other'
+      );
+
+      expect(otherCollection?.totalBackupCount).toBe(0);
+      expect(otherCollection?.lastBackupTime).toBeNull();
+    });
+  });
 });
