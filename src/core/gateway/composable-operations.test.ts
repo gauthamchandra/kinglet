@@ -203,6 +203,38 @@ describe('composed operations routing (Memorystore + Workflows on one RequestRou
     expect(result.nextPageToken).toBe('2');
   });
 
+  test('composedOperations_listRoute_givenNoPageSize_appliesTheSameHundredRowDefaultEachServiceAppliesAlone', async () => {
+    for (let index = 0; index < 101; index++) {
+      await router.route(
+        new Request(
+          `http://localhost/v1/projects/${PROJECT}/locations/${LOCATION}/instances?instanceId=cache${String(index).padStart(3, '0')}`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({}),
+          }
+        )
+      );
+    }
+
+    const listResponse = await router.route(
+      new Request(`http://localhost/v1/projects/${PROJECT}/locations/${LOCATION}/operations`)
+    );
+
+    expect(listResponse.status).toBe(200);
+
+    const result = (await listResponse.json()) as {
+      operations: Array<{ name: string }>;
+      nextPageToken?: string;
+    };
+
+    // Each service's own listOperations defaults an absent pageSize to 100, so
+    // a composed route that treats it as unbounded makes pagination depend on
+    // which services happen to be running rather than on the request.
+    expect(result.operations.length).toBe(100);
+    expect(result.nextPageToken).toBe('100');
+  });
+
   test('composedOperations_listRoute_givenAZeroOrNegativePageSize_returnsAllOperationsWithNoNextPageTokenInsteadOfLoopingForever', async () => {
     await router.route(
       new Request(

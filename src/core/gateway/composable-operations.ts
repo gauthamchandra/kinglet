@@ -17,7 +17,11 @@
  */
 
 import type { Logger } from '@/shared/utils/logger.ts';
-import { parseOffsetToken, parsePageSize } from '@/shared/utils/pagination.ts';
+import {
+  DEFAULT_LIST_PAGE_SIZE,
+  parseOffsetToken,
+  parsePageSize,
+} from '@/shared/utils/pagination.ts';
 import type { RouteDefinition, RouteRequest } from './request-router.ts';
 import { ResponseUtils, StandardResponseFormatter } from './response-handlers.ts';
 
@@ -66,7 +70,11 @@ export function buildComposedOperationsRoutes(
       path: '/v1/projects/:project/locations/:location/operations',
       handler: async req => {
         const { project, location } = req.params;
-        const pageSize = parsePageSize(req.query.pageSize);
+        // Resolved here rather than left absent: this handler paginates the
+        // merged list itself, so nothing downstream would otherwise apply the
+        // default each store applies when asked directly, and composing two
+        // services would silently turn a bounded list into an unbounded one.
+        const pageSize = parsePageSize(req.query.pageSize) ?? DEFAULT_LIST_PAGE_SIZE;
         const offset = parseOffsetToken(req.query.pageToken);
 
         const results = await Promise.all(
@@ -77,12 +85,11 @@ export function buildComposedOperationsRoutes(
 
         const merged = results.flatMap(result => result.operations).sort(compareOperationsByName);
 
-        const page =
-          pageSize != null ? merged.slice(offset, offset + pageSize) : merged.slice(offset);
+        const body: Record<string, unknown> = {
+          operations: merged.slice(offset, offset + pageSize),
+        };
 
-        const body: Record<string, unknown> = { operations: page };
-
-        if (pageSize != null && offset + pageSize < merged.length) {
+        if (offset + pageSize < merged.length) {
           body.nextPageToken = String(offset + pageSize);
         }
 

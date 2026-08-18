@@ -7,6 +7,16 @@
  * storage provider whose `if (limit)` check would otherwise drop the
  * `LIMIT`/`OFFSET` clause and return the whole table.
  */
+/**
+ * Rows a list endpoint returns when the caller names no `pageSize`.
+ *
+ * <p>Matches the limit every repository in this emulator falls back to, so a
+ * handler that has to resolve the default itself — rather than handing an
+ * absent `pageSize` down to a repository that would — stays consistent with
+ * the rest of the API instead of quietly returning an unbounded list.
+ */
+export const DEFAULT_LIST_PAGE_SIZE = 100;
+
 export function parsePageSize(raw: unknown): number | undefined {
   if (raw == null || raw === '') return undefined;
 
