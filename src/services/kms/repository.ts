@@ -152,6 +152,17 @@ export class CryptoKeyVersionRepository {
     });
   }
 
+  /** Highest version number allocated for a key, or 0 when it has none. */
+  async getHighestVersionNumber(cryptoKeyName: string): Promise<number> {
+    const result = await this.storage.find<CryptoKeyVersionRecord>(KMS_CRYPTO_KEY_VERSIONS_TABLE, {
+      filter: { conditions: [{ field: 'cryptoKeyName', operator: 'eq', value: cryptoKeyName }] },
+      pagination: { limit: 1, offset: 0 },
+      sort: [{ field: 'versionNumber', direction: 'desc' }],
+    });
+
+    return result.data[0]?.versionNumber ?? 0;
+  }
+
   async listVersions(
     cryptoKeyName: string,
     pageSize?: number,

@@ -155,6 +155,67 @@ describe('encrypt / decrypt over the wire', () => {
     expect(fromB64((dec.body as { plaintext: string }).plaintext)).toBe('wire secret');
   });
 
+  test('reads an empty plaintext as absent, the way proto3 does', async () => {
+    const enc = await call('kms.cryptoKeys.encrypt', {
+      params: keyParams,
+      body: { plaintext: '' },
+    });
+
+    expect(enc.status).toBe(400);
+    expect(enc.body).toMatchObject({ error: { status: 'INVALID_ARGUMENT' } });
+  });
+
+  test('reads an empty additionalAuthenticatedData as no AAD at all', async () => {
+    const enc = await call('kms.cryptoKeys.encrypt', {
+      params: keyParams,
+      body: { plaintext: b64('no aad'), additionalAuthenticatedData: '' },
+    });
+
+    expect(enc.status).toBe(200);
+
+    const dec = await call('kms.cryptoKeys.decrypt', {
+      params: keyParams,
+      body: { ciphertext: (enc.body as { ciphertext: string }).ciphertext },
+    });
+
+    expect(dec.status).toBe(200);
+    expect(fromB64((dec.body as { plaintext: string }).plaintext)).toBe('no aad');
+  });
+
+  test('rejects malformed base64 instead of encrypting the characters it recognizes', async () => {
+    const enc = await call('kms.cryptoKeys.encrypt', {
+      params: keyParams,
+      body: { plaintext: '!!! not base64 !!!' },
+    });
+
+    expect(enc.status).toBe(400);
+    expect(enc.body).toMatchObject({ error: { status: 'INVALID_ARGUMENT' } });
+  });
+
+  test('accepts url-safe base64 and unpadded base64', async () => {
+    const plaintext = new Uint8Array([0xfb, 0xff, 0xbf]);
+    const urlSafe = Buffer.from(plaintext).toString('base64url');
+
+    expect(urlSafe).toBe('-_-_');
+
+    const enc = await call('kms.cryptoKeys.encrypt', {
+      params: keyParams,
+      body: { plaintext: urlSafe },
+    });
+
+    expect(enc.status).toBe(200);
+
+    const dec = await call('kms.cryptoKeys.decrypt', {
+      params: keyParams,
+      body: { ciphertext: (enc.body as { ciphertext: string }).ciphertext },
+    });
+
+    expect(dec.status).toBe(200);
+    expect(
+      new Uint8Array(Buffer.from((dec.body as { plaintext: string }).plaintext, 'base64'))
+    ).toEqual(plaintext);
+  });
+
   test('returns the crypto key version that encrypted in name, per EncryptResponse', async () => {
     const enc = await call('kms.cryptoKeys.encrypt', {
       params: keyParams,

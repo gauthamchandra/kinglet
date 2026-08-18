@@ -131,7 +131,6 @@ export interface CryptoKeyRecord extends BaseRecord {
   labels: string; // JSON-serialized Record<string,string>
   rotationPeriod: string | null;
   nextRotationTime: string | null;
-  versionCounter: number; // monotonic; next version id = versionCounter + 1
 }
 
 export interface CryptoKeyVersionRecord extends BaseRecord {
@@ -171,7 +170,6 @@ export const kmsCryptoKeysTableSchema: TableSchema = {
     { name: 'labels', type: 'json' },
     { name: 'rotationPeriod', type: 'string', nullable: true },
     { name: 'nextRotationTime', type: 'string', nullable: true },
-    { name: 'versionCounter', type: 'number' },
   ],
   indexes: [
     { name: 'idx_kms_crypto_keys_name', columns: ['name'], unique: true },

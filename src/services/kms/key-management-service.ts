@@ -91,6 +91,8 @@ export interface ListVersionsResult {
 }
 
 export class KeyManagementService {
+  private readonly versionAllocations = new Map<string, Promise<void>>();
+
   constructor(
     private keyRingRepo: KeyRingRepository,
     private cryptoKeyRepo: CryptoKeyRepository,
@@ -227,14 +229,13 @@ export class KeyManagementService {
       labels: JSON.stringify(request.labels ?? {}),
       rotationPeriod: request.rotationPeriod ?? null,
       nextRotationTime: request.nextRotationTime ?? null,
-      versionCounter: 0,
     });
 
     let finalKey = keyRecord;
     let primary: CryptoKeyVersionRecord | null = null;
 
     if (!skipInitialVersionCreation) {
-      const result = await this.addVersion(keyRecord);
+      const result = await this.addVersion(keyRecord.name);
 
       finalKey = result.key;
 
@@ -368,8 +369,9 @@ export class KeyManagementService {
   // ── Crypto key versions ──
 
   async createCryptoKeyVersion(cryptoKeyName: string): Promise<CryptoKeyVersionResponse> {
-    const key = await this.requireCryptoKey(cryptoKeyName);
-    const result = await this.addVersion(key);
+    await this.requireCryptoKey(cryptoKeyName);
+
+    const result = await this.addVersion(cryptoKeyName);
 
     return cryptoKeyVersionRecordToResponse(result.version);
   }
@@ -543,35 +545,65 @@ export class KeyManagementService {
     }
   }
 
-  private async addVersion(
-    key: CryptoKeyRecord
+  /**
+   * Allocations for one key are queued because the next version number is read
+   * from the versions already persisted: two concurrent rotations would
+   * otherwise both read the same maximum, and the second insert would fail as a
+   * duplicate name. Deriving the number from the versions themselves rather than
+   * from a counter on the CryptoKey also means there is no second write that can
+   * be lost — a version that exists is a number that has been handed out.
+   */
+  private addVersion(
+    cryptoKeyName: string
   ): Promise<{ version: CryptoKeyVersionRecord; key: CryptoKeyRecord }> {
-    const versionId = String(key.versionCounter + 1);
-    const versionName = buildCryptoKeyVersionName(key.name, versionId);
-    const now = new Date().toISOString();
+    const queued = (this.versionAllocations.get(cryptoKeyName) ?? Promise.resolve()).then(() =>
+      this.allocateVersion(cryptoKeyName)
+    );
+
+    // A failed allocation must not reject the next caller's queue position.
+    const tail = queued.then(
+      () => undefined,
+      () => undefined
+    );
+
+    this.versionAllocations.set(cryptoKeyName, tail);
+
+    void tail.then(() => {
+      if (this.versionAllocations.get(cryptoKeyName) === tail) {
+        this.versionAllocations.delete(cryptoKeyName);
+      }
+    });
+
+    return queued;
+  }
+
+  private async allocateVersion(
+    cryptoKeyName: string
+  ): Promise<{ version: CryptoKeyVersionRecord; key: CryptoKeyRecord }> {
+    const key = await this.requireCryptoKey(cryptoKeyName);
+    const versionNumber = (await this.versionRepo.getHighestVersionNumber(cryptoKeyName)) + 1;
+    const versionId = String(versionNumber);
 
     const version = await this.versionRepo.createVersion({
-      name: versionName,
+      name: buildCryptoKeyVersionName(key.name, versionId),
       cryptoKeyName: key.name,
-      versionNumber: key.versionCounter + 1,
+      versionNumber,
       state: CryptoKeyVersionState.ENABLED,
       protectionLevel: key.protectionLevel,
       algorithm: key.algorithm,
       keyMaterial: generateKeyMaterial(key.algorithm),
-      generateTime: now,
+      generateTime: new Date().toISOString(),
       destroyTime: null,
       destroyEventTime: null,
     });
 
-    const keyUpdates: Partial<Omit<CryptoKeyRecord, keyof BaseRecord>> = {
-      versionCounter: key.versionCounter + 1,
-    };
-
-    if (key.primaryVersion == null && purposeUsesPrimaryVersion(key.purpose)) {
-      keyUpdates.primaryVersion = versionId;
+    if (key.primaryVersion != null || !purposeUsesPrimaryVersion(key.purpose)) {
+      return { version, key };
     }
 
-    const updatedKey = await this.cryptoKeyRepo.updateCryptoKey(key.name, keyUpdates);
+    const updatedKey = await this.cryptoKeyRepo.updateCryptoKey(key.name, {
+      primaryVersion: versionId,
+    });
 
     return { version, key: updatedKey ?? key };
   }

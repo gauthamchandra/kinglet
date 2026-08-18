@@ -49,6 +49,30 @@ authenticates with AES-256-GCM. This makes rotation correct by construction: old
 ciphertext continues to decrypt against the version that produced it, while new
 encryptions use the current primary version.
 
+### Version ids derived from persisted versions, not a counter
+
+A CryptoKey does not carry a "next version" counter. `cryptoKeyVersions.create`
+reads the highest `versionNumber` already persisted for the key and adds one, and
+allocations for a given key are queued so that read and the insert cannot
+interleave with another allocation for the same key.
+
+The obvious alternative — a `versionCounter` column bumped alongside the insert —
+needs two writes to stay in step, and the storage layer cannot make them one:
+the memory provider's transaction applies writes immediately and its rollback is
+a no-op, so `withTransaction` would look atomic without being atomic. Deriving
+the id from the versions themselves removes the second write entirely. A version
+that exists *is* a number that has been handed out, including for DESTROYED
+versions, whose rows remain and whose ids are therefore never reused.
+
+### Empty `bytes` fields are read as absent
+
+Proto3 cannot distinguish an empty `bytes` value from an omitted one — they are
+byte-identical on the wire, and JSON `""` transcodes to the same empty field. So
+`""` is treated as absent throughout: an optional field the caller did not set,
+or a required one that is missing (`INVALID_ARGUMENT`). Malformed base64 is
+rejected rather than decoded down to the characters `Buffer` happens to
+recognize, which would otherwise encrypt or sign a silently truncated input.
+
 ### Real, software-backed crypto for a focused operation set
 
 Implemented and tested end to end (including against the official

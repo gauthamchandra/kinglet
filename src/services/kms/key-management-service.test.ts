@@ -185,6 +185,35 @@ describe('crypto key versions', () => {
     expect(key.primary?.name).toBe(`${keyName}/cryptoKeyVersions/1`);
   });
 
+  test('concurrent rotations each get a distinct version', async () => {
+    const created = await Promise.all(
+      Array.from({ length: 5 }, () => svc.createCryptoKeyVersion(keyName))
+    );
+
+    const names = created.map(v => v.name).sort();
+    expect(names).toEqual([2, 3, 4, 5, 6].map(n => `${keyName}/cryptoKeyVersions/${n}`));
+
+    const listed = await svc.listCryptoKeyVersions(keyName);
+    expect(listed.cryptoKeyVersions).toHaveLength(6);
+  });
+
+  test('a failed allocation does not block the next one', async () => {
+    const missing = `${RING_NAME}/cryptoKeys/absent`;
+
+    await expect(svc.createCryptoKeyVersion(missing)).rejects.toHaveProperty('code', 'NOT_FOUND');
+
+    const next = await svc.createCryptoKeyVersion(keyName);
+    expect(next.name).toBe(`${keyName}/cryptoKeyVersions/2`);
+  });
+
+  test('version numbering skips ids already taken by destroyed versions', async () => {
+    await svc.createCryptoKeyVersion(keyName);
+    await svc.destroyCryptoKeyVersion(`${keyName}/cryptoKeyVersions/2`);
+
+    const v3 = await svc.createCryptoKeyVersion(keyName);
+    expect(v3.name).toBe(`${keyName}/cryptoKeyVersions/3`);
+  });
+
   test('updatePrimaryVersion promotes a new version', async () => {
     await svc.createCryptoKeyVersion(keyName);
     const key = await svc.updatePrimaryVersion(keyName, '2');

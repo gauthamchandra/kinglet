@@ -27,12 +27,25 @@ import {
   ProtectionLevel,
 } from './types.ts';
 
-function decodeBase64(value: unknown): Uint8Array | undefined {
+/**
+ * Proto3 cannot distinguish an empty `bytes` field from an absent one, so real
+ * KMS reads `""` as absent — an omitted optional field, or a missing required
+ * one it rejects with INVALID_ARGUMENT. Malformed base64 is rejected rather
+ * than silently decoding to the subset of characters Buffer recognizes.
+ */
+function decodeBase64(value: unknown, field: string): Uint8Array | undefined {
   if (typeof value !== 'string' || value.length === 0) {
     return undefined;
   }
 
-  return new Uint8Array(Buffer.from(value, 'base64'));
+  const normalized = value.replaceAll('-', '+').replaceAll('_', '/').replace(/=+$/, '');
+  const bytes = new Uint8Array(Buffer.from(normalized, 'base64'));
+
+  if (Buffer.from(bytes).toString('base64').replace(/=+$/, '') !== normalized) {
+    throw new KmsError('INVALID_ARGUMENT', `${field} is not valid base64`);
+  }
+
+  return bytes;
 }
 
 function encodeBase64(bytes: Uint8Array): string {
@@ -429,13 +442,13 @@ export class KmsHandlers {
   private async encrypt(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const plaintext = decodeBase64(body.plaintext);
+      const plaintext = decodeBase64(body.plaintext, 'plaintext');
 
       if (!plaintext) {
         throw new KmsError('INVALID_ARGUMENT', 'plaintext is required');
       }
 
-      const aad = decodeBase64(body.additionalAuthenticatedData);
+      const aad = decodeBase64(body.additionalAuthenticatedData, 'additionalAuthenticatedData');
       const verifiedPlaintext = this.checkCrc(plaintext, body.plaintextCrc32c);
       const verifiedAad = aad
         ? this.checkCrc(aad, body.additionalAuthenticatedDataCrc32c)
@@ -461,13 +474,13 @@ export class KmsHandlers {
   private async decrypt(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const ciphertext = decodeBase64(body.ciphertext);
+      const ciphertext = decodeBase64(body.ciphertext, 'ciphertext');
 
       if (!ciphertext) {
         throw new KmsError('INVALID_ARGUMENT', 'ciphertext is required');
       }
 
-      const aad = decodeBase64(body.additionalAuthenticatedData);
+      const aad = decodeBase64(body.additionalAuthenticatedData, 'additionalAuthenticatedData');
 
       this.checkCrc(ciphertext, body.ciphertextCrc32c);
 
@@ -487,7 +500,7 @@ export class KmsHandlers {
   private async asymmetricSign(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const data = decodeBase64(body.data);
+      const data = decodeBase64(body.data, 'data');
       const digest = this.readDigest(body.digest);
 
       const verifiedData = data ? this.checkCrc(data, body.dataCrc32c) : undefined;
@@ -522,7 +535,7 @@ export class KmsHandlers {
   private async asymmetricDecrypt(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const ciphertext = decodeBase64(body.ciphertext);
+      const ciphertext = decodeBase64(body.ciphertext, 'ciphertext');
 
       if (!ciphertext) {
         throw new KmsError('INVALID_ARGUMENT', 'ciphertext is required');
@@ -546,7 +559,7 @@ export class KmsHandlers {
   private async macSign(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const data = decodeBase64(body.data);
+      const data = decodeBase64(body.data, 'data');
 
       if (!data) {
         throw new KmsError('INVALID_ARGUMENT', 'data is required');
@@ -572,8 +585,8 @@ export class KmsHandlers {
   private async macVerify(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const data = decodeBase64(body.data);
-      const mac = decodeBase64(body.mac);
+      const data = decodeBase64(body.data, 'data');
+      const mac = decodeBase64(body.mac, 'mac');
 
       if (!data || !mac) {
         throw new KmsError('INVALID_ARGUMENT', 'data and mac are required');
@@ -638,7 +651,11 @@ export class KmsHandlers {
 
     const d = digest as Record<string, unknown>;
 
-    return decodeBase64(d.sha256) ?? decodeBase64(d.sha384) ?? decodeBase64(d.sha512);
+    return (
+      decodeBase64(d.sha256, 'digest.sha256') ??
+      decodeBase64(d.sha384, 'digest.sha384') ??
+      decodeBase64(d.sha512, 'digest.sha512')
+    );
   }
 
   /**
