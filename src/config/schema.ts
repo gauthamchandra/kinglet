@@ -38,6 +38,34 @@ const ServicesConfigSchema = z.object({
   secrets: z.object({ enabled: z.boolean().default(true) }),
   storage: z.object({ enabled: z.boolean().default(true) }),
   workflows: z.object({ enabled: z.boolean().default(true) }),
+  memorystore: z
+    .object({
+      enabled: z.boolean().default(true),
+      dataPlane: z
+        .object({
+          // On by default: a Memorystore instance you cannot actually connect a
+          // Valkey client to is metadata, not emulation. Set
+          // MEMORYSTORE_DATA_PLANE=false for the metadata-only control plane.
+          // When the binary is absent this degrades to metadata-only endpoints
+          // anyway (see ValkeyProcessManager), so defaulting to `true` cannot
+          // harden into a startup failure on a host without valkey-server.
+          enabled: z.boolean().default(true),
+          binaryPath: z.string().optional(),
+          // 6380 onwards sits next to the well-known Valkey/Redis port without
+          // colliding with a valkey the developer may already run on 6379.
+          // Deliberately NOT 7000-7099: macOS ships AirPlay Receiver listening
+          // on 7000, so the first instance a Mac developer created would appear
+          // to bind fine and then answer with something that is not Valkey.
+          portRangeStart: z.number().int().min(1).max(65535).default(6380),
+          portRangeEnd: z.number().int().min(1).max(65535).default(6479),
+        })
+        .refine(dataPlane => dataPlane.portRangeStart <= dataPlane.portRangeEnd, {
+          message: 'portRangeStart must be less than or equal to portRangeEnd',
+          path: ['portRangeStart'],
+        })
+        .prefault({}),
+    })
+    .prefault({}),
 });
 
 // Logging configuration schema
@@ -111,6 +139,25 @@ export const EnvConfigSchema = z.object({
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
+  ENABLE_MEMORYSTORE: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
+  MEMORYSTORE_DATA_PLANE: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
+  MEMORYSTORE_VALKEY_BINARY: z.string().optional(),
+  MEMORYSTORE_PORT_RANGE_START: z
+    .string()
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(65535))
+    .optional(),
+  MEMORYSTORE_PORT_RANGE_END: z
+    .string()
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(65535))
+    .optional(),
 
   // Logging configuration
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
@@ -181,7 +228,12 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.ENABLE_TASKS !== undefined ||
     env.ENABLE_SECRETS !== undefined ||
     env.ENABLE_STORAGE !== undefined ||
-    env.ENABLE_WORKFLOWS !== undefined;
+    env.ENABLE_WORKFLOWS !== undefined ||
+    env.ENABLE_MEMORYSTORE !== undefined ||
+    env.MEMORYSTORE_DATA_PLANE !== undefined ||
+    env.MEMORYSTORE_VALKEY_BINARY !== undefined ||
+    env.MEMORYSTORE_PORT_RANGE_START !== undefined ||
+    env.MEMORYSTORE_PORT_RANGE_END !== undefined;
 
   if (hasServiceConfig) {
     config.services = {};
@@ -196,6 +248,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       config.services.secrets = { enabled: enabledServices.includes('secrets') };
       config.services.storage = { enabled: enabledServices.includes('storage') };
       config.services.workflows = { enabled: enabledServices.includes('workflows') };
+      config.services.memorystore = { enabled: enabledServices.includes('memorystore') };
     }
 
     // Map individual service enablement
@@ -223,6 +276,37 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.ENABLE_WORKFLOWS !== undefined) {
       if (!config.services.workflows) config.services.workflows = {};
       config.services.workflows.enabled = env.ENABLE_WORKFLOWS;
+    }
+
+    if (env.ENABLE_MEMORYSTORE !== undefined) {
+      if (!config.services.memorystore) config.services.memorystore = {};
+      config.services.memorystore.enabled = env.ENABLE_MEMORYSTORE;
+    }
+
+    if (
+      env.MEMORYSTORE_DATA_PLANE !== undefined ||
+      env.MEMORYSTORE_VALKEY_BINARY !== undefined ||
+      env.MEMORYSTORE_PORT_RANGE_START !== undefined ||
+      env.MEMORYSTORE_PORT_RANGE_END !== undefined
+    ) {
+      if (!config.services.memorystore) config.services.memorystore = {};
+
+      const dataPlane: NonNullable<
+        NonNullable<DeepPartial<Config>['services']>['memorystore']
+      >['dataPlane'] = {};
+
+      if (env.MEMORYSTORE_DATA_PLANE !== undefined) dataPlane.enabled = env.MEMORYSTORE_DATA_PLANE;
+      if (env.MEMORYSTORE_VALKEY_BINARY !== undefined) {
+        dataPlane.binaryPath = env.MEMORYSTORE_VALKEY_BINARY;
+      }
+      if (env.MEMORYSTORE_PORT_RANGE_START !== undefined) {
+        dataPlane.portRangeStart = env.MEMORYSTORE_PORT_RANGE_START;
+      }
+      if (env.MEMORYSTORE_PORT_RANGE_END !== undefined) {
+        dataPlane.portRangeEnd = env.MEMORYSTORE_PORT_RANGE_END;
+      }
+
+      config.services.memorystore.dataPlane = dataPlane;
     }
   }
 

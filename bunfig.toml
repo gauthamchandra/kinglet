@@ -21,7 +21,8 @@ coverageExclude = [
 # Include test files from co-located structure and test-utils directory
 include = [
   "src/**/*.test.ts",
-  "test-utils/**/*.test.ts"
+  "test-utils/**/*.test.ts",
+  "scripts/**/*.test.ts"
 ]
 
 [install]

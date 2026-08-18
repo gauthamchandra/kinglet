@@ -126,6 +126,7 @@ export class ConfigLoader {
         secrets: {},
         storage: {},
         workflows: {},
+        memorystore: {},
         ...mergedConfig.services,
       },
     };
@@ -257,6 +258,7 @@ export async function loadConfigFromEnv(
       secrets: {},
       storage: {},
       workflows: {},
+      memorystore: {},
       ...partialConfig.services,
     },
   };

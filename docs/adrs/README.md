@@ -13,6 +13,7 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [004](004-modular-service-gateway.md) | Modular Service Gateway Pattern | Accepted |
 | [005](005-pubsub-message-fanout-delivery.md) | Pub/Sub Message Fan-Out and Delivery | Accepted |
 | [006](006-open-source-licensing-and-governance.md) | Open-Source Licensing and Governance | Accepted |
+| [007](007-memorystore-valkey-data-plane.md) | Memorystore for Valkey Data Plane | Accepted |
 
 ## A note on the project's former name
 

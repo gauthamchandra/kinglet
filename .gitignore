@@ -74,3 +74,7 @@ data/
 # inherit lives in the checked-in .claude/settings.json; this file is where your
 # own additions accumulate and is personal by convention.
 .claude/settings.local.json
+
+# Don't commit discovery documents that GCP gates behind authentication
+# because it's likely against their wishes
+memorystore.discovery-document.private.json

@@ -5,7 +5,7 @@
     "interface": true,
     "type": true
   },
-  "ignoreFiles": ["src/**/index.ts"],
+  "ignoreFiles": ["src/**/index.ts", "src/__fixtures__/**", "src/services/memorystore/__fixtures__/**"],
   "ignoreIssues": {
     "src/core/gateway/proto-types.ts": ["types"],
     "src/shared/types/index.ts": ["types"],

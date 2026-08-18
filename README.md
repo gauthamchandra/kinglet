@@ -40,6 +40,13 @@ services:
     image: ghcr.io/gauthamchandra/kinglet:latest
     ports:
       - "8765:8765"
+      # Memorystore data plane (on by default; omit if MEMORYSTORE_DATA_PLANE=false).
+      # Each instance's `valkey-server` listens on every interface with
+      # protected mode off, so these published ports are reachable from the
+      # host and the data plane is unauthenticated. Publish this range only
+      # on a trusted local/CI machine, never from a container reachable from
+      # the internet.
+      - "6380-6479:6380-6479"
     volumes:
       - kinglet-data:/app/data  # persist state across restarts
     environment:
@@ -148,6 +155,7 @@ curl -X POST http://localhost:8765/v2/projects/test-project/locations/us-central
 | Cloud Pub/Sub | Implemented | v1 | Topics, subscriptions, publish/pull, ack, snapshots, schemas, seek |
 | Cloud Storage | Experimental | v1 | Bucket CRUD, object upload/download, copy, compose, rewrite |
 | Cloud Workflows | Experimental | v1 | Workflow CRUD, revisions, LRO operations |
+| Memorystore for Valkey | Experimental | v1 | Instance/ACL/backup/token-auth CRUD, real `valkey-server` data plane on by default (token-auth is metadata only — the data plane is unauthenticated) |
 | Secret Manager | Planned | — | Not yet implemented — the config flag exists but the service is a stub |
 
 > **Experimental** means the service API is implemented but has not yet been validated against production use cases or official GCP client libraries. Breaking changes may occur.
@@ -183,6 +191,11 @@ All configuration is via environment variables. Defaults are shown below.
 | `ENABLE_SECRETS` | `true` | Enable Secret Manager service |
 | `ENABLE_STORAGE` | `true` | Enable Cloud Storage service (experimental) |
 | `ENABLE_WORKFLOWS` | `true` | Enable Cloud Workflows service |
+| `ENABLE_MEMORYSTORE` | `true` | Enable Memorystore for Valkey service |
+| `MEMORYSTORE_DATA_PLANE` | `true` | Spawn a real `valkey-server` per instance; `false` for metadata-only endpoints |
+| `MEMORYSTORE_VALKEY_BINARY` | — | Override the resolved `valkey-server` binary path |
+| `MEMORYSTORE_PORT_RANGE_START` | `6380` | First port available for data-plane instances |
+| `MEMORYSTORE_PORT_RANGE_END` | `6479` | Last port available for data-plane instances |
 
 ### Logging
 
@@ -372,6 +385,86 @@ docker run -d \
 |--------|------|-------------|
 | `GET` | `/v1/projects/{project}/locations` | List locations |
 | `GET` | `/v1/projects/{project}/locations/{location}` | Get location |
+
+### Memorystore for Valkey (v1) — Experimental
+
+Each instance is backed by a real `valkey-server` process, so
+`discoveryEndpoints` is something a Valkey client can actually connect to. Set
+`MEMORYSTORE_DATA_PLANE=false` for metadata-only endpoints. If the
+`valkey-server` binary is not on `PATH`, instances degrade to metadata-only
+automatically — see [ADR-007](docs/adrs/007-memorystore-valkey-data-plane.md).
+
+**Instances**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/locations/{location}/instances` | Create instance |
+| `GET` | `/v1/projects/{project}/locations/{location}/instances` | List instances |
+| `GET` | `/v1/projects/{project}/locations/{location}/instances/{instance}` | Get instance |
+| `PATCH` | `/v1/projects/{project}/locations/{location}/instances/{instance}` | Update instance |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/instances/{instance}` | Delete instance |
+| `GET` | `/v1/projects/{project}/locations/{location}/instances/{instance}/certificateAuthority` | Get certificate authority |
+| `POST` | `/v1/projects/{project}/locations/{location}/instances/{instance}:backup` | Backup instance |
+| `POST` | `/v1/projects/{project}/locations/{location}/instances/{instance}:startMigration` | Start migration |
+| `POST` | `/v1/projects/{project}/locations/{location}/instances/{instance}:finishMigration` | Finish migration |
+| `POST` | `/v1/projects/{project}/locations/{location}/instances/{instance}:rescheduleMaintenance` | Reschedule maintenance |
+| `POST` | `/v1/projects/{project}/locations/{location}/instances/{instance}:addTokenAuthUser` | Add token auth user |
+
+**Token auth**
+
+> These endpoints manage metadata only. Tokens are stored but not enforced on
+> the Valkey connection today — the data plane is unauthenticated regardless of
+> tokens created or an instance's `authorizationMode`. See ADR-007.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/locations/{location}/instances/{instance}/tokenAuthUsers` | List token auth users |
+| `GET` | `/v1/projects/{project}/locations/{location}/instances/{instance}/tokenAuthUsers/{tokenAuthUser}` | Get token auth user |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/instances/{instance}/tokenAuthUsers/{tokenAuthUser}` | Delete token auth user |
+| `POST` | `/v1/projects/{project}/locations/{location}/instances/{instance}/tokenAuthUsers/{tokenAuthUser}:addAuthToken` | Add auth token |
+| `GET` | `/v1/projects/{project}/locations/{location}/instances/{instance}/tokenAuthUsers/{tokenAuthUser}/authTokens` | List auth tokens |
+| `GET` | `/v1/projects/{project}/locations/{location}/instances/{instance}/tokenAuthUsers/{tokenAuthUser}/authTokens/{authToken}` | Get auth token |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/instances/{instance}/tokenAuthUsers/{tokenAuthUser}/authTokens/{authToken}` | Delete auth token |
+
+**Backups**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/locations/{location}/backupCollections` | List backup collections |
+| `GET` | `/v1/projects/{project}/locations/{location}/backupCollections/{backupCollection}` | Get backup collection |
+| `GET` | `/v1/projects/{project}/locations/{location}/backupCollections/{backupCollection}/backups` | List backups |
+| `GET` | `/v1/projects/{project}/locations/{location}/backupCollections/{backupCollection}/backups/{backup}` | Get backup |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/backupCollections/{backupCollection}/backups/{backup}` | Delete backup |
+| `POST` | `/v1/projects/{project}/locations/{location}/backupCollections/{backupCollection}/backups/{backup}:export` | Export backup |
+
+**ACL policies**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/locations/{location}/aclPolicies` | Create ACL policy |
+| `GET` | `/v1/projects/{project}/locations/{location}/aclPolicies` | List ACL policies |
+| `GET` | `/v1/projects/{project}/locations/{location}/aclPolicies/{aclPolicy}` | Get ACL policy |
+| `PATCH` | `/v1/projects/{project}/locations/{location}/aclPolicies/{aclPolicy}` | Update ACL policy |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/aclPolicies/{aclPolicy}` | Delete ACL policy |
+| `GET` | `/v1/projects/{project}/locations/{location}/aclPolicies/{aclPolicy}/revisions` | List ACL policy revisions |
+| `GET` | `/v1/projects/{project}/locations/{location}/aclPolicies/{aclPolicy}/revisions/{revision}` | Get ACL policy revision |
+
+**Operations**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/locations/{location}/operations` | List operations |
+| `GET` | `/v1/projects/{project}/locations/{location}/operations/{operation}` | Get operation |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/operations/{operation}` | Delete operation |
+| `POST` | `/v1/projects/{project}/locations/{location}/operations/{operation}:cancel` | Cancel operation |
+
+**Locations**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/locations` | List locations |
+| `GET` | `/v1/projects/{project}/locations/{location}` | Get location |
+| `GET` | `/v1/projects/{project}/locations/{location}/sharedRegionalCertificateAuthority` | Get shared regional certificate authority |
 
 ## Storage
 

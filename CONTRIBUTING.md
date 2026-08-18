@@ -311,7 +311,40 @@ bun run lint                  # tsc + biome + knip — must be clean
 bun run lint:fix              # auto-fix what Biome can
 bun run format                # format everything
 bun run build                 # production build
+bun run setup:valkey          # install valkey-server (see below)
 ```
+
+### Valkey, for the Memorystore data-plane tests
+
+Memorystore spawns a real `valkey-server`, and the suites that exercise it **skip themselves**
+when that binary is missing — so without it you get a green run that silently covered less than
+you think. CI installs it explicitly, and [`test-utils/valkey.ts`](test-utils/valkey.ts) turns a
+missing binary into a hard error whenever `CI` is set, so the gap cannot reopen there.
+
+`bun install` tries to sort this out for you. Valkey publishes no prebuilt binaries — every
+release is source-only — so installing means going through a system package manager, and on
+Linux that needs root. The `postinstall` hook therefore installs **only when it can do so
+without prompting** (Homebrew on macOS, or an already-root shell); anywhere else it prints the
+exact command and exits successfully. It never fails `bun install`.
+
+To install it yourself at any point:
+
+```sh
+bun run setup:valkey          # picks the right package manager, may use sudo on Linux
+```
+
+Set `KINGLET_SKIP_VALKEY_SETUP=1` to opt out of the hook entirely. Valkey has no native Windows
+build — use WSL, or run kinglet via Docker (the image ships `valkey-server`).
+
+> **macOS: valkey conflicts with redis.** Homebrew's valkey formula declares
+> `conflicts_with "redis"` because both install the `redis-*` binaries. If redis holds those
+> names, `brew install valkey` unpacks the keg and then *fails to link it* — so `valkey-server`
+> never reaches your `PATH` and the tests keep skipping even though the install looked fine.
+> The setup script detects this, runs `brew unlink redis`, and tells you it did. redis stays
+> installed and `brew link redis` puts it back (which unlinks valkey again); in the meantime
+> valkey's own keg provides `redis-server` and `redis-cli`, so those commands keep working.
+> If the valkey install then fails anyway, the script relinks redis itself rather than leaving
+> you with neither on your `PATH`.
 
 > **On coverage:** `bunfig.toml` deliberately sets no `coverageThreshold`, because Bun applies
 > that value *per file* rather than to the aggregate — at any meaningful setting it fails on
