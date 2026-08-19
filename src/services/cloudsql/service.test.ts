@@ -223,4 +223,147 @@ describe('SqlAdminService', () => {
       expect(filtered.items[0]?.targetId).toBe('db-a');
     });
   });
+
+  describe('createInstance fix', () => {
+    test('strips kind and settingsVersion from initial settings', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { kind: 'sql#settings', settingsVersion: 999, tier: 'db-custom-1-3840' },
+      });
+
+      const instance = await service.getInstance('p1', 'db-a');
+
+      expect(instance.settings.settingsVersion).toBe(1);
+      expect(instance.settings.tier).toBe('db-custom-1-3840');
+    });
+  });
+
+  describe('databases', () => {
+    beforeEach(async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+    });
+
+    test('createDatabase returns CREATE_DATABASE op and record is listable', async () => {
+      const op = await service.createDatabase('p1', 'db-a', { name: 'appdb' });
+
+      expect(op.operationType).toBe('CREATE_DATABASE');
+      expect(op.status).toBe('DONE');
+
+      const list = await service.listDatabases('p1', 'db-a');
+
+      expect(list.items.map(d => d.name)).toEqual(['appdb', 'postgres']);
+      expect(Object.keys(list)).not.toContain('nextPageToken');
+    });
+
+    test('createDatabase on a missing instance throws NOT_FOUND', async () => {
+      const promise = service.createDatabase('p1', 'nope', { name: 'appdb' });
+
+      await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
+    });
+
+    test('duplicate database throws ALREADY_EXISTS', async () => {
+      await service.createDatabase('p1', 'db-a', { name: 'appdb' });
+
+      const promise = service.createDatabase('p1', 'db-a', { name: 'appdb' });
+
+      await expect(promise).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
+    });
+
+    test('getDatabase returns the sql#database resource', async () => {
+      await service.createDatabase('p1', 'db-a', { name: 'appdb', charset: 'UTF8' });
+
+      const database = await service.getDatabase('p1', 'db-a', 'appdb');
+
+      expect(database.kind).toBe('sql#database');
+      expect(database.charset).toBe('UTF8');
+    });
+
+    test('updateDatabase changes collation and returns UPDATE_DATABASE op', async () => {
+      await service.createDatabase('p1', 'db-a', { name: 'appdb' });
+
+      const op = await service.updateDatabase('p1', 'db-a', 'appdb', { collation: 'C' });
+
+      expect(op.operationType).toBe('UPDATE_DATABASE');
+
+      const database = await service.getDatabase('p1', 'db-a', 'appdb');
+
+      expect(database.collation).toBe('C');
+    });
+
+    test('deleteDatabase removes the record and returns DELETE_DATABASE op', async () => {
+      await service.createDatabase('p1', 'db-a', { name: 'appdb' });
+
+      const op = await service.deleteDatabase('p1', 'db-a', 'appdb');
+
+      expect(op.operationType).toBe('DELETE_DATABASE');
+      await expect(service.getDatabase('p1', 'db-a', 'appdb')).rejects.toHaveProperty(
+        'code',
+        'NOT_FOUND'
+      );
+    });
+  });
+
+  describe('users', () => {
+    beforeEach(async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+    });
+
+    test('createUser returns CREATE_USER op and user appears without password', async () => {
+      const op = await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+
+      expect(op.operationType).toBe('CREATE_USER');
+
+      const list = await service.listUsers('p1', 'db-a');
+      const created = list.items.find(u => u.name === 'app');
+
+      expect(created?.kind).toBe('sql#user');
+      expect(JSON.stringify(list)).not.toContain('s3cret');
+    });
+
+    test('updateUser resolves the user from body.name when query name is absent', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app' });
+
+      const op = await service.updateUser('p1', 'db-a', undefined, undefined, {
+        name: 'app',
+        password: 'newpass',
+      });
+
+      expect(op.operationType).toBe('UPDATE_USER');
+    });
+
+    test('updateUser with neither query nor body name throws INVALID_ARGUMENT', async () => {
+      const promise = service.updateUser('p1', 'db-a', undefined, undefined, {
+        password: 'x',
+      });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+    });
+
+    test('deleteUser removes the user and returns DELETE_USER op', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app' });
+
+      const op = await service.deleteUser('p1', 'db-a', 'app');
+
+      expect(op.operationType).toBe('DELETE_USER');
+
+      const list = await service.listUsers('p1', 'db-a');
+
+      expect(list.items.find(u => u.name === 'app')).toBeUndefined();
+    });
+
+    test('deleteUser without a name throws INVALID_ARGUMENT', async () => {
+      await expect(service.deleteUser('p1', 'db-a', undefined)).rejects.toHaveProperty(
+        'code',
+        'INVALID_ARGUMENT'
+      );
+    });
+
+    test('getUser throws NOT_FOUND for a missing user', async () => {
+      await expect(service.getUser('p1', 'db-a', 'ghost')).rejects.toHaveProperty(
+        'code',
+        'NOT_FOUND'
+      );
+    });
+  });
 });
