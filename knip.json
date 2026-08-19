@@ -12,6 +12,7 @@
     "src/core/discovery/discovery-endpoints.ts": ["exports"],
     "src/core/discovery/service-registry.ts": ["exports"],
     "src/core/gateway/request-router.ts": ["exports"],
-    "src/core/gateway/service-dispatcher.ts": ["exports"]
+    "src/core/gateway/service-dispatcher.ts": ["exports"],
+    "src/services/cloudsql/types.ts": ["exports", "types"]
   }
 }
