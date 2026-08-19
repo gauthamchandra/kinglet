@@ -106,6 +106,28 @@ describe('CloudSqlRepository', () => {
     test('deleteInstance returns false for a missing instance', async () => {
       expect(await repo.deleteInstance('test-project', 'nope')).toBe(false);
     });
+
+    test('updateInstance updates and returns the modified record', async () => {
+      const created = await repo.createInstance(makeInstanceData());
+
+      const updated = await repo.updateInstance('test-project', 'my-instance', {
+        settingsVersion: 2,
+        settings: JSON.stringify({ backup: true }),
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated?.settingsVersion).toBe(2);
+      expect(updated?.settings).toBe(JSON.stringify({ backup: true }));
+      expect(updated?.id).toBe(created.id);
+    });
+
+    test('updateInstance returns null for a missing instance', async () => {
+      const updated = await repo.updateInstance('test-project', 'nope', {
+        settingsVersion: 2,
+      });
+
+      expect(updated).toBeNull();
+    });
   });
 
   describe('databases', () => {
@@ -121,6 +143,54 @@ describe('CloudSqlRepository', () => {
       await repo.createDatabase(data);
 
       await expect(repo.createDatabase(data)).rejects.toBeInstanceOf(Error);
+    });
+
+    test('updateDatabase updates and returns the modified record', async () => {
+      const created = await repo.createDatabase({
+        project: 'test-project',
+        instance: 'my-instance',
+        name: 'appdb',
+        charset: 'UTF8',
+        collation: 'en_US.UTF8',
+      });
+
+      const updated = await repo.updateDatabase('test-project', 'my-instance', 'appdb', {
+        collation: 'en_US.UTF16',
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated?.collation).toBe('en_US.UTF16');
+      expect(updated?.id).toBe(created.id);
+    });
+
+    test('updateDatabase returns null for a missing database', async () => {
+      const updated = await repo.updateDatabase('test-project', 'my-instance', 'nope', {
+        collation: 'en_US.UTF16',
+      });
+
+      expect(updated).toBeNull();
+    });
+
+    test('deleteDatabase returns true and removes the record', async () => {
+      await repo.createDatabase({
+        project: 'test-project',
+        instance: 'my-instance',
+        name: 'appdb',
+        charset: 'UTF8',
+        collation: 'en_US.UTF8',
+      });
+
+      const deleted = await repo.deleteDatabase('test-project', 'my-instance', 'appdb');
+
+      expect(deleted).toBe(true);
+      const found = await repo.getDatabase('test-project', 'my-instance', 'appdb');
+      expect(found).toBeNull();
+    });
+
+    test('deleteDatabase returns false for a missing database', async () => {
+      const deleted = await repo.deleteDatabase('test-project', 'my-instance', 'nope');
+
+      expect(deleted).toBe(false);
     });
   });
 
@@ -138,6 +208,117 @@ describe('CloudSqlRepository', () => {
       const found = await repo.getUser('test-project', 'my-instance', 'app-user');
 
       expect(found?.host).toBe('%');
+    });
+
+    test('updateUser updates and returns the modified record', async () => {
+      const created = await repo.createUser({
+        project: 'test-project',
+        instance: 'my-instance',
+        name: 'app-user',
+        host: '%',
+        type: 'BUILT_IN',
+        password: 'secret',
+      });
+
+      const updated = await repo.updateUser('test-project', 'my-instance', 'app-user', '%', {
+        password: 'newsecret',
+      });
+
+      expect(updated).not.toBeNull();
+      expect(updated?.password).toBe('newsecret');
+      expect(updated?.id).toBe(created.id);
+    });
+
+    test('updateUser returns null for a missing user', async () => {
+      const updated = await repo.updateUser('test-project', 'my-instance', 'nope', '%', {
+        password: 'newsecret',
+      });
+
+      expect(updated).toBeNull();
+    });
+
+    test('deleteUser returns true and removes the record', async () => {
+      await repo.createUser({
+        project: 'test-project',
+        instance: 'my-instance',
+        name: 'app-user',
+        host: '%',
+        type: 'BUILT_IN',
+        password: 'secret',
+      });
+
+      const deleted = await repo.deleteUser('test-project', 'my-instance', 'app-user', '%');
+
+      expect(deleted).toBe(true);
+      const found = await repo.getUser('test-project', 'my-instance', 'app-user', '%');
+      expect(found).toBeNull();
+    });
+
+    test('deleteUser returns false for a missing user', async () => {
+      const deleted = await repo.deleteUser('test-project', 'my-instance', 'nope', '%');
+
+      expect(deleted).toBe(false);
+    });
+
+    test('host-disambiguation: multiple users with same name but different hosts', async () => {
+      // Create two users with the same name but different hosts
+      await repo.createUser({
+        project: 'test-project',
+        instance: 'my-instance',
+        name: 'shared-user',
+        host: '%',
+        type: 'BUILT_IN',
+        password: 'pass1',
+      });
+
+      await repo.createUser({
+        project: 'test-project',
+        instance: 'my-instance',
+        name: 'shared-user',
+        host: '10.0.0.1',
+        type: 'BUILT_IN',
+        password: 'pass2',
+      });
+
+      // getUser with explicit host returns exactly that user
+      const found1 = await repo.getUser('test-project', 'my-instance', 'shared-user', '%');
+      expect(found1?.host).toBe('%');
+      expect(found1?.password).toBe('pass1');
+
+      const found2 = await repo.getUser('test-project', 'my-instance', 'shared-user', '10.0.0.1');
+      expect(found2?.host).toBe('10.0.0.1');
+      expect(found2?.password).toBe('pass2');
+
+      // updateUser with explicit host updates only that user
+      await repo.updateUser('test-project', 'my-instance', 'shared-user', '%', {
+        password: 'updated1',
+      });
+
+      const afterUpdate1 = await repo.getUser('test-project', 'my-instance', 'shared-user', '%');
+      expect(afterUpdate1?.password).toBe('updated1');
+
+      const afterUpdate2 = await repo.getUser(
+        'test-project',
+        'my-instance',
+        'shared-user',
+        '10.0.0.1'
+      );
+      expect(afterUpdate2?.password).toBe('pass2');
+
+      // deleteUser with explicit host deletes only that user
+      const deleted = await repo.deleteUser('test-project', 'my-instance', 'shared-user', '%');
+      expect(deleted).toBe(true);
+
+      const stillExists = await repo.getUser(
+        'test-project',
+        'my-instance',
+        'shared-user',
+        '10.0.0.1'
+      );
+      expect(stillExists?.host).toBe('10.0.0.1');
+
+      const doesNotExist = await repo.getUser('test-project', 'my-instance', 'shared-user', '%');
+      expect(doesNotExist).toBeNull();
     });
   });
 
@@ -164,6 +345,30 @@ describe('CloudSqlRepository', () => {
 
       expect(paged.operations).toHaveLength(2);
       expect(paged.nextPageToken).toBe('2');
+    });
+
+    test('getOperation round-trips: found and returns null for unknown', async () => {
+      const created = await repo.createOperation({
+        project: 'test-project',
+        name: 'op-test',
+        operationType: 'CREATE',
+        status: 'DONE',
+        targetId: 'my-instance',
+        insertTime: '2026-08-18T00:00:00.000Z',
+        startTime: '2026-08-18T00:00:00.000Z',
+        endTime: '2026-08-18T00:00:00.000Z',
+      });
+
+      const found = await repo.getOperation('test-project', 'op-test');
+
+      expect(found).not.toBeNull();
+      expect(found?.name).toBe('op-test');
+      expect(found?.operationType).toBe('CREATE');
+      expect(found?.id).toBe(created.id);
+
+      const notFound = await repo.getOperation('test-project', 'nonexistent');
+
+      expect(notFound).toBeNull();
     });
   });
 });
