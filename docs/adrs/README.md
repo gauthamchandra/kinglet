@@ -14,6 +14,8 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [005](005-pubsub-message-fanout-delivery.md) | Pub/Sub Message Fan-Out and Delivery | Accepted |
 | [006](006-open-source-licensing-and-governance.md) | Open-Source Licensing and Governance | Accepted |
 | [007](007-memorystore-valkey-data-plane.md) | Memorystore for Valkey Data Plane | Accepted |
+| [008](008-kms-crypto-emulation.md) | Cloud KMS Crypto Emulation | Accepted |
+| [009](009-shared-route-namespace.md) | Shared Route Namespace Across Services | Accepted |
 
 ## A note on the project's former name
 

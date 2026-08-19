@@ -22,6 +22,7 @@
     "scheduler": { "enabled": true },
     "tasks": { "enabled": true },
     "secrets": { "enabled": true },
+    "kms": { "enabled": true },
     "memorystore": { "enabled": true }
   },
   "logging": {

@@ -48,6 +48,13 @@
       "discoveryUrl": "https://workflows.googleapis.com/$discovery/rest?version=v1",
       "version": "v1",
       "implementationPath": "src/services/workflows/"
+    },
+    {
+      "name": "cloud-kms",
+      "displayName": "Cloud KMS",
+      "discoveryUrl": "https://cloudkms.googleapis.com/$discovery/rest?version=v1",
+      "version": "v1",
+      "implementationPath": "src/services/kms/"
     }
   ]
 }

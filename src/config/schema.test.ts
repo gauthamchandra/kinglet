@@ -25,6 +25,7 @@ describe('Configuration Schema', () => {
           secrets: {},
           storage: {},
           workflows: {},
+          kms: {},
         },
         logging: {},
       });
@@ -64,6 +65,7 @@ describe('Configuration Schema', () => {
           secrets: { enabled: false },
           storage: { enabled: true },
           workflows: { enabled: true },
+          kms: { enabled: true },
         },
         logging: {
           level: 'debug',
@@ -132,6 +134,7 @@ describe('Configuration Schema', () => {
           secrets: {},
           storage: {},
           workflows: {},
+          kms: {},
         },
         logging: {},
       });
@@ -154,6 +157,7 @@ describe('Configuration Schema', () => {
           secrets: {},
           storage: {},
           workflows: {},
+          kms: {},
           memorystore: {
             enabled: true,
             dataPlane: {
@@ -186,6 +190,7 @@ describe('Configuration Schema', () => {
             secrets: {},
             storage: {},
             workflows: {},
+            kms: {},
             memorystore: {
               enabled: true,
               dataPlane: {
@@ -336,6 +341,7 @@ describe('Configuration Schema', () => {
           secrets: { enabled: true },
           storage: { enabled: true },
           workflows: { enabled: true },
+          kms: { enabled: true },
         },
         logging: { level: 'debug' },
       };

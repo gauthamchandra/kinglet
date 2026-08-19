@@ -1,9 +1,9 @@
 /**
  * Unit tests for LocationHandlers
  *
- * Pure handler with no service collaborator (locations are a hardcoded GCP
- * list, see src/services/workflows/handlers.ts for the precedent), so these
- * tests exercise the real class end to end without any mock() boundary.
+ * Pure handler with no service collaborator, so these tests exercise the real
+ * class end to end without any mock() boundary. The generic locations.list/get
+ * pair lives in src/core/gateway/location-routes.ts and is tested there.
  */
 
 import { beforeEach, describe, expect, test } from 'bun:test';
@@ -48,52 +48,19 @@ describe('LocationHandlers', () => {
     handlers = new LocationHandlers(new Logger('test', 'error'));
   });
 
-  test('getRoutes_returnsAllThreeLocationRouteIds', () => {
-    const ids = handlers.getRoutes().map(r => r.id);
+  test('getRoutes_ownsOnlyTheMemorystoreSpecificLocationRoute', () => {
+    const routes = handlers.getRoutes();
 
-    expect(ids).toContain('memorystore.locations.list');
-    expect(ids).toContain('memorystore.locations.get');
-    expect(ids).toContain('memorystore.locations.getSharedRegionalCertificateAuthority');
-    expect(new Set(ids).size).toBe(ids.length);
+    expect(routes.map(r => r.id)).toEqual([
+      'memorystore.locations.getSharedRegionalCertificateAuthority',
+    ]);
   });
 
-  test('handleListLocations_returnsMultipleRealGcpLocationsScopedToTheRequestedProject', async () => {
-    const route = findRoute(handlers.getRoutes(), 'memorystore.locations.list');
+  test('getRoutes_leavesTheSharedLocationPathsToTheServiceNeutralHandler', () => {
+    const paths = handlers.getRoutes().map(r => r.path);
 
-    const response = await route.handler(makeRequest({ params: { project: 'p' } }), makeContext());
-
-    expect(response.status).toBe(200);
-    const body = response.body as { locations: Array<{ name: string; locationId: string }> };
-
-    expect(body.locations.length).toBeGreaterThan(1);
-    expect(body.locations.every(loc => loc.name.startsWith('projects/p/locations/'))).toBe(true);
-    expect(body.locations.some(loc => loc.locationId === 'us-central1')).toBe(true);
-  });
-
-  test('handleGetLocation_givenKnownLocationId_returnsItsResourceName', async () => {
-    const route = findRoute(handlers.getRoutes(), 'memorystore.locations.get');
-
-    const response = await route.handler(
-      makeRequest({ params: { project: 'p', location: 'us-central1' } }),
-      makeContext()
-    );
-
-    expect(response.status).toBe(200);
-    const body = response.body as { name: string; locationId: string };
-
-    expect(body.name).toBe('projects/p/locations/us-central1');
-    expect(body.locationId).toBe('us-central1');
-  });
-
-  test('handleGetLocation_givenUnknownLocationId_returns404', async () => {
-    const route = findRoute(handlers.getRoutes(), 'memorystore.locations.get');
-
-    const response = await route.handler(
-      makeRequest({ params: { project: 'p', location: 'not-a-real-location' } }),
-      makeContext()
-    );
-
-    expect(response.status).toBe(404);
+    expect(paths).not.toContain('/v1/projects/:project/locations');
+    expect(paths).not.toContain('/v1/projects/:project/locations/:location');
   });
 
   test('handleGetSharedRegionalCertificateAuthority_returnsAResourceNamedAfterTheRequestedLocation', async () => {

@@ -38,6 +38,7 @@ const ServicesConfigSchema = z.object({
   secrets: z.object({ enabled: z.boolean().default(true) }),
   storage: z.object({ enabled: z.boolean().default(true) }),
   workflows: z.object({ enabled: z.boolean().default(true) }),
+  kms: z.object({ enabled: z.boolean().default(true) }),
   memorystore: z
     .object({
       enabled: z.boolean().default(true),
@@ -139,6 +140,10 @@ export const EnvConfigSchema = z.object({
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
+  ENABLE_KMS: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
   ENABLE_MEMORYSTORE: z
     .string()
     .transform(val => val.toLowerCase() === 'true')
@@ -229,6 +234,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.ENABLE_SECRETS !== undefined ||
     env.ENABLE_STORAGE !== undefined ||
     env.ENABLE_WORKFLOWS !== undefined ||
+    env.ENABLE_KMS !== undefined ||
     env.ENABLE_MEMORYSTORE !== undefined ||
     env.MEMORYSTORE_DATA_PLANE !== undefined ||
     env.MEMORYSTORE_VALKEY_BINARY !== undefined ||
@@ -248,6 +254,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       config.services.secrets = { enabled: enabledServices.includes('secrets') };
       config.services.storage = { enabled: enabledServices.includes('storage') };
       config.services.workflows = { enabled: enabledServices.includes('workflows') };
+      config.services.kms = { enabled: enabledServices.includes('kms') };
       config.services.memorystore = { enabled: enabledServices.includes('memorystore') };
     }
 
@@ -276,6 +283,11 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.ENABLE_WORKFLOWS !== undefined) {
       if (!config.services.workflows) config.services.workflows = {};
       config.services.workflows.enabled = env.ENABLE_WORKFLOWS;
+    }
+
+    if (env.ENABLE_KMS !== undefined) {
+      if (!config.services.kms) config.services.kms = {};
+      config.services.kms.enabled = env.ENABLE_KMS;
     }
 
     if (env.ENABLE_MEMORYSTORE !== undefined) {
