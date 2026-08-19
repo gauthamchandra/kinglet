@@ -12,6 +12,7 @@ import {
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
@@ -30,6 +31,7 @@ let cloudStorageService: CloudStorageService | null = null;
 let pubsubService: PubSubService | null = null;
 let workflowsService: CloudWorkflowsService | null = null;
 let memorystoreService: MemorystoreService | null = null;
+let alloydbService: AlloyDbService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -134,12 +136,19 @@ async function main(): Promise<void> {
       logger.info('Memorystore for Valkey service enabled and started');
     }
 
-    // Workflows and Memorystore both expose `/operations` routes of the same
-    // shape; RequestRouter can only pick one winner per path (see
+    if (config.services.alloydb.enabled) {
+      alloydbService = new AlloyDbService(storageManager, new Logger('AlloyDB'));
+      await alloydbService.initialize();
+
+      logger.info('AlloyDB service enabled');
+    }
+
+    // Workflows, Memorystore and AlloyDB each expose `/operations` routes of the
+    // same shape; RequestRouter can only pick one winner per path (see
     // docs/adrs/007-memorystore-valkey-data-plane.md). Registering a composed
     // route set first lets it win that tie-break, so an LRO is retrievable
     // regardless of which service created it, instead of one service's
-    // operations silently shadowing the other's.
+    // operations silently shadowing the others'.
     const composableOperationsStores: ComposableOperationsStore[] = [];
 
     if (memorystoreService) {
@@ -148,6 +157,10 @@ async function main(): Promise<void> {
 
     if (workflowsService) {
       composableOperationsStores.push(workflowsService.getComposableOperationsStore());
+    }
+
+    if (alloydbService) {
+      composableOperationsStores.push(alloydbService.getComposableOperationsStore());
     }
 
     if (composableOperationsStores.length > 1) {
@@ -167,6 +180,12 @@ async function main(): Promise<void> {
 
     if (memorystoreService) {
       for (const route of memorystoreService.getRoutes()) {
+        router.addRoute(route);
+      }
+    }
+
+    if (alloydbService) {
+      for (const route of alloydbService.getRoutes()) {
         router.addRoute(route);
       }
     }

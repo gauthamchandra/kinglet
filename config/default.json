@@ -18,6 +18,7 @@
     }
   },
   "services": {
+    "alloydb": { "enabled": true },
     "pubsub": { "enabled": true },
     "scheduler": { "enabled": true },
     "tasks": { "enabled": true },

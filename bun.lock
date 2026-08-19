@@ -16,6 +16,7 @@
         "@biomejs/biome": "^2.4.6",
         "@commitlint/cli": "^20.0.0",
         "@commitlint/config-conventional": "^20.0.0",
+        "@google-cloud/alloydb": "3.0.0",
         "@google-cloud/memorystore": "0.9.0",
         "@google-cloud/pubsub": "^5.3.0",
         "@google-cloud/scheduler": "^5.3.1",
@@ -96,6 +97,8 @@
     "@emnapi/runtime": ["@emnapi/runtime@1.8.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-mehfKSMWjjNol8659Z8KxEMrdSJDDot5SXMq00dM8BN4o+CLNXQ0xH2V7EchNHV4RmbZLmmPdEaXZc5H2FXmDg=="],
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.1.0", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-WI0DdZ8xFSbgMjR1sFsKABJ/C5OnRrjT06JXbZKexJGrDuPTzZdDYfFlsgcCXCyf+suG5QU2e/y1Wo2V/OapLQ=="],
+
+    "@google-cloud/alloydb": ["@google-cloud/alloydb@3.0.0", "", { "dependencies": { "google-gax": "^6.0.0" } }, "sha512-Q0g7t14OJQ245sMMOFWJfgYWB/jCeTQqRkLE4Pu5vXBs43WjYVOSe3nqJjPdv9zv8qCw0VxnpKNQEabSKoed1w=="],
 
     "@google-cloud/memorystore": ["@google-cloud/memorystore@0.9.0", "", { "dependencies": { "google-gax": "^6.0.0" } }, "sha512-bCwGhFYasjGAxqD+BsZTHgxNCmAZX4IX0B07DBCoiTsOBRyl3WzrejZHiFm6Dqyq5maSAD1dDJ5R22FY9+0BOQ=="],
 

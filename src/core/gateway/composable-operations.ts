@@ -39,6 +39,11 @@ export interface ComposableOperationsStore {
     pageToken?: string
   ): Promise<ComposableOperationsListResult>;
   deleteOperation(name: string): Promise<boolean>;
+  /**
+   * Optional: a service whose API publishes no `operations.cancel` (Cloud
+   * Workflows) omits this, and the composed cancel route skips it.
+   */
+  cancelOperation?(name: string): Promise<boolean>;
 }
 
 function buildOperationName(req: RouteRequest): string {
@@ -107,6 +112,25 @@ export function buildComposedOperationsRoutes(
           const operation = await store.getOperation(name);
 
           if (operation) return responseUtils.success(operation);
+        }
+
+        return responseUtils.notFound('Operation', name);
+      },
+    },
+    {
+      // Composed for the same reason as get/delete, and load-bearing in a subtler
+      // way: cancel paths differ only by parameter *name* between services
+      // (`:operation` vs `:operationId`), so the router's length tie-break made
+      // the service with the longer parameter name win every cancel regardless of
+      // which one owned the operation.
+      id: 'composedOperations.cancel',
+      method: 'POST',
+      path: '/v1/projects/:project/locations/:location/operations/:operationId:cancel',
+      handler: async req => {
+        const name = buildOperationName(req);
+
+        for (const store of stores) {
+          if (await store.cancelOperation?.(name)) return responseUtils.success({});
         }
 
         return responseUtils.notFound('Operation', name);

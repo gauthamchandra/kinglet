@@ -163,6 +163,7 @@ export class MemorystoreService {
           nextPageToken?: string;
         }>,
       deleteOperation: name => store.deleteOperation(name),
+      cancelOperation: name => store.cancelOperation(name),
     };
   }
 

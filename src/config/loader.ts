@@ -127,6 +127,7 @@ export class ConfigLoader {
         storage: {},
         workflows: {},
         memorystore: {},
+        alloydb: {},
         ...mergedConfig.services,
       },
     };
@@ -259,6 +260,7 @@ export async function loadConfigFromEnv(
       storage: {},
       workflows: {},
       memorystore: {},
+      alloydb: {},
       ...partialConfig.services,
     },
   };
