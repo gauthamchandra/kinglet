@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.0](https://github.com/gauthamchandra/kinglet/compare/v2.0.0...v2.1.0) (2026-08-19)
+
+
+### Features
+
+* **kms:** add Cloud KMS service emulation ([#36](https://github.com/gauthamchandra/kinglet/issues/36)) ([d592d12](https://github.com/gauthamchandra/kinglet/commit/d592d12b19d0f895a0aec3bdd3b0a158a8702ed6))
+* **memorystore:** Add Memorystore for Valkey emulation ([#39](https://github.com/gauthamchandra/kinglet/issues/39)) ([28e5d28](https://github.com/gauthamchandra/kinglet/commit/28e5d28bb196370045a844d157ebb57219280d58))
+
 ## [2.0.0](https://github.com/gauthamchandra/localstack-gcp/compare/v1.5.0...v2.0.0) (2026-08-16)
 
 
