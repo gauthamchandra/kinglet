@@ -128,6 +128,7 @@ export class ConfigLoader {
         workflows: {},
         kms: {},
         memorystore: {},
+        cloudsql: {},
         ...mergedConfig.services,
       },
     };
@@ -261,6 +262,7 @@ export async function loadConfigFromEnv(
       workflows: {},
       kms: {},
       memorystore: {},
+      cloudsql: {},
       ...partialConfig.services,
     },
   };

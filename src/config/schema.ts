@@ -67,6 +67,7 @@ const ServicesConfigSchema = z.object({
         .prefault({}),
     })
     .prefault({}),
+  cloudsql: z.object({ enabled: z.boolean().default(true) }),
 });
 
 // Logging configuration schema
@@ -163,6 +164,10 @@ export const EnvConfigSchema = z.object({
     .transform(Number)
     .pipe(z.number().int().min(1).max(65535))
     .optional(),
+  ENABLE_CLOUDSQL: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
 
   // Logging configuration
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
@@ -239,7 +244,8 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.MEMORYSTORE_DATA_PLANE !== undefined ||
     env.MEMORYSTORE_VALKEY_BINARY !== undefined ||
     env.MEMORYSTORE_PORT_RANGE_START !== undefined ||
-    env.MEMORYSTORE_PORT_RANGE_END !== undefined;
+    env.MEMORYSTORE_PORT_RANGE_END !== undefined ||
+    env.ENABLE_CLOUDSQL !== undefined;
 
   if (hasServiceConfig) {
     config.services = {};
@@ -256,6 +262,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       config.services.workflows = { enabled: enabledServices.includes('workflows') };
       config.services.kms = { enabled: enabledServices.includes('kms') };
       config.services.memorystore = { enabled: enabledServices.includes('memorystore') };
+      config.services.cloudsql = { enabled: enabledServices.includes('cloudsql') };
     }
 
     // Map individual service enablement
@@ -319,6 +326,11 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       }
 
       config.services.memorystore.dataPlane = dataPlane;
+    }
+
+    if (env.ENABLE_CLOUDSQL !== undefined) {
+      if (!config.services.cloudsql) config.services.cloudsql = {};
+      config.services.cloudsql.enabled = env.ENABLE_CLOUDSQL;
     }
   }
 

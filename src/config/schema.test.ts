@@ -26,6 +26,7 @@ describe('Configuration Schema', () => {
           storage: {},
           workflows: {},
           kms: {},
+          cloudsql: {},
         },
         logging: {},
       });
@@ -66,6 +67,7 @@ describe('Configuration Schema', () => {
           storage: { enabled: true },
           workflows: { enabled: true },
           kms: { enabled: true },
+          cloudsql: { enabled: true },
         },
         logging: {
           level: 'debug',
@@ -135,6 +137,7 @@ describe('Configuration Schema', () => {
           storage: {},
           workflows: {},
           kms: {},
+          cloudsql: {},
         },
         logging: {},
       });
@@ -167,6 +170,7 @@ describe('Configuration Schema', () => {
               portRangeEnd: 8050,
             },
           },
+          cloudsql: {},
         },
         logging: {},
       });
@@ -199,6 +203,7 @@ describe('Configuration Schema', () => {
                 portRangeEnd: 8000,
               },
             },
+            cloudsql: {},
           },
           logging: {},
         });
@@ -342,6 +347,7 @@ describe('Configuration Schema', () => {
           storage: { enabled: true },
           workflows: { enabled: true },
           kms: { enabled: true },
+          cloudsql: { enabled: true },
         },
         logging: { level: 'debug' },
       };

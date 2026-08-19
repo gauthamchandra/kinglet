@@ -14,6 +14,7 @@ import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { CloudSqlService } from '@/services/cloudsql/index.ts';
 import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
@@ -34,6 +35,7 @@ let pubsubService: PubSubService | null = null;
 let workflowsService: CloudWorkflowsService | null = null;
 let memorystoreService: MemorystoreService | null = null;
 let kmsService: CloudKmsService | null = null;
+let cloudSqlService: CloudSqlService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -154,6 +156,18 @@ async function main(): Promise<void> {
 
       memorystoreService.start();
       logger.info('Memorystore for Valkey service enabled and started');
+    }
+
+    if (config.services.cloudsql.enabled) {
+      cloudSqlService = new CloudSqlService(storageManager, new Logger('CloudSQL'));
+      await cloudSqlService.initialize();
+
+      for (const route of cloudSqlService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      cloudSqlService.start();
+      logger.info('Cloud SQL service enabled and started');
     }
 
     // Workflows and Memorystore both expose `/operations` routes of the same shape
@@ -285,6 +299,11 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     if (kmsService) {
       await kmsService.stop();
       logger.info('KMS service stopped');
+    }
+
+    if (cloudSqlService) {
+      await cloudSqlService.stop();
+      logger.info('Cloud SQL service stopped');
     }
 
     if (storageManager) {
