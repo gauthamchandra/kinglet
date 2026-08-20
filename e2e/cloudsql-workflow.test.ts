@@ -99,14 +99,11 @@ describe('Cloud SQL e2e', () => {
     expect(instance.ipAddresses).toEqual([{ type: 'PRIMARY', ipAddress: '127.0.0.1' }]);
 
     // 4. databases CRUD
-    const dbCreateResp = await fetch(
-      url(`/v1/projects/${PROJECT}/instances/orders-db/databases`),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'analytics' }),
-      }
-    );
+    const dbCreateResp = await fetch(url(`/v1/projects/${PROJECT}/instances/orders-db/databases`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'analytics' }),
+    });
 
     expect(dbCreateResp.status).toBe(200);
 
@@ -143,9 +140,7 @@ describe('Cloud SQL e2e', () => {
     expect(userDeleteResp.status).toBe(200);
 
     // 6. operations.list filtered by instance
-    const opsResp = await fetch(
-      url(`/v1/projects/${PROJECT}/operations?instance=orders-db`)
-    );
+    const opsResp = await fetch(url(`/v1/projects/${PROJECT}/operations?instance=orders-db`));
     const opsList = (await opsResp.json()) as { kind: string; items: Array<{ status: string }> };
 
     expect(opsList.kind).toBe('sql#operationsList');

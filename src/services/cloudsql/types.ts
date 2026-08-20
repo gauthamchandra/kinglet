@@ -269,13 +269,6 @@ export const UpdateUserRequestSchema = z.object({
   password: z.string().optional(),
 });
 
-export type InsertInstanceRequest = z.infer<typeof InsertInstanceRequestSchema>;
-export type UpdateInstanceRequest = z.infer<typeof UpdateInstanceRequestSchema>;
-export type InsertDatabaseRequest = z.infer<typeof InsertDatabaseRequestSchema>;
-export type UpdateDatabaseRequest = z.infer<typeof UpdateDatabaseRequestSchema>;
-export type InsertUserRequest = z.infer<typeof InsertUserRequestSchema>;
-export type UpdateUserRequest = z.infer<typeof UpdateUserRequestSchema>;
-
 // ── Name Helpers ──
 
 export function buildConnectionName(project: string, region: string, name: string): string {
@@ -286,11 +279,11 @@ export function buildInstanceSelfLink(project: string, name: string): string {
   return `${SQLADMIN_BASE_URL}/projects/${project}/instances/${name}`;
 }
 
-export function buildOperationSelfLink(project: string, operationName: string): string {
+function buildOperationSelfLink(project: string, operationName: string): string {
   return `${SQLADMIN_BASE_URL}/projects/${project}/operations/${operationName}`;
 }
 
-export function buildDatabaseSelfLink(project: string, instance: string, name: string): string {
+function buildDatabaseSelfLink(project: string, instance: string, name: string): string {
   return `${SQLADMIN_BASE_URL}/projects/${project}/instances/${instance}/databases/${name}`;
 }
 
