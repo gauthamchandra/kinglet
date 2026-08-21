@@ -175,11 +175,13 @@ describe('Cloud SQL e2e', () => {
   });
 
   test('update without matching settingsVersion returns 409 FAILED_PRECONDITION', async () => {
-    await fetch(url(`/v1/projects/${PROJECT}/instances`), {
+    const createResp = await fetch(url(`/v1/projects/${PROJECT}/instances`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'conflict-db', databaseVersion: 'POSTGRES_16' }),
     });
+
+    expect(createResp.status).toBe(200);
 
     const resp = await fetch(url(`/v1/projects/${PROJECT}/instances/conflict-db`), {
       method: 'PUT',

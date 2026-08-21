@@ -143,6 +143,35 @@ describe('SqlAdminService', () => {
       expect(instance.settings.tier).toBe('db-custom-2-8192');
     });
 
+    test('update (PUT) replaces settings entirely, dropping keys omitted from the request', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { tier: 'db-custom-1-3840', availabilityType: 'ZONAL' },
+      });
+
+      const op = await service.updateInstance('p1', 'db-a', {
+        settings: { settingsVersion: 1, tier: 'db-custom-2-8192' },
+      });
+
+      expect(op.operationType).toBe('UPDATE');
+
+      const instance = await service.getInstance('p1', 'db-a');
+
+      expect(instance.settings.tier).toBe('db-custom-2-8192');
+      expect(instance.settings.availabilityType).toBeUndefined();
+      expect(instance.settings.settingsVersion).toBe(2);
+    });
+
+    test('update (PUT) without a settings object throws INVALID_ARGUMENT', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+
+      const promise = service.updateInstance('p1', 'db-a', {});
+
+      await expect(promise).rejects.toBeInstanceOf(SqlAdminError);
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+    });
+
     test('patch merges settings without requiring settingsVersion', async () => {
       await service.createInstance('p1', {
         name: 'db-a',
@@ -159,6 +188,21 @@ describe('SqlAdminService', () => {
       expect(instance.settings.tier).toBe('db-custom-1-3840');
       expect(instance.settings.availabilityType).toBe('ZONAL');
       expect(instance.settings.settingsVersion).toBe(2);
+    });
+
+    test('patch with a mismatched settingsVersion throws FAILED_PRECONDITION', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { tier: 'db-custom-1-3840' },
+      });
+
+      const promise = service.patchInstance('p1', 'db-a', {
+        settings: { settingsVersion: 99, availabilityType: 'ZONAL' },
+      });
+
+      await expect(promise).rejects.toBeInstanceOf(SqlAdminError);
+      await expect(promise).rejects.toHaveProperty('code', 'FAILED_PRECONDITION');
     });
   });
 
@@ -330,6 +374,27 @@ describe('SqlAdminService', () => {
       });
 
       expect(op.operationType).toBe('UPDATE_USER');
+    });
+
+    test('updateUser falls back to body.host when the query host is absent', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', host: '%', password: 'orig-1' });
+      await service.createUser('p1', 'db-a', {
+        name: 'app',
+        host: '10.0.0.1',
+        password: 'orig-2',
+      });
+
+      await service.updateUser('p1', 'db-a', undefined, undefined, {
+        name: 'app',
+        host: '10.0.0.1',
+        password: 'x',
+      });
+
+      const wildcardUser = await repo.getUser('p1', 'db-a', 'app', '%');
+      const scopedUser = await repo.getUser('p1', 'db-a', 'app', '10.0.0.1');
+
+      expect(scopedUser?.password).toBe('x');
+      expect(wildcardUser?.password).toBe('orig-1');
     });
 
     test('updateUser with neither query nor body name throws INVALID_ARGUMENT', async () => {

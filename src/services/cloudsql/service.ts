@@ -404,13 +404,17 @@ export class SqlAdminService {
       );
     }
 
-    const updates: Partial<{ password: string; host: string }> = {};
+    const updates: Partial<{ password: string }> = {};
 
     if (parsed.data.password !== undefined) {
       updates.password = parsed.data.password;
     }
 
-    const updated = await this.repo.updateUser(project, instance, targetName, host, updates);
+    // Real API behavior: the host query parameter is optional and falls back
+    // to the request body's host field.
+    const targetHost = host ?? parsed.data.host;
+
+    const updated = await this.repo.updateUser(project, instance, targetName, targetHost, updates);
 
     if (!updated) {
       throw new SqlAdminError(
@@ -479,6 +483,10 @@ export class SqlAdminService {
       );
     }
 
+    if (requireVersion && parsed.data.settings == null) {
+      throw new SqlAdminError('INVALID_ARGUMENT', 'settings is required for instances.update');
+    }
+
     const existing = await this.requireInstance(project, name);
     const incoming = parsed.data.settings ?? {};
     const { settingsVersion, kind, ...userSettings } = incoming as Record<string, unknown>;
@@ -496,11 +504,14 @@ export class SqlAdminService {
       }
     }
 
-    const currentSettings = JSON.parse(existing.settings) as Record<string, unknown>;
-    const merged = { ...currentSettings, ...userSettings };
+    // PUT (instances.update) replaces the settings object entirely; PATCH
+    // (instances.patch) merges the provided keys into the existing settings.
+    const nextSettings = requireVersion
+      ? userSettings
+      : { ...(JSON.parse(existing.settings) as Record<string, unknown>), ...userSettings };
 
     await this.repo.updateInstance(project, name, {
-      settings: JSON.stringify(merged),
+      settings: JSON.stringify(nextSettings),
       settingsVersion: existing.settingsVersion + 1,
     });
 

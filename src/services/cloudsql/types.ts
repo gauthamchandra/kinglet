@@ -26,7 +26,6 @@ const INSTANCE_NAME_PATTERN = /^[a-z](?:[-a-z0-9]{0,96}[a-z0-9])?$/;
 
 export const InstanceState = {
   RUNNABLE: 'RUNNABLE',
-  PENDING_CREATE: 'PENDING_CREATE',
 } as const;
 
 export const OperationType = {

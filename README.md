@@ -571,13 +571,21 @@ PostgreSQL is the only supported engine — `MYSQL_*` and `SQLSERVER_*`
 | `GET` | `/v1/projects/{project}/operations/{operation}` | Get operation |
 | `GET` | `/v1/projects/{project}/operations` | List operations |
 
+> `operations.list` supports filtering by instance via `?instance=`.
+
 > **Limitations:**
 >
 > - Control-plane emulation only — instances are records, not connectable
 >   databases (a PGlite-backed data plane is planned as a follow-up).
 > - PostgreSQL only — `MYSQL_*` / `SQLSERVER_*` `databaseVersion` values are
 >   rejected with 400 `INVALID_ARGUMENT`.
-> - `instances.list`'s `filter` parameter is accepted but ignored.
+> - Optional parameters accepted but silently ignored: `instances.list`'s
+>   `filter`; `instances.delete`'s `enableFinalBackup`, `finalBackupTtlDays`,
+>   `finalBackupExpiryTime`, `finalBackupDescription`; `instances.patch`'s
+>   `reconcilePscNetworking`, `reconcilePscNetworkingForce`; `users.update`'s
+>   `databaseRoles`, `serverRoles`, `revokeExistingRoles`,
+>   `revokeExistingServerRoles`; and `operations.get`'s / `operations.list`'s
+>   `location`.
 > - Operations complete synchronously (`status: "DONE"` immediately on
 >   return) but remain pollable via `operations.get` for API compatibility.
 >
