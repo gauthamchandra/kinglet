@@ -98,7 +98,7 @@ describe('LRUCache', () => {
       smallCache.destroy();
     });
 
-    test('should update existing keys without eviction', async () => {
+    test('should update existing keys without eviction and treat the update as a recent use', async () => {
       // Create a cache with smaller size for this test
       const smallCache = new LRUCache({
         maxSize: 3,
@@ -108,12 +108,17 @@ describe('LRUCache', () => {
       await smallCache.set('key1', 'value1');
       await smallCache.set('key2', 'value2');
       await smallCache.set('key3', 'value3');
-      expect(smallCache.size()).toBe(3);
 
       // Update existing key
       await smallCache.set('key1', 'updated-value1');
       expect(smallCache.size()).toBe(3);
+
+      await smallCache.set('key4', 'value4');
+
       expect(await smallCache.get<string>('key1')).toBe('updated-value1');
+      expect(await smallCache.get('key2')).toBeNull();
+      expect(await smallCache.get<string>('key3')).toBe('value3');
+      expect(await smallCache.get<string>('key4')).toBe('value4');
 
       smallCache.destroy();
     });

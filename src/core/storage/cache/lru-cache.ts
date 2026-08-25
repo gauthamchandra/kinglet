@@ -13,8 +13,6 @@ import type { CacheOperations, CacheStats } from '../types';
 interface CacheEntry<T> {
   value: T;
   expiresAt?: number;
-  prev?: string;
-  next?: string;
 }
 
 /**
@@ -29,11 +27,14 @@ export interface LRUCacheConfig {
 
 /**
  * LRU Cache implementation with TTL support
+ *
+ * <p>Recency is tracked by the insertion order `Map` already guarantees rather than by a
+ * separate linked list, so the first key `entries.keys()` yields is always the least
+ * recently used one. Every write that counts as a use has to go through
+ * {@link LRUCache#markRecentlyUsed} to maintain that.
  */
 export class LRUCache implements CacheOperations {
   private entries = new Map<string, CacheEntry<unknown>>();
-  private head?: string; // Most recently used
-  private tail?: string; // Least recently used
   private stats = {
     hits: 0,
     misses: 0,
@@ -66,14 +67,12 @@ export class LRUCache implements CacheOperations {
     // Check TTL expiration
     if (entry.expiresAt && Date.now() > entry.expiresAt) {
       this.entries.delete(key);
-      this.removeFromList(key);
       this.stats.misses++;
 
       return null;
     }
 
-    // Move to head (mark as recently used)
-    this.moveToHead(key);
+    this.markRecentlyUsed(key, entry);
     this.stats.hits++;
 
     return entry.value;
@@ -95,7 +94,8 @@ export class LRUCache implements CacheOperations {
       } else {
         delete existingEntry.expiresAt;
       }
-      this.moveToHead(key);
+
+      this.markRecentlyUsed(key, existingEntry);
     } else {
       // Create new entry
       const entry: CacheEntry<T> = {
@@ -104,11 +104,10 @@ export class LRUCache implements CacheOperations {
       };
 
       this.entries.set(key, entry as CacheEntry<unknown>);
-      this.addToHead(key);
 
       // Check if we need to evict
       if (this.entries.size > this.config.maxSize) {
-        await this.evictLRU();
+        this.evictLRU();
       }
 
       // Check memory usage if configured
@@ -116,7 +115,7 @@ export class LRUCache implements CacheOperations {
         const memoryUsage = this.getMemoryUsage();
 
         if (memoryUsage > this.config.maxMemoryMb * 1024 * 1024) {
-          await this.evictByMemory();
+          this.evictByMemory();
         }
       }
     }
@@ -131,7 +130,6 @@ export class LRUCache implements CacheOperations {
       return false;
     }
 
-    this.removeFromList(key);
     this.entries.delete(key);
     this.stats.deletes++;
 
@@ -148,7 +146,6 @@ export class LRUCache implements CacheOperations {
     // Check TTL expiration
     if (entry.expiresAt && Date.now() > entry.expiresAt) {
       this.entries.delete(key);
-      this.removeFromList(key);
 
       return false;
     }
@@ -158,8 +155,6 @@ export class LRUCache implements CacheOperations {
 
   async clear(): Promise<void> {
     this.entries.clear();
-    delete this.head;
-    delete this.tail;
     this.stats.sets = 0;
     this.stats.hits = 0;
     this.stats.misses = 0;
@@ -195,7 +190,6 @@ export class LRUCache implements CacheOperations {
 
     for (const key of expiredKeys) {
       this.entries.delete(key);
-      this.removeFromList(key);
     }
   }
 
@@ -208,121 +202,44 @@ export class LRUCache implements CacheOperations {
       delete this.cleanupTimer;
     }
     this.entries.clear();
-    delete this.head;
-    delete this.tail;
   }
 
   /**
-   * Move entry to head of LRU list
+   * Move an entry to the most-recently-used position.
+   *
+   * <p>Deleting before re-inserting is what does the work: `Map` appends a key only when it
+   * is genuinely new, so a plain `set` on a key already present would leave it where it is
+   * and the next eviction would take the wrong entry.
    */
-  private moveToHead(key: string): void {
-    if (this.head === key) {
-      return; // Already at head
-    }
+  private markRecentlyUsed(key: string, entry: CacheEntry<unknown>): void {
+    this.entries.delete(key);
 
-    // Remove from current position
-    this.removeFromList(key);
-
-    // Add to head
-    this.addToHead(key);
-  }
-
-  /**
-   * Add entry to head of LRU list
-   */
-  private addToHead(key: string): void {
-    const entry = this.entries.get(key);
-
-    if (!entry) return;
-
-    if (this.head !== undefined) {
-      entry.next = this.head;
-    }
-    delete entry.prev;
-
-    if (this.head) {
-      const headEntry = this.entries.get(this.head);
-
-      if (headEntry) {
-        headEntry.prev = key;
-      }
-    }
-
-    this.head = key;
-
-    if (!this.tail) {
-      this.tail = key;
-    }
-  }
-
-  /**
-   * Remove entry from LRU list
-   */
-  private removeFromList(key: string): void {
-    const entry = this.entries.get(key);
-
-    if (!entry) return;
-
-    if (entry.prev) {
-      const prevEntry = this.entries.get(entry.prev);
-
-      if (prevEntry) {
-        if (entry.next !== undefined) {
-          prevEntry.next = entry.next;
-        } else {
-          delete prevEntry.next;
-        }
-      }
-    } else if (entry.next) {
-      this.head = entry.next;
-    } else {
-      delete this.head;
-    }
-
-    if (entry.next) {
-      const nextEntry = this.entries.get(entry.next);
-
-      if (nextEntry) {
-        if (entry.prev !== undefined) {
-          nextEntry.prev = entry.prev;
-        } else {
-          delete nextEntry.prev;
-        }
-      }
-    } else if (entry.prev) {
-      this.tail = entry.prev;
-    } else {
-      delete this.tail;
-    }
-
-    delete entry.prev;
-    delete entry.next;
+    this.entries.set(key, entry);
   }
 
   /**
    * Evict least recently used entry
    */
-  private async evictLRU(): Promise<void> {
-    if (!this.tail) return;
+  private evictLRU(): void {
+    const leastRecentlyUsedKey = this.entries.keys().next().value;
 
-    const tailKey = this.tail;
+    if (leastRecentlyUsedKey === undefined) return;
 
-    this.removeFromList(tailKey);
-    this.entries.delete(tailKey);
+    this.entries.delete(leastRecentlyUsedKey);
     this.stats.evictions++;
   }
 
   /**
    * Evict entries to free memory
    */
-  private async evictByMemory(): Promise<void> {
+  private evictByMemory(): void {
     if (this.config.maxMemoryMb === undefined) {
       throw new Error('maxMemoryMb should be defined for memory eviction');
     }
     const maxMemoryBytes = this.config.maxMemoryMb * 1024 * 1024;
 
-    while (this.getMemoryUsage() > maxMemoryBytes && this.tail) {
-      await this.evictLRU();
+    while (this.getMemoryUsage() > maxMemoryBytes && this.entries.size > 0) {
+      this.evictLRU();
     }
   }
 
