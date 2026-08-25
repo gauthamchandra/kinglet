@@ -9,7 +9,6 @@
   "ignoreIssues": {
     "src/core/gateway/proto-types.ts": ["types"],
     "src/shared/types/index.ts": ["types"],
-    "src/core/storage/interfaces.ts": ["types"],
     "src/core/discovery/discovery-endpoints.ts": ["exports"],
     "src/core/discovery/service-registry.ts": ["exports"],
     "src/core/gateway/request-router.ts": ["exports"],
