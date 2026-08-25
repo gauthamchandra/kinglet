@@ -78,6 +78,20 @@ describe('CloudSqlRepository', () => {
       expect(page2.instances[0]?.name).not.toBe(page1.instances[0]?.name);
     });
 
+    test('listInstances resets to the first page for a malformed or negative token', async () => {
+      for (let i = 0; i < 3; i++) {
+        await repo.createInstance(makeInstanceData({ name: `inst-${i}` }));
+      }
+
+      const firstPage = await repo.listInstances('test-project', 2);
+
+      for (const token of ['not-a-number', '-5']) {
+        const page = await repo.listInstances('test-project', 2, token);
+
+        expect(page.instances.map(i => i.name)).toEqual(firstPage.instances.map(i => i.name));
+      }
+    });
+
     test('deleteInstance cascades database and user records', async () => {
       await repo.createInstance(makeInstanceData());
       await repo.createDatabase({

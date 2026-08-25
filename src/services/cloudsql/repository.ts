@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord, QueryCondition } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type {
   SqlDatabaseRecord,
   SqlInstanceRecord,
@@ -30,8 +31,6 @@ export interface ListOperationsResult {
   operations: SqlOperationRecord[];
   nextPageToken?: string | undefined;
 }
-
-const DEFAULT_PAGE_SIZE = 100;
 
 export class CloudSqlRepository {
   private storage: StorageManager;
@@ -79,8 +78,8 @@ export class CloudSqlRepository {
     maxResults?: number,
     pageToken?: string
   ): Promise<ListInstancesResult> {
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = maxResults ?? DEFAULT_PAGE_SIZE;
+    const offset = parseOffsetToken(pageToken);
+    const limit = maxResults ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<SqlInstanceRecord>(CLOUDSQL_INSTANCES_TABLE, {
       filter: { conditions: [{ field: 'project', operator: 'eq', value: project }] },
@@ -313,8 +312,8 @@ export class CloudSqlRepository {
     maxResults?: number,
     pageToken?: string
   ): Promise<ListOperationsResult> {
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = maxResults ?? DEFAULT_PAGE_SIZE;
+    const offset = parseOffsetToken(pageToken);
+    const limit = maxResults ?? DEFAULT_LIST_PAGE_SIZE;
 
     const conditions: QueryCondition[] = [{ field: 'project', operator: 'eq', value: project }];
 

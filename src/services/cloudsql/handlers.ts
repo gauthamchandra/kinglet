@@ -17,6 +17,7 @@ import type {
 } from '@/core/gateway/request-router.ts';
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { parsePageSize } from '@/shared/utils/pagination.ts';
 import type { SqlAdminService } from './service.ts';
 import { SqlAdminError } from './service.ts';
 
@@ -193,7 +194,7 @@ export class CloudSqlHandlers {
     try {
       const result = await this.service.listInstances(
         req.params.project ?? '',
-        this.parseMaxResults(req),
+        parsePageSize(this.queryString(req, 'maxResults')),
         this.queryString(req, 'pageToken')
       );
 
@@ -451,7 +452,7 @@ export class CloudSqlHandlers {
       const result = await this.service.listOperations(
         req.params.project ?? '',
         this.queryString(req, 'instance'),
-        this.parseMaxResults(req),
+        parsePageSize(this.queryString(req, 'maxResults')),
         this.queryString(req, 'pageToken')
       );
 
@@ -477,22 +478,6 @@ export class CloudSqlHandlers {
     }
 
     return undefined;
-  }
-
-  private parseMaxResults(req: RouteRequest): number | undefined {
-    const raw = this.queryString(req, 'maxResults');
-
-    if (raw == null) {
-      return undefined;
-    }
-
-    const parsed = parseInt(raw, 10);
-
-    if (Number.isNaN(parsed) || parsed <= 0) {
-      return undefined;
-    }
-
-    return parsed;
   }
 
   private handleError(err: unknown): RouteResponse {
