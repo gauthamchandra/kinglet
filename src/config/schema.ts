@@ -32,6 +32,11 @@ const AuthConfigSchema = z.object({
 
 // Services configuration schema
 const ServicesConfigSchema = z.object({
+  // `.prefault({})` rather than a bare object: every sibling here is a required
+  // key, kept satisfiable only by the per-service `{}` literals hardcoded in
+  // src/config/loader.ts. Defaulting the whole block means a partial
+  // config/local.json cannot turn into a startup Zod failure.
+  alloydb: z.object({ enabled: z.boolean().default(true) }).prefault({}),
   pubsub: z.object({ enabled: z.boolean().default(true) }),
   scheduler: z.object({ enabled: z.boolean().default(true) }),
   tasks: z.object({ enabled: z.boolean().default(true) }),
@@ -141,6 +146,10 @@ export const EnvConfigSchema = z.object({
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
+  ENABLE_ALLOYDB: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
   ENABLE_KMS: z
     .string()
     .transform(val => val.toLowerCase() === 'true')
@@ -239,6 +248,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.ENABLE_SECRETS !== undefined ||
     env.ENABLE_STORAGE !== undefined ||
     env.ENABLE_WORKFLOWS !== undefined ||
+    env.ENABLE_ALLOYDB !== undefined ||
     env.ENABLE_KMS !== undefined ||
     env.ENABLE_MEMORYSTORE !== undefined ||
     env.MEMORYSTORE_DATA_PLANE !== undefined ||
@@ -262,6 +272,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       config.services.workflows = { enabled: enabledServices.includes('workflows') };
       config.services.kms = { enabled: enabledServices.includes('kms') };
       config.services.memorystore = { enabled: enabledServices.includes('memorystore') };
+      config.services.alloydb = { enabled: enabledServices.includes('alloydb') };
       config.services.cloudsql = { enabled: enabledServices.includes('cloudsql') };
     }
 
@@ -290,6 +301,11 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.ENABLE_WORKFLOWS !== undefined) {
       if (!config.services.workflows) config.services.workflows = {};
       config.services.workflows.enabled = env.ENABLE_WORKFLOWS;
+    }
+
+    if (env.ENABLE_ALLOYDB !== undefined) {
+      if (!config.services.alloydb) config.services.alloydb = {};
+      config.services.alloydb.enabled = env.ENABLE_ALLOYDB;
     }
 
     if (env.ENABLE_KMS !== undefined) {

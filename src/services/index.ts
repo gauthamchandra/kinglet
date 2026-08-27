@@ -2,6 +2,7 @@
  * Service implementations exports
  */
 
+export * from './alloydb/index.ts';
 export * from './cloudsql/index.ts';
 export * from './kms/index.ts';
 export * from './pubsub/index.ts';

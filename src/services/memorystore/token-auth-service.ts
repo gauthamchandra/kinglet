@@ -14,8 +14,8 @@
  * see ADR-007 "Known Limitations".
  */
 
+import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { OperationsStore } from './operations.ts';
-import type { ResourceMutex } from './resource-mutex.ts';
 import type { TokenAuthRepository } from './token-auth-repository.ts';
 import {
   AddAuthTokenRequestSchema,

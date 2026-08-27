@@ -157,6 +157,7 @@ curl -X POST http://localhost:8765/v2/projects/test-project/locations/us-central
 | Cloud Workflows | Experimental | v1 | Workflow CRUD, revisions, LRO operations |
 | Cloud KMS | Implemented | v1 | Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decrypt, MAC, random bytes (IAM & importJobs deferred) |
 | Memorystore for Valkey | Experimental | v1 | Instance/ACL/backup/token-auth CRUD, real `valkey-server` data plane on by default (token-auth is metadata only — the data plane is unauthenticated) |
+| AlloyDB for PostgreSQL | Experimental | v1 | Cluster/instance/user CRUD and LRO operations — **control plane only**, nothing listens on a PostgreSQL port. See the endpoint list for what is not implemented |
 | Cloud SQL | Implemented | v1 | Admin API control plane only — instance/database/user/operation CRUD; no connectable data plane (instances are records, not real Postgres servers) |
 | Secret Manager | Planned | — | Not yet implemented — the config flag exists but the service is a stub |
 
@@ -187,6 +188,7 @@ All configuration is via environment variables. Defaults are shown below.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SERVICES` | — | Comma-separated list to enable (e.g., `scheduler,tasks`) |
+| `ENABLE_ALLOYDB` | `true` | Enable AlloyDB for PostgreSQL service |
 | `ENABLE_PUBSUB` | `true` | Enable Pub/Sub service |
 | `ENABLE_SCHEDULER` | `true` | Enable Cloud Scheduler service |
 | `ENABLE_TASKS` | `true` | Enable Cloud Tasks service |
@@ -518,6 +520,117 @@ automatically — see [ADR-007](docs/adrs/007-memorystore-valkey-data-plane.md).
 | `GET` | `/v1/projects/{project}/locations` | List locations |
 | `GET` | `/v1/projects/{project}/locations/{location}` | Get location |
 | `GET` | `/v1/projects/{project}/locations/{location}/sharedRegionalCertificateAuthority` | Get shared regional certificate authority |
+
+### AlloyDB for PostgreSQL (v1) — Experimental
+
+Emulates the **control plane only**: 23 of the API's 40 v1 methods. Specification:
+`https://alloydb.googleapis.com/$discovery/rest?version=v1`.
+
+> **IMPORTANT:** there is no data plane. No PostgreSQL server is started, so
+> `Instance.ipAddress` and `ConnectionInfo.ipAddress` always report `127.0.0.1` as a
+> placeholder to keep the response shape correct. You cannot connect a `psql` or `pg`
+> client to an emulated instance.
+
+Every cluster and instance mutation returns a `google.longrunning.Operation` that is
+already `done` — the emulator applies mutations synchronously, so a client that polls
+until `done` terminates on its first read. **User mutations are the exception:** per the
+discovery document they return the `User` resource directly (and `Empty` for delete),
+not an Operation.
+
+**Clusters**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/locations/{location}/clusters?clusterId={id}` | Create cluster (id is a **query** parameter; `initialUser` is required) |
+| `GET` | `/v1/projects/{project}/locations/{location}/clusters` | List clusters |
+| `GET` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}` | Get cluster |
+| `PATCH` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}` | Update cluster (`updateMask`, `allowMissing`) |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}` | Delete cluster (`force=true` to cascade to child instances) |
+
+**Instances**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/instances?instanceId={id}` | Create instance |
+| `GET` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/instances` | List instances |
+| `GET` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/instances/{instance}` | Get instance |
+| `PATCH` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/instances/{instance}` | Update instance |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/instances/{instance}` | Delete instance |
+| `GET` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/instances/{instance}/connectionInfo` | Get connection info |
+
+**Users** — synchronous; these return `User`, not an Operation
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/users?userId={id}` | Create user |
+| `GET` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/users` | List users |
+| `GET` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/users/{user}` | Get user |
+| `PATCH` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/users/{user}` | Update user |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/clusters/{cluster}/users/{user}` | Delete user (returns `{}`) |
+
+**Operations, locations and flags**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/locations/{location}/operations` | List operations |
+| `GET` | `/v1/projects/{project}/locations/{location}/operations/{operation}` | Get operation |
+| `DELETE` | `/v1/projects/{project}/locations/{location}/operations/{operation}` | Delete operation |
+| `POST` | `/v1/projects/{project}/locations/{location}/operations/{operation}:cancel` | Cancel operation |
+| `GET` | `/v1/projects/{project}/locations` | List locations |
+| `GET` | `/v1/projects/{project}/locations/{location}` | Get location |
+| `GET` | `/v1/projects/{project}/locations/{location}/supportedDatabaseFlags` | List supported database flags |
+
+#### Not implemented
+
+Absent rather than stubbed, so a call fails locally instead of appearing to work:
+
+- **Backups** — all of `backups.create`, `.get`, `.list`, `.patch`, `.delete`
+- **Cluster verbs** — `createsecondary`, `promote`, `switchover`, `restore`,
+  `restoreFromCloudSQL`, `export`, `import`, `upgrade`
+- **Instance verbs** — `createsecondary`, `failover`, `injectFault`, `restart`
+
+#### Accepted but ignored
+
+- `requestId` — no idempotency de-duplication; a retried request creates a second resource
+- `etag` — no optimistic concurrency checking
+- `filter` and `orderBy` on list methods — `pageSize`/`pageToken`/`nextPageToken` *are* honoured,
+  including on `locations.list` and `supportedDatabaseFlags.list`
+- `view` on `clusters.get` and `instances.get` — a `CLUSTER_VIEW_BASIC` request still receives the
+  full resource, so a test that passes here could mask a real under-fetch
+- `scope` on `supportedDatabaseFlags.list`, and `extraLocationTypes` / `returnPartialSuccess`
+  on `locations.list`
+- `Cluster.initialUser` — both `user` and `password` are required on create, as in real
+  AlloyDB; the username is retained, the password is validated then discarded (no data plane
+  to create a role in), and neither is ever returned
+
+#### Other known limitations
+
+- `supportedDatabaseFlags` returns a small representative subset; real AlloyDB returns hundreds.
+  The discovery document describes the shape but carries no flag data.
+- Locations are the same generic GCP region list the other services use, not AlloyDB's real
+  regional availability, which is not published in the discovery document.
+- Top-level enum fields are normalized whether sent as a name (`"PRIMARY"`) or as a proto wire
+  number (`1`, which is what the official client's REST fallback sends). Enums **nested inside
+  sub-messages** are round-tripped verbatim, so a numeric one is read back as a number.
+- `Cluster.databaseVersion` defaults to `POSTGRES_15` when unspecified; the discovery document
+  does not state the real default.
+- Listing instances or users under a cluster that does not exist returns `404 NOT_FOUND`. The
+  discovery document does not specify whether real AlloyDB 404s or returns an empty page.
+- Cluster creation requires networking in one of the three legitimate shapes —
+  `networkConfig.network`, the deprecated `network` field, or `pscConfig` for a PSC-only cluster.
+  `Cluster.network` is documented "Required… Deprecated, use network_config.network instead", so
+  requiring the deprecated field alone would reject valid modern requests, while accepting a
+  cluster with no networking at all would accept what production rejects.
+- `Instance.nodes` and `Instance.writableNode` are never populated — they describe real compute
+  VMs. A `readPoolConfig.nodeCount` is echoed back, but no corresponding `nodes` array appears.
+- Instance creation and any type-changing `PATCH` enforce AlloyDB's placement rules so a shape
+  production rejects fails locally too: a cluster may hold at most one `PRIMARY` and a `READ_POOL`
+  requires an existing primary (both `FAILED_PRECONDITION`), and a `SECONDARY` cannot be created
+  through the normal path (`INVALID_ARGUMENT`) since `instances.createsecondary` is not
+  implemented. Because a demotion of the sole primary would leave the cluster with none,
+  `instanceType` is in practice only reassignable to itself — matching real AlloyDB, where it is
+  fixed at creation. The discovery document describes the enum but not these preconditions, so the
+  error codes are inferred.
 
 ### Cloud SQL (v1)
 

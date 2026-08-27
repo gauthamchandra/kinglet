@@ -3,11 +3,11 @@
  */
 
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { BackupRepository } from './backup-repository.ts';
 import type { InstanceRepository } from './instance-repository.ts';
 import { InstanceService } from './instance-service.ts';
 import type { OperationsStore } from './operations.ts';
-import { ResourceMutex } from './resource-mutex.ts';
 import type { TokenAuthRepository } from './token-auth-repository.ts';
 import { MemoryStoreError } from './types.ts';
 import type { ValkeyProcessManager } from './valkey-process-manager.ts';

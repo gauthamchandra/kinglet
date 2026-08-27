@@ -3,8 +3,8 @@
  */
 
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { OperationsStore } from './operations.ts';
-import { ResourceMutex } from './resource-mutex.ts';
 import type { TokenAuthRepository } from './token-auth-repository.ts';
 import { TokenAuthService } from './token-auth-service.ts';
 import { MemoryStoreError } from './types.ts';

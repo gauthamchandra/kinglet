@@ -14,6 +14,7 @@ import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
 import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
@@ -34,6 +35,7 @@ let cloudStorageService: CloudStorageService | null = null;
 let pubsubService: PubSubService | null = null;
 let workflowsService: CloudWorkflowsService | null = null;
 let memorystoreService: MemorystoreService | null = null;
+let alloydbService: AlloyDbService | null = null;
 let kmsService: CloudKmsService | null = null;
 let cloudSqlService: CloudSqlService | null = null;
 
@@ -158,6 +160,13 @@ async function main(): Promise<void> {
       logger.info('Memorystore for Valkey service enabled and started');
     }
 
+    if (config.services.alloydb.enabled) {
+      alloydbService = new AlloyDbService(storageManager, new Logger('AlloyDB'));
+      await alloydbService.initialize();
+
+      logger.info('AlloyDB service enabled');
+    }
+
     if (config.services.cloudsql.enabled) {
       cloudSqlService = new CloudSqlService(storageManager, new Logger('CloudSQL'));
       await cloudSqlService.initialize();
@@ -170,9 +179,9 @@ async function main(): Promise<void> {
       logger.info('Cloud SQL service enabled and started');
     }
 
-    // Workflows and Memorystore both expose `/operations` routes of the same shape
-    // (see docs/adrs/007-memorystore-valkey-data-plane.md). A composed route set
-    // queries both stores, so an LRO is retrievable regardless of which service
+    // Workflows, Memorystore and AlloyDB all expose `/operations` routes of the same
+    // shape (see docs/adrs/007-memorystore-valkey-data-plane.md). A composed route set
+    // queries every store, so an LRO is retrievable regardless of which service
     // created it, and each service's own copy is then dropped below — one owner per
     // path, per docs/adrs/009-shared-route-namespace.md.
     const composableOperationsStores: ComposableOperationsStore[] = [];
@@ -183,6 +192,10 @@ async function main(): Promise<void> {
 
     if (workflowsService) {
       composableOperationsStores.push(workflowsService.getComposableOperationsStore());
+    }
+
+    if (alloydbService) {
+      composableOperationsStores.push(alloydbService.getComposableOperationsStore());
     }
 
     const composedOperationsRegistered = composableOperationsStores.length > 1;
@@ -214,6 +227,10 @@ async function main(): Promise<void> {
 
     if (memorystoreService) {
       registerServiceRoutes(memorystoreService.getRoutes());
+    }
+
+    if (alloydbService) {
+      registerServiceRoutes(alloydbService.getRoutes());
     }
 
     server = Bun.serve({

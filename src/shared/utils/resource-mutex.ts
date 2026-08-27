@@ -6,16 +6,14 @@
  * resource, decides something from what it read, and then writes — and a
  * concurrent mutation landing between the read and the write would invalidate
  * the decision. An instance create that persists its row and then mints a
- * completed Operation, and an instance delete that purges the instance's
- * children and then removes it, are both that shape.
+ * completed Operation, and a placement check that lists a cluster's instances
+ * before adding another, are both that shape.
  *
  * <p><b>IMPORTANT:</b> mutual exclusion only holds between callers sharing one
- * instance of this class. Memorystore's instance lifecycle spans two services
- * — {@link InstanceService} owns the instance and its token users, while
- * {@link TokenAuthService} owns the auth tokens beneath them — so both are
- * handed the same mutex by {@link MemorystoreService} and both key on the
- * instance's resource name. A second mutex, or a caller keying on the child's
- * name instead of the instance's, silently buys no exclusion at all.
+ * instance of this class, and only when they key on the same name. Callers that
+ * guard a cluster-wide invariant must key on the cluster's name, not the child
+ * resource's — a second mutex, or a caller keying on the wrong name, silently
+ * buys no exclusion at all.
  *
  * <p><b>NOTE:</b> operations must not nest. A locked operation that awaits
  * another operation on the same key deadlocks, since the inner call waits on a

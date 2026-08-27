@@ -9,13 +9,16 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
+import type { ComposableOperationsStore } from './composable-operations.ts';
 import {
   buildComposedOperationsRoutes,
   isComposedOperationsPath,
 } from './composable-operations.ts';
+import type { RouteDefinition, RouteResponse } from './request-router.ts';
 import { RequestRouter } from './request-router.ts';
 
 const PROJECT = 'p';
@@ -296,5 +299,247 @@ describe('composed operations routing (Memorystore + Workflows on one RequestRou
     const result = (await listResponse.json()) as { operations: Array<{ name: string }> };
 
     expect(result.operations.length).toBe(1);
+  });
+});
+
+describe('cancel composition across services', () => {
+  /**
+   * Regression: AlloyDB and Memorystore both register a structurally identical
+   * `.../operations/{id}:cancel`. `buildComposedOperationsRoutes` originally
+   * composed only list/get/delete, so cancel fell through to `RequestRouter`'s
+   * one-winner-per-path scoring — where the tie-break is raw path length, and
+   * AlloyDB's `:operationId` beat Memorystore's `:operation` by two characters.
+   * The result was a 404 when cancelling a Memorystore LRO that existed.
+   */
+  test('buildComposedOperationsRoutes_includesCancelSoNoServicesCancelIsShadowed', () => {
+    const routes = buildComposedOperationsRoutes([stubStore(), stubStore()], testLogger());
+
+    const cancelRoute = routes.find(route => route.id === 'composedOperations.cancel');
+
+    expect(cancelRoute?.method).toBe('POST');
+    expect(cancelRoute?.path).toBe(
+      '/v1/projects/:project/locations/:location/operations/:operationId:cancel'
+    );
+  });
+
+  test('composedCancel_cancelsThroughWhicheverStoreOwnsTheOperation', async () => {
+    const owning = stubStore({ 'projects/p/locations/l/operations/op-1': true });
+    const other = stubStore();
+    const routes = buildComposedOperationsRoutes([other, owning], testLogger());
+
+    const response = await invokeRoute(routes, 'composedOperations.cancel', 'op-1');
+
+    expect(response.status).toBe(200);
+    expect(owning.cancelled).toEqual(['projects/p/locations/l/operations/op-1']);
+  });
+
+  test('composedCancel_givenAnOperationNoStoreOwns_returns404', async () => {
+    const routes = buildComposedOperationsRoutes([stubStore(), stubStore()], testLogger());
+
+    const response = await invokeRoute(routes, 'composedOperations.cancel', 'missing');
+
+    expect(response.status).toBe(404);
+  });
+
+  /**
+   * Workflows' API has no `operations.cancel`, so its store omits the method. A
+   * store without it must be skipped rather than crashing the composed handler.
+   */
+  test('composedCancel_skipsAStoreThatDoesNotSupportCancelling', async () => {
+    const cancellable = stubStore({ 'projects/p/locations/l/operations/op-1': true });
+    const notCancellable = stubStore();
+
+    delete (notCancellable as { cancelOperation?: unknown }).cancelOperation;
+
+    const routes = buildComposedOperationsRoutes([notCancellable, cancellable], testLogger());
+    const response = await invokeRoute(routes, 'composedOperations.cancel', 'op-1');
+
+    expect(response.status).toBe(200);
+    expect(cancellable.cancelled).toEqual(['projects/p/locations/l/operations/op-1']);
+  });
+});
+
+interface StubStore extends ComposableOperationsStore {
+  cancelled: string[];
+}
+
+function stubStore(cancellable: Record<string, boolean> = {}): StubStore {
+  const cancelled: string[] = [];
+
+  return {
+    cancelled,
+    getOperation: async () => null,
+    listOperations: async () => ({ operations: [] }),
+    deleteOperation: async () => false,
+    cancelOperation: async (name: string) => {
+      if (cancellable[name] !== true) return false;
+
+      cancelled.push(name);
+
+      return true;
+    },
+  };
+}
+
+function testLogger() {
+  return new Logger('composed-operations-test', 'error');
+}
+
+async function invokeRoute(
+  routes: RouteDefinition[],
+  routeId: string,
+  operationId: string
+): Promise<RouteResponse> {
+  const route = routes.find(candidate => candidate.id === routeId);
+
+  if (!route) throw new Error(`No route with id "${routeId}"`);
+
+  return route.handler(
+    {
+      method: route.method,
+      path: '/',
+      query: {},
+      headers: {},
+      params: { project: 'p', location: 'l', operationId },
+      originalRequest: new Request('http://localhost/'),
+    },
+    { routeId, startTime: 0, metadata: {}, logger: testLogger() }
+  );
+}
+
+describe('composed operations routing (AlloyDB + Memorystore on one RequestRouter)', () => {
+  let router: RequestRouter;
+
+  beforeEach(async () => {
+    const storage = new StorageManager();
+    await storage.initialize({ type: 'memory' });
+
+    const memorystoreService = new MemorystoreService(storage, new Logger('test', 'error'), {
+      enabled: false,
+    });
+    const alloydbService = new AlloyDbService(storage, new Logger('test', 'error'));
+
+    await memorystoreService.initialize();
+    await alloydbService.initialize();
+
+    router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of buildComposedOperationsRoutes(
+      [
+        memorystoreService.getComposableOperationsStore(),
+        alloydbService.getComposableOperationsStore(),
+      ],
+      new Logger('test', 'error')
+    )) {
+      router.addRoute(route);
+    }
+
+    for (const service of [memorystoreService, alloydbService]) {
+      for (const route of service.getRoutes()) {
+        if (isComposedOperationsPath(route.path)) continue;
+
+        router.addRoute(route);
+      }
+    }
+  });
+
+  async function createMemorystoreInstanceOperation(): Promise<string> {
+    const response = await router.route(
+      new Request(
+        `http://localhost/v1/projects/${PROJECT}/locations/${LOCATION}/instances?instanceId=cache1`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({}),
+        }
+      )
+    );
+
+    expect(response.status).toBe(200);
+
+    return ((await response.json()) as { name: string }).name;
+  }
+
+  async function createAlloyDbClusterOperation(): Promise<string> {
+    const response = await router.route(
+      new Request(
+        `http://localhost/v1/projects/${PROJECT}/locations/${LOCATION}/clusters?clusterId=db1`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            initialUser: { user: 'postgres', password: 'hunter2' },
+            networkConfig: { network: 'projects/p/global/networks/default' },
+          }),
+        }
+      )
+    );
+
+    expect(response.status).toBe(200);
+
+    return ((await response.json()) as { name: string }).name;
+  }
+
+  /**
+   * The bug this pins: AlloyDB's cancel path is two characters longer than
+   * Memorystore's (`:operationId` vs `:operation`), and the router's tie-break is
+   * raw path length — so before cancel was composed, AlloyDB's handler answered
+   * every cancel and a real Memorystore operation reported 404.
+   */
+  test('composedOperations_cancelRoute_cancelsAMemorystoreOperationRatherThanRoutingItToAlloyDb', async () => {
+    const operationName = await createMemorystoreInstanceOperation();
+
+    const cancelResponse = await router.route(
+      new Request(`http://localhost/v1/${operationName}:cancel`, { method: 'POST' })
+    );
+
+    expect(cancelResponse.status).toBe(200);
+
+    const afterwards = await router.route(new Request(`http://localhost/v1/${operationName}`));
+    const operation = (await afterwards.json()) as {
+      metadata: { requestedCancellation?: boolean };
+    };
+
+    expect(operation.metadata.requestedCancellation).toBe(true);
+  });
+
+  test('composedOperations_cancelRoute_alsoCancelsAnAlloyDbOperation', async () => {
+    const operationName = await createAlloyDbClusterOperation();
+
+    const cancelResponse = await router.route(
+      new Request(`http://localhost/v1/${operationName}:cancel`, { method: 'POST' })
+    );
+
+    expect(cancelResponse.status).toBe(200);
+
+    const afterwards = await router.route(new Request(`http://localhost/v1/${operationName}`));
+    const operation = (await afterwards.json()) as {
+      metadata: { requestedCancellation?: boolean };
+    };
+
+    expect(operation.metadata.requestedCancellation).toBe(true);
+  });
+
+  test('composedOperations_cancelRoute_givenAnOperationNeitherServiceOwns_returns404', async () => {
+    const response = await router.route(
+      new Request(
+        `http://localhost/v1/projects/${PROJECT}/locations/${LOCATION}/operations/nope:cancel`,
+        { method: 'POST' }
+      )
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  test('composedOperations_getRoute_reachesBothServicesOperations', async () => {
+    const memorystoreOperation = await createMemorystoreInstanceOperation();
+    const alloydbOperation = await createAlloyDbClusterOperation();
+
+    for (const name of [memorystoreOperation, alloydbOperation]) {
+      const response = await router.route(new Request(`http://localhost/v1/${name}`));
+
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { name: string }).name).toBe(name);
+    }
   });
 });
