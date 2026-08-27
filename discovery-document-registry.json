@@ -1,6 +1,13 @@
 {
   "services": [
     {
+      "name": "alloydb",
+      "displayName": "AlloyDB",
+      "discoveryUrl": "https://alloydb.googleapis.com/$discovery/rest?version=v1",
+      "version": "v1",
+      "implementationPath": "src/services/alloydb/"
+    },
+    {
       "name": "cloud-tasks",
       "displayName": "Cloud Tasks",
       "discoveryUrl": "https://cloudtasks.googleapis.com/$discovery/rest?version=v2",

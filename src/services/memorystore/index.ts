@@ -11,6 +11,7 @@ import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/respons
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { parsePageSize } from '@/shared/utils/pagination.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { AclPolicyHandlers } from './acl-policy-handlers.ts';
 import { AclPolicyRepository } from './acl-policy-repository.ts';
 import { AclPolicyService } from './acl-policy-service.ts';
@@ -22,7 +23,6 @@ import { InstanceRepository } from './instance-repository.ts';
 import { InstanceService } from './instance-service.ts';
 import { LocationHandlers } from './location-handlers.ts';
 import { OperationsStore } from './operations.ts';
-import { ResourceMutex } from './resource-mutex.ts';
 import { TokenAuthHandlers } from './token-auth-handlers.ts';
 import { TokenAuthRepository } from './token-auth-repository.ts';
 import { TokenAuthService } from './token-auth-service.ts';
@@ -163,6 +163,7 @@ export class MemorystoreService {
           nextPageToken?: string;
         }>,
       deleteOperation: name => store.deleteOperation(name),
+      cancelOperation: name => store.cancelOperation(name),
     };
   }
 

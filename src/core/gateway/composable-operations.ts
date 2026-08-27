@@ -39,6 +39,11 @@ export interface ComposableOperationsStore {
     pageToken?: string
   ): Promise<ComposableOperationsListResult>;
   deleteOperation(name: string): Promise<boolean>;
+  /**
+   * Optional: a service whose API publishes no `operations.cancel` (Cloud
+   * Workflows) omits this, and the composed cancel route skips it.
+   */
+  cancelOperation?(name: string): Promise<boolean>;
 }
 
 function buildOperationName(req: RouteRequest): string {
@@ -60,14 +65,16 @@ function compareOperationsByName(a: Record<string, unknown>, b: Record<string, u
 const COMPOSED_OPERATIONS_PATHS = [
   '/v1/projects/:project/locations/:location/operations',
   '/v1/projects/:project/locations/:location/operations/:operationId',
+  '/v1/projects/:project/locations/:location/operations/:operationId:cancel',
 ].map(stripRouteParamNames);
 
 /**
  * True when a service's own route would land on a path the composed set owns.
  *
  * <p>Services spell the parameter differently (`:operation` vs `:operationId`), so
- * the comparison has to ignore parameter names. Memorystore's `:cancel` verb keeps
- * its literal suffix and is therefore left to Memorystore.
+ * the comparison has to ignore parameter names. The `:cancel` verb keeps its literal
+ * suffix through {@link stripRouteParamNames}, so both spellings normalise to the same
+ * composed path and each service's own cancel route is dropped rather than shadowed.
  */
 export function isComposedOperationsPath(path: string): boolean {
   return COMPOSED_OPERATIONS_PATHS.includes(stripRouteParamNames(path));
@@ -123,6 +130,25 @@ export function buildComposedOperationsRoutes(
           const operation = await store.getOperation(name);
 
           if (operation) return responseUtils.success(operation);
+        }
+
+        return responseUtils.notFound('Operation', name);
+      },
+    },
+    {
+      // Composed for the same reason as get/delete, and load-bearing in a subtler
+      // way: cancel paths differ only by parameter *name* between services
+      // (`:operation` vs `:operationId`), so the router's length tie-break made
+      // the service with the longer parameter name win every cancel regardless of
+      // which one owned the operation.
+      id: 'composedOperations.cancel',
+      method: 'POST',
+      path: '/v1/projects/:project/locations/:location/operations/:operationId:cancel',
+      handler: async req => {
+        const name = buildOperationName(req);
+
+        for (const store of stores) {
+          if (await store.cancelOperation?.(name)) return responseUtils.success({});
         }
 
         return responseUtils.notFound('Operation', name);
