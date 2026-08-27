@@ -425,6 +425,11 @@ export class MemoryStorageProvider implements StorageProvider {
   }
 
   async createTable(name: string, schema: TableSchema): Promise<void> {
+    // Idempotent: if table exists, skip creation (like SQL's CREATE TABLE IF NOT EXISTS)
+    if (this.tables.has(name)) {
+      return;
+    }
+
     const memoryTable: MemoryTable = {
       schema,
       records: new Map(),

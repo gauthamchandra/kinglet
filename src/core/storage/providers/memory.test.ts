@@ -429,6 +429,33 @@ describe('MemoryStorageProvider', () => {
     test('should throw error for operations on non-existent table', async () => {
       await expect(provider.create('non_existent_table', { name: 'test' })).rejects.toThrow();
     });
+
+    test('should preserve existing records when createTable is called again for the same table', async () => {
+      const created = await provider.create<TestRecord>('test_records', {
+        name: 'Persistent User',
+        email: 'persistent@example.com',
+        age: 33,
+        active: true,
+      });
+
+      await provider.createTable('test_records', {
+        name: 'test_records',
+        columns: [
+          { name: 'id', type: 'string', primaryKey: true },
+          { name: 'name', type: 'string', nullable: false },
+          { name: 'email', type: 'string', unique: true },
+          { name: 'age', type: 'number', nullable: true },
+          { name: 'active', type: 'boolean', defaultValue: true },
+        ],
+        timestamps: true,
+      });
+
+      const found = await provider.findById<TestRecord>('test_records', created.id);
+
+      expect(found).not.toBeNull();
+      expect(found?.name).toBe('Persistent User');
+      expect(found?.email).toBe('persistent@example.com');
+    });
   });
 
   describe('query operators', () => {

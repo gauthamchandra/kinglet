@@ -157,6 +157,7 @@ curl -X POST http://localhost:8765/v2/projects/test-project/locations/us-central
 | Cloud Workflows | Experimental | v1 | Workflow CRUD, revisions, LRO operations |
 | Cloud KMS | Implemented | v1 | Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decrypt, MAC, random bytes (IAM & importJobs deferred) |
 | Memorystore for Valkey | Experimental | v1 | Instance/ACL/backup/token-auth CRUD, real `valkey-server` data plane on by default (token-auth is metadata only — the data plane is unauthenticated) |
+| Cloud SQL | Implemented | v1 | Admin API control plane only — instance/database/user/operation CRUD; no connectable data plane (instances are records, not real Postgres servers) |
 | Secret Manager | Planned | — | Not yet implemented — the config flag exists but the service is a stub |
 
 > **Experimental** means the service API is implemented but has not yet been validated against production use cases or official GCP client libraries. Breaking changes may occur.
@@ -194,6 +195,7 @@ All configuration is via environment variables. Defaults are shown below.
 | `ENABLE_WORKFLOWS` | `true` | Enable Cloud Workflows service |
 | `ENABLE_KMS` | `true` | Enable Cloud KMS service |
 | `ENABLE_MEMORYSTORE` | `true` | Enable Memorystore for Valkey service |
+| `ENABLE_CLOUDSQL` | `true` | Enable Cloud SQL service |
 | `MEMORYSTORE_DATA_PLANE` | `true` | Spawn a real `valkey-server` per instance; `false` for metadata-only endpoints |
 | `MEMORYSTORE_VALKEY_BINARY` | — | Override the resolved `valkey-server` binary path |
 | `MEMORYSTORE_PORT_RANGE_START` | `6380` | First port available for data-plane instances |
@@ -516,6 +518,81 @@ automatically — see [ADR-007](docs/adrs/007-memorystore-valkey-data-plane.md).
 | `GET` | `/v1/projects/{project}/locations` | List locations |
 | `GET` | `/v1/projects/{project}/locations/{location}` | Get location |
 | `GET` | `/v1/projects/{project}/locations/{location}/sharedRegionalCertificateAuthority` | Get shared regional certificate authority |
+
+### Cloud SQL (v1)
+
+Control-plane emulation of the sqladmin v1 API: instances, databases, users,
+and operations are stored as records, but there is no connectable database
+behind an instance (a PGlite-backed data plane is planned as a follow-up).
+PostgreSQL is the only supported engine — `MYSQL_*` and `SQLSERVER_*`
+`databaseVersion` values are rejected with 400 `INVALID_ARGUMENT`.
+
+**Instances**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/instances` | Create instance |
+| `GET` | `/v1/projects/{project}/instances/{instance}` | Get instance |
+| `GET` | `/v1/projects/{project}/instances` | List instances |
+| `DELETE` | `/v1/projects/{project}/instances/{instance}` | Delete instance |
+| `PATCH` | `/v1/projects/{project}/instances/{instance}` | Patch instance |
+| `PUT` | `/v1/projects/{project}/instances/{instance}` | Update instance |
+| `POST` | `/v1/projects/{project}/instances/{instance}/restart` | Restart instance |
+
+**Databases**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/instances/{instance}/databases` | Create database |
+| `GET` | `/v1/projects/{project}/instances/{instance}/databases/{database}` | Get database |
+| `GET` | `/v1/projects/{project}/instances/{instance}/databases` | List databases |
+| `PATCH` | `/v1/projects/{project}/instances/{instance}/databases/{database}` | Patch database |
+| `PUT` | `/v1/projects/{project}/instances/{instance}/databases/{database}` | Update database |
+| `DELETE` | `/v1/projects/{project}/instances/{instance}/databases/{database}` | Delete database |
+
+**Users**
+
+> `users.update` and `users.delete` identify the target user via `?name=` and
+> `?host=` query parameters rather than a path segment, matching the sqladmin
+> v1 discovery document.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/projects/{project}/instances/{instance}/users` | Create user |
+| `GET` | `/v1/projects/{project}/instances/{instance}/users/{name}` | Get user |
+| `GET` | `/v1/projects/{project}/instances/{instance}/users` | List users |
+| `PUT` | `/v1/projects/{project}/instances/{instance}/users` | Update user |
+| `DELETE` | `/v1/projects/{project}/instances/{instance}/users` | Delete user |
+
+**Operations**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/projects/{project}/operations/{operation}` | Get operation |
+| `GET` | `/v1/projects/{project}/operations` | List operations |
+
+> `operations.list` supports filtering by instance via `?instance=`.
+
+> **Limitations:**
+>
+> - Control-plane emulation only — instances are records, not connectable
+>   databases (a PGlite-backed data plane is planned as a follow-up).
+> - PostgreSQL only — `MYSQL_*` / `SQLSERVER_*` `databaseVersion` values are
+>   rejected with 400 `INVALID_ARGUMENT`.
+> - Optional parameters accepted but silently ignored: `instances.list`'s
+>   `filter`; `instances.delete`'s `enableFinalBackup`, `finalBackupTtlDays`,
+>   `finalBackupExpiryTime`, `finalBackupDescription`; `instances.patch`'s
+>   `reconcilePscNetworking`, `reconcilePscNetworkingForce`; `users.update`'s
+>   `databaseRoles`, `serverRoles`, `revokeExistingRoles`,
+>   `revokeExistingServerRoles`; and `operations.get`'s / `operations.list`'s
+>   `location`.
+> - Operations complete synchronously (`status: "DONE"` immediately on
+>   return) but remain pollable via `operations.get` for API compatibility.
+>
+> **Not implemented:** the remaining 28 `instances` methods (`clone`,
+> `failover`, `import`, `export`, read replicas, SSL certificate management,
+> `executeSql`, …), `backupRuns`, `Backups`, `sslCerts`, `connect`, `flags`,
+> `tiers`, `projects.instances.*`, and `operations.cancel`.
 
 ## Storage
 
