@@ -1,0 +1,54 @@
+{
+  "services": {
+    "alloydb": {
+      "status": "experimental",
+      "dataPlane": "Control plane only",
+      "summary": "Cluster, instance, and user CRUD with LRO operations — no connectable PostgreSQL server."
+    },
+    "cloud-kms": {
+      "status": "implemented",
+      "dataPlane": "Emulated in-process",
+      "summary": "Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decrypt, MAC, random bytes."
+    },
+    "cloud-scheduler": {
+      "status": "implemented",
+      "dataPlane": "Emulated in-process",
+      "summary": "Job CRUD, pause/resume, and cron execution."
+    },
+    "cloud-sql": {
+      "status": "implemented",
+      "dataPlane": "Control plane only",
+      "summary": "Instance, database, and user admin API — PostgreSQL only; instances are records, not connectable servers."
+    },
+    "cloud-storage": {
+      "status": "experimental",
+      "dataPlane": "File-backed objects",
+      "summary": "Bucket CRUD, object upload/download, copy, compose, and rewrite."
+    },
+    "cloud-tasks": {
+      "status": "implemented",
+      "dataPlane": "Emulated in-process",
+      "summary": "Queue lifecycle, task CRUD, and HTTP dispatch."
+    },
+    "memorystore": {
+      "status": "experimental",
+      "dataPlane": "Real valkey-server (optional)",
+      "summary": "Instance, ACL, backup, and token-auth CRUD; optional real Valkey data plane on by default."
+    },
+    "pubsub": {
+      "status": "implemented",
+      "dataPlane": "Emulated in-process",
+      "summary": "Topics, subscriptions, publish/pull, ack, snapshots, schemas, and seek."
+    },
+    "secret-manager": {
+      "status": "planned",
+      "dataPlane": "Not started",
+      "summary": "Config flag exists; service is a stub with no routes yet."
+    },
+    "workflows": {
+      "status": "experimental",
+      "dataPlane": "Emulated in-process",
+      "summary": "Workflow CRUD, revisions, and LRO operations."
+    }
+  }
+}

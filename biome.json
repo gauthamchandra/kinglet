@@ -14,7 +14,8 @@
       "!**/coverage/**",
       "!**/*.config.js",
       "!**/commitlint.config.js",
-      "!**/.compatibility-reports/**"
+      "!**/.compatibility-reports/**",
+      "!**/.discovery-cache/**"
     ]
   },
   "formatter": {
