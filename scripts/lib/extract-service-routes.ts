@@ -41,6 +41,9 @@ const SERVICE_FACTORIES: Record<string, ServiceFactory> = {
   workflows: (storage, logger) => new CloudWorkflowsService(storage, logger),
 };
 
+/** Registry services with no routes yet — empty output is expected. */
+const PLANNED_WITHOUT_ROUTES = new Set(['secret-manager']);
+
 /** v1 services that rely on the shared gateway locations routes. */
 const USES_SHARED_V1_LOCATIONS = new Set([
   'alloydb',
@@ -63,10 +66,16 @@ function getSharedV1LocationRoutes(logger: Logger): ExtractedRoute[] {
 }
 
 export async function extractRoutesForService(serviceName: string): Promise<ExtractedRoute[]> {
+  if (PLANNED_WITHOUT_ROUTES.has(serviceName)) {
+    return [];
+  }
+
   const factory = SERVICE_FACTORIES[serviceName];
 
   if (!factory) {
-    return [];
+    throw new Error(
+      `No route extractor registered for service "${serviceName}". Add it to SERVICE_FACTORIES in scripts/lib/extract-service-routes.ts.`
+    );
   }
 
   const storage = new StorageManager();

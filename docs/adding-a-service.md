@@ -221,8 +221,9 @@ test catches it.
 
 1. Add service metadata to [`docs/service-metadata.json`](../docs/service-metadata.json) (status, data plane, summary).
 2. Register the service in `discovery-document-registry.json`.
-3. Run `bun run docs:generate:api` and commit the generated API reference under `docs/reference/api/`.
-4. Call out unimplemented endpoints explicitly in the PR description. The compatibility matrix is refreshed separately by the scheduled docs sync workflow.
+3. Register route extraction in `SERVICE_FACTORIES` inside [`scripts/lib/extract-service-routes.ts`](../../scripts/lib/extract-service-routes.ts).
+4. Run `bun run docs:generate:api` and commit the generated API reference under `docs/reference/api/`.
+5. Call out unimplemented endpoints explicitly in the PR description. The compatibility matrix is refreshed separately by the scheduled docs sync workflow.
 
 ---
 

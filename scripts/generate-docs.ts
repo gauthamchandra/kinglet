@@ -17,6 +17,7 @@ import {
 import { fetchDiscoveryDocument } from './lib/fetch-discovery-document.ts';
 import { extractRoutesForAllServices, type ExtractedRoute } from './lib/extract-service-routes.ts';
 import { findMatchingRoute } from './lib/path-matching.ts';
+import { pruneGeneratedMarkdown } from './lib/prune-generated-docs.ts';
 
 const ROOT = join(import.meta.dir, '..');
 const REGISTRY_PATH = join(ROOT, 'discovery-document-registry.json');
@@ -102,10 +103,19 @@ async function main(): Promise<void> {
 
   if (generateApi) {
     await writeApiReferenceIndex(registry.services, routesByService);
+    await pruneGeneratedMarkdown(
+      API_REFERENCE_DIR,
+      new Set(registry.services.map(service => service.name)),
+      { keepIndex: true }
+    );
   }
 
   if (generateCompatibility) {
     await writeCompatibilityDocs(coverages);
+    await pruneGeneratedMarkdown(
+      COMPATIBILITY_SERVICES_DIR,
+      new Set(registry.services.map(service => service.name))
+    );
   }
 
   const parts: string[] = [];

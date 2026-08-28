@@ -92,4 +92,34 @@ describe('path matching', () => {
       )
     ).toBe(false);
   });
+
+  test('matches Cloud Tasks compound :taskAction routes', () => {
+    const kingletTaskAction =
+      '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskAction';
+
+    expect(
+      pathsMatch(
+        'v2/{+name}:run',
+        {
+          name: {
+            pattern: '^projects/[^/]+/locations/[^/]+/queues/[^/]+/tasks/[^/]+$',
+          },
+        },
+        kingletTaskAction
+      )
+    ).toBe(true);
+
+    expect(
+      pathsMatch(
+        'v2/{+queue}/tasks/{taskId}:buffer',
+        {
+          queue: {
+            pattern: '^projects/[^/]+/locations/[^/]+/queues/[^/]+$',
+          },
+          taskId: {},
+        },
+        kingletTaskAction
+      )
+    ).toBe(true);
+  });
 });

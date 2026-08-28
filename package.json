@@ -31,7 +31,7 @@
     "docs:generate": "bun run scripts/generate-docs.ts",
     "docs:generate:api": "bun run scripts/generate-docs.ts --api-only",
     "docs:generate:compatibility": "bun run scripts/generate-docs.ts --compatibility-only",
-    "docs:check": "bun run scripts/generate-docs.ts --api-only && git diff --exit-code docs/reference/api",
+    "docs:check": "bun run scripts/generate-docs.ts --api-only && bun run scripts/check-generated-docs.ts",
     "knip": "knip",
     "setup:valkey": "bun run scripts/setup-valkey.ts",
     "postinstall": "bun run scripts/setup-valkey.ts --auto",

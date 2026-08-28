@@ -45,7 +45,7 @@ export function kingletPathToSegments(path: string): string[] {
   return trimmed
     .split('/')
     .filter(segment => segment.length > 0)
-    .flatMap(splitPathSegment);
+    .flatMap(splitKingletPathSegment);
 }
 
 /** Discovery documents and kinglet routes sometimes use different URL prefixes. */
@@ -102,6 +102,15 @@ export function findMatchingRoute<T extends { method: string; path: string }>(
       route.method.toUpperCase() === discoveryMethod.toUpperCase() &&
       pathsMatch(discoveryPath, discoveryParameters, route.path)
   );
+}
+
+function splitKingletPathSegment(segment: string): string[] {
+  // Cloud Tasks encodes `taskId:run` / `taskId:buffer` in a single :taskAction segment.
+  if (segment.startsWith(':') && segment.endsWith('Action')) {
+    return ['*', '*'];
+  }
+
+  return splitPathSegment(segment);
 }
 
 function splitPathSegment(segment: string): string[] {

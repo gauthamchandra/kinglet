@@ -5,38 +5,39 @@
 **Status:** Implemented
 **API version:** v2
 **Data plane:** Emulated in-process
-**Endpoint coverage:** 16/18 (89%)
+**Endpoint coverage:** 18/18 (100%)
 
 Queue lifecycle, task CRUD, and HTTP dispatch.
 
 ## Implemented endpoints
 
-- `PATCH` `v2/{+name}` — `projects.locations.updateCmekConfig`
-- `GET` `v2/{+name}` — `projects.locations.get`
 - `GET` `v2/{+name}` — `projects.locations.getCmekConfig`
+- `GET` `v2/{+name}` — `projects.locations.get`
 - `GET` `v2/{+name}/locations` — `projects.locations.list`
-- `GET` `v2/{+name}` — `projects.locations.queues.get`
-- `DELETE` `v2/{+name}` — `projects.locations.queues.delete`
-- `GET` `v2/{+parent}/queues` — `projects.locations.queues.list`
-- `POST` `v2/{+name}:resume` — `projects.locations.queues.resume`
-- `POST` `v2/{+name}:pause` — `projects.locations.queues.pause`
+- `PATCH` `v2/{+name}` — `projects.locations.updateCmekConfig`
 - `POST` `v2/{+parent}/queues` — `projects.locations.queues.create`
+- `GET` `v2/{+parent}/queues` — `projects.locations.queues.list`
+- `GET` `v2/{+name}` — `projects.locations.queues.get`
 - `PATCH` `v2/{+name}` — `projects.locations.queues.patch`
+- `POST` `v2/{+name}:pause` — `projects.locations.queues.pause`
+- `DELETE` `v2/{+name}` — `projects.locations.queues.delete`
 - `POST` `v2/{+name}:purge` — `projects.locations.queues.purge`
-- `GET` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.list`
+- `POST` `v2/{+name}:resume` — `projects.locations.queues.resume`
+- `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
+- `POST` `v2/{+queue}/tasks/{taskId}:buffer` — `projects.locations.queues.tasks.buffer`
 - `GET` `v2/{+name}` — `projects.locations.queues.tasks.get`
 - `DELETE` `v2/{+name}` — `projects.locations.queues.tasks.delete`
+- `GET` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.list`
 - `POST` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.create`
 
 ## Missing endpoints
 
-- `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
-- `POST` `v2/{+queue}/tasks/{taskId}:buffer` — `projects.locations.queues.tasks.buffer`
+_None._
 
 ## IAM endpoints (deferred)
 
-- `POST` `v2/{+resource}:testIamPermissions` — `projects.locations.queues.testIamPermissions`
 - `POST` `v2/{+resource}:setIamPolicy` — `projects.locations.queues.setIamPolicy`
+- `POST` `v2/{+resource}:testIamPermissions` — `projects.locations.queues.testIamPermissions`
 - `POST` `v2/{+resource}:getIamPolicy` — `projects.locations.queues.getIamPolicy`
 
 ## API reference
