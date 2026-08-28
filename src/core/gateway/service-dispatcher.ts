@@ -171,12 +171,6 @@ export class ServiceDispatcher {
     this.loadBalancer = new LoadBalancer(this.config.loadBalancer, logger);
     this.metrics = this.createMetrics();
 
-    // Start circuit breaker monitoring
-    if (this.config.circuitBreaker.enabled) {
-      this.startCircuitBreakerMonitoring();
-    }
-
-    // Start session cleanup
     if (this.config.loadBalancer.stickySession) {
       this.startSessionCleanup();
     }
@@ -690,17 +684,6 @@ export class ServiceDispatcher {
   }
 
   /**
-   * Start circuit breaker monitoring
-   */
-  private startCircuitBreakerMonitoring(): void {
-    setInterval(() => {
-      for (const circuitBreaker of this.circuitBreakers.values()) {
-        circuitBreaker.updateState();
-      }
-    }, this.config.circuitBreaker.monitoringPeriod);
-  }
-
-  /**
    * Start session cleanup
    */
   private startSessionCleanup(): void {
@@ -950,11 +933,6 @@ class CircuitBreaker {
     if (state === 'open') {
       this.nextAttempt = new Date(Date.now() + this.config.recoveryTimeout);
     }
-  }
-
-  updateState(): void {
-    // This method can be called periodically to update circuit breaker state
-    // based on additional logic like time-based recovery
   }
 
   getStats(): CircuitBreakerStats {

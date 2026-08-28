@@ -4,7 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { parseOffsetToken } from '@/shared/utils/pagination.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { OperationMetadata, OperationRecord, OperationResponse } from './types.ts';
 import {
   buildMemorystoreOperationName,
@@ -89,7 +89,7 @@ export class OperationsStore {
     const prefix = `projects/${project}/locations/${location}/operations/`;
 
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? 100;
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<OperationRecord>(MEMORYSTORE_OPERATIONS_TABLE, {
       filter: {

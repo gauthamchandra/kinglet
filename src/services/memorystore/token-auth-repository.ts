@@ -4,7 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { parseOffsetToken } from '@/shared/utils/pagination.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { AuthTokenRecord, TokenAuthUserRecord } from './types.ts';
 import {
   authTokenTableSchema,
@@ -68,7 +68,7 @@ export class TokenAuthRepository {
     pageToken?: string
   ): Promise<ListTokenAuthUsersResult> {
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? 100;
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<TokenAuthUserRecord>(
       MEMORYSTORE_TOKEN_AUTH_USERS_TABLE,
@@ -150,7 +150,7 @@ export class TokenAuthRepository {
     pageToken?: string
   ): Promise<ListAuthTokensResult> {
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? 100;
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<AuthTokenRecord>(MEMORYSTORE_AUTH_TOKENS_TABLE, {
       filter: {

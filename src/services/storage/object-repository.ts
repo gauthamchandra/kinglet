@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord, QueryCondition } from '@/core/storage/types.ts';
+import { parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { ObjectRecord } from './types.ts';
 import { OBJECTS_TABLE, objectsTableSchema } from './types.ts';
 
@@ -76,7 +77,7 @@ export class ObjectRepository {
     conditions: QueryCondition[],
     options?: { maxResults?: number; pageToken?: string }
   ): Promise<ListObjectsResult> {
-    const offset = options?.pageToken ? parseInt(options.pageToken, 10) : 0;
+    const offset = parseOffsetToken(options?.pageToken);
     const limit = options?.maxResults ?? 1000;
 
     const result = await this.storage.find<ObjectRecord>(OBJECTS_TABLE, {
@@ -135,7 +136,7 @@ export class ObjectRepository {
       }
     }
 
-    const offset = options.pageToken ? parseInt(options.pageToken, 10) : 0;
+    const offset = parseOffsetToken(options.pageToken);
     const limit = options.maxResults ?? 1000;
     const page = combined.slice(offset, offset + limit);
 

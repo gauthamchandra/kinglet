@@ -194,7 +194,6 @@ export type EnvConfig = z.infer<typeof EnvConfigSchema>;
 export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
   const config: DeepPartial<Config> = {};
 
-  // Map server configuration
   if (
     env.PORT !== undefined ||
     env.HTTP_PORT !== undefined ||
@@ -208,7 +207,6 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.MAX_CONNECTIONS !== undefined) config.server.maxConnections = env.MAX_CONNECTIONS;
   }
 
-  // Map storage configuration
   if (
     env.STORAGE_TYPE !== undefined ||
     env.SQLITE_PATH !== undefined ||
@@ -220,7 +218,6 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.CACHE_SIZE !== undefined) config.storage.cacheSize = env.CACHE_SIZE;
   }
 
-  // Map authentication configuration
   if (
     env.AUTH_ENABLED !== undefined ||
     env.AUTH_MODE !== undefined ||
@@ -239,7 +236,6 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     }
   }
 
-  // Map services configuration
   const hasServiceConfig =
     env.SERVICES !== undefined ||
     env.ENABLE_PUBSUB !== undefined ||
@@ -260,7 +256,6 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
   if (hasServiceConfig) {
     config.services = {};
 
-    // Map services configuration from SERVICES environment variable
     if (env.SERVICES !== undefined) {
       const enabledServices = env.SERVICES.split(',').map(s => s.trim().toLowerCase());
 
@@ -276,7 +271,6 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       config.services.cloudsql = { enabled: enabledServices.includes('cloudsql') };
     }
 
-    // Map individual service enablement
     if (env.ENABLE_PUBSUB !== undefined) {
       if (!config.services.pubsub) config.services.pubsub = {};
       config.services.pubsub.enabled = env.ENABLE_PUBSUB;
@@ -350,7 +344,6 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     }
   }
 
-  // Map logging configuration
   if (env.LOG_LEVEL !== undefined || env.LOG_FORMAT !== undefined) {
     config.logging = {};
     if (env.LOG_LEVEL !== undefined) config.logging.level = env.LOG_LEVEL;
@@ -360,16 +353,10 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
   return config;
 }
 
-/**
- * Validate configuration object against schema
- */
 export function validateConfig(config: unknown): Config {
   return ConfigSchema.parse(config);
 }
 
-/**
- * Validate environment variables against schema
- */
 export function validateEnv(env: Record<string, string | undefined> = process.env): EnvConfig {
   return EnvConfigSchema.parse(env);
 }

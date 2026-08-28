@@ -137,10 +137,5 @@ describe('Test Helpers', () => {
         throw new Error('Specific error');
       }, 'Specific error');
     });
-
-    // TODO: Fix this test - there's an edge case with error handling
-    // test('should throw if function does not throw', async () => {
-    //   // Implementation needs work
-    // });
   });
 });

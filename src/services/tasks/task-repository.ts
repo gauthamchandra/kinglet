@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { TaskRecord } from './types.ts';
 import { TASKS_TABLE, TaskStatus, tasksTableSchema } from './types.ts';
 
@@ -46,8 +47,8 @@ export class TaskRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListTasksResult> {
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<TaskRecord>(TASKS_TABLE, {
       filter: {

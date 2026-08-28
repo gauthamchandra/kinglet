@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { ExecutionRecord } from './types.ts';
 import { EXECUTIONS_TABLE, executionsTableSchema } from './types.ts';
 
@@ -40,8 +41,8 @@ export class ExecutionRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListExecutionsResult> {
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<ExecutionRecord>(EXECUTIONS_TABLE, {
       filter: {

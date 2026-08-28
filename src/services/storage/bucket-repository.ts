@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { BucketRecord } from './types.ts';
 import { BUCKETS_TABLE, bucketsTableSchema } from './types.ts';
 
@@ -46,8 +47,8 @@ export class BucketRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListBucketsResult> {
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<BucketRecord>(BUCKETS_TABLE, {
       filter: {

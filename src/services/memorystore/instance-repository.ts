@@ -4,7 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { parseOffsetToken } from '@/shared/utils/pagination.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { InstanceRecord } from './types.ts';
 import { instanceTableSchema, MEMORYSTORE_INSTANCES_TABLE } from './types.ts';
 
@@ -53,7 +53,7 @@ export class InstanceRepository {
     pageToken?: string
   ): Promise<ListInstancesResult> {
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? 100;
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
     const prefix = `projects/${project}/locations/${location}/instances/`;
 
     const result = await this.storage.find<InstanceRecord>(MEMORYSTORE_INSTANCES_TABLE, {

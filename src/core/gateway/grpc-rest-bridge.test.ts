@@ -374,11 +374,7 @@ describe('GrpcRestBridge', () => {
 
   describe('Factory Functions', () => {
     test('should create GCP transcoding rules', () => {
-      const rules = createGcpTranscodingRules(
-        'Publisher',
-        'Topic',
-        '/v1/projects/{project}/topics'
-      );
+      const rules = createGcpTranscodingRules('Topic', '/v1/projects/{project}/topics');
 
       expect(rules).toHaveLength(5); // Create, Get, List, Update, Delete
 
@@ -434,11 +430,7 @@ describe('GrpcRestBridge', () => {
     });
 
     test('should create custom response transformers', () => {
-      const rules = createGcpTranscodingRules(
-        'Publisher',
-        'Topic',
-        '/v1/projects/{project}/topics'
-      );
+      const rules = createGcpTranscodingRules('Topic', '/v1/projects/{project}/topics');
       const listRule = rules.find(r => r.grpcMethod === 'ListTopics');
 
       expect(listRule?.responseTransform).toBeDefined();
