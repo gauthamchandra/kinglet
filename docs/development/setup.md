@@ -16,13 +16,21 @@ bun run lint      # typecheck + biome + knip
 
 ## Documentation
 
-Regenerate compatibility and API reference docs after changing routes:
+After changing routes, regenerate and commit the API reference:
 
 ```bash
-bun run docs:generate
+bun run docs:generate:api
 ```
 
-CI enforces that generated docs are up to date. See [compatibility matrix](../compatibility/index.md).
+CI and the pre-push hook run `bun run docs:check`, which verifies `docs/reference/api/` matches the codebase.
+
+The compatibility matrix (`docs/compatibility/`) is refreshed by a scheduled workflow that fetches Google discovery documents live and opens its own PR. Regenerate locally with:
+
+```bash
+bun run docs:generate:compatibility
+```
+
+Use `--use-cache` with either generate command to reuse a local `.discovery-cache/` when offline.
 
 ## Where to go next
 

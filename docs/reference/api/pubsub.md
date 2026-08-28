@@ -43,4 +43,4 @@
 | `GET` | `/v1/projects/:project/topics/:topic/snapshots` | `pubsub.topics.snapshots.list` |
 | `GET` | `/v1/projects/:project/topics/:topic/subscriptions` | `pubsub.topics.subscriptions.list` |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.

@@ -22,4 +22,4 @@
 | `GET` | `/v1/projects/:project/locations/:location/workflows/:workflowId/executions/:executionId` | `executions.get` |
 | `POST` | `/v1/projects/:project/locations/:location/workflows/:workflowId/executions/:executionId:cancel` | `executions.cancel` |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.

@@ -31,4 +31,4 @@
 | `POST` | `/v1/projects/:project/locations/:location/keyRings/:keyRing/cryptoKeys/:cryptoKey/cryptoKeyVersions/:version:restore` | `kms.cryptoKeyVersions.restore` |
 | `GET` | `/v1/projects/:project/locations/:location/keyRings/:keyRing/cryptoKeys/:cryptoKey/cryptoKeyVersions/:version/publicKey` | `kms.cryptoKeyVersions.getPublicKey` |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.

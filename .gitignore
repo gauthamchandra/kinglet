@@ -67,6 +67,9 @@ data/
 .compatibility-reports/*
 !.compatibility-reports/.gitkeep
 
+# Discovery document cache (fetched from Google at generate time; not committed)
+.discovery-cache/
+
 # Agent scratch space (Conductor workspaces, session notes)
 .context/
 

@@ -29,4 +29,4 @@
 | `GET` | `/v1/projects/:project/operations` | `cloudsql.operations.list` |
 | `GET` | `/v1/projects/:project/operations/:operation` | `cloudsql.operations.get` |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.

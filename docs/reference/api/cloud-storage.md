@@ -23,4 +23,4 @@
 | `POST` | `/upload/storage/v1/b/:bucket/o` | `storage.objects.insert` |
 | `PUT` | `/upload/storage/v1/b/:bucket/o` | `storage.objects.resumable` |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.

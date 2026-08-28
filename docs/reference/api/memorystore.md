@@ -45,4 +45,4 @@
 | `POST` | `/v1/projects/:project/locations/:location/operations/:operation:cancel` | `memorystore.operations.cancel` |
 | `GET` | `/v1/projects/:project/locations/:location/sharedRegionalCertificateAuthority` | `memorystore.locations.getSharedRegionalCertificateAuthority` |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.

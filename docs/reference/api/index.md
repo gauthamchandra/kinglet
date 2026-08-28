@@ -17,4 +17,4 @@ HTTP routes registered by kinglet, grouped by emulated GCP service.
 | [Cloud KMS](cloud-kms.md) | 24 |
 | [Cloud SQL](cloud-sql.md) | 22 |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that these files match the codebase.

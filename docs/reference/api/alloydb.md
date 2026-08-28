@@ -30,4 +30,4 @@
 | `POST` | `/v1/projects/:project/locations/:location/operations/:operationId:cancel` | `alloydb.operations.cancel` |
 | `GET` | `/v1/projects/:project/locations/:location/supportedDatabaseFlags` | `alloydb.supportedDatabaseFlags.list` |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.

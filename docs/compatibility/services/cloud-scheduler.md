@@ -11,25 +11,25 @@ Job CRUD, pause/resume, and cron execution.
 
 ## Implemented endpoints
 
-- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `GET` `v1/{+name}` — `projects.locations.get`
-- `POST` `v1/{+parent}/jobs` — `projects.locations.jobs.create`
+- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `GET` `v1/{+name}` — `projects.locations.jobs.get`
-- `POST` `v1/{+name}:pause` — `projects.locations.jobs.pause`
+- `PATCH` `v1/{+name}` — `projects.locations.jobs.patch`
 - `DELETE` `v1/{+name}` — `projects.locations.jobs.delete`
+- `POST` `v1/{+name}:pause` — `projects.locations.jobs.pause`
 - `POST` `v1/{+name}:resume` — `projects.locations.jobs.resume`
 - `GET` `v1/{+parent}/jobs` — `projects.locations.jobs.list`
-- `PATCH` `v1/{+name}` — `projects.locations.jobs.patch`
 - `POST` `v1/{+name}:run` — `projects.locations.jobs.run`
+- `POST` `v1/{+parent}/jobs` — `projects.locations.jobs.create`
 
 ## Missing endpoints
 
-- `GET` `v1/{+name}` — `projects.locations.getCmekConfig`
 - `PATCH` `v1/{+name}` — `projects.locations.updateCmekConfig`
+- `GET` `v1/{+name}` — `projects.locations.getCmekConfig`
 - `GET` `v1/{+name}/operations` — `projects.locations.operations.list`
+- `GET` `v1/{+name}` — `projects.locations.operations.get`
 - `DELETE` `v1/{+name}` — `projects.locations.operations.delete`
 - `POST` `v1/{+name}:cancel` — `projects.locations.operations.cancel`
-- `GET` `v1/{+name}` — `projects.locations.operations.get`
 
 ## IAM endpoints (deferred)
 

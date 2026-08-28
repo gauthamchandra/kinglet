@@ -35,8 +35,10 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun run lint:fix` - Run Biome linter with auto-fix
 - `bun run format` - Format code with Biome
 - `bun run format:check` - Check formatting without writing
-- `bun run docs:generate` - Regenerate compatibility matrix and API reference docs
-- `bun run docs:check` - Verify generated docs are up to date (also runs on pre-push)
+- `bun run docs:generate` - Regenerate all docs (fetches Google discovery documents live)
+- `bun run docs:generate:api` - Regenerate API reference route tables only
+- `bun run docs:generate:compatibility` - Regenerate compatibility matrix (live discovery fetch)
+- `bun run docs:check` - Verify API reference docs match the codebase (runs on pre-push and CI)
 
 ## Architecture
 

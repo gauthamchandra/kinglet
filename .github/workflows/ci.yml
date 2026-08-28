@@ -127,7 +127,7 @@ jobs:
       - name: Run linter
         run: bun run lint
 
-      - name: Check generated docs
+      - name: Check generated API reference docs
         run: bun run docs:check
 
       - name: Check formatting

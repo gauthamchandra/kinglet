@@ -24,4 +24,4 @@
 | `DELETE` | `/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId` | `tasks.tasks.delete` |
 | `GET` | `/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId` | `tasks.tasks.get` |
 
-Regenerate this page with `bun run docs:generate`.
+Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.

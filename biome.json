@@ -15,7 +15,7 @@
       "!**/*.config.js",
       "!**/commitlint.config.js",
       "!**/.compatibility-reports/**",
-      "!discovery-documents/**"
+      "!**/.discovery-cache/**"
     ]
   },
   "formatter": {

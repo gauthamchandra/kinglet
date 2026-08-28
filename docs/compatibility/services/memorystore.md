@@ -11,7 +11,7 @@ Instance, ACL, backup, and token-auth CRUD; optional real Valkey data plane on b
 
 ## Discovery document
 
-No cached discovery document is available for this service. Add `discovery-documents/memorystore.json` to enable endpoint coverage reporting.
+The Google REST discovery document for this service is not publicly fetchable (Memorystore requires credentials). Endpoint coverage against the official API surface is not computed here.
 
 ## Implemented routes in kinglet
 

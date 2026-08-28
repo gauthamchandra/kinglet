@@ -11,40 +11,40 @@ Topics, subscriptions, publish/pull, ack, snapshots, schemas, and seek.
 
 ## Implemented endpoints
 
-- `GET` `v1/{+project}/topics` — `projects.topics.list`
-- `GET` `v1/{+topic}` — `projects.topics.get`
-- `PATCH` `v1/{+name}` — `projects.topics.patch`
-- `PUT` `v1/{+name}` — `projects.topics.create`
-- `DELETE` `v1/{+topic}` — `projects.topics.delete`
-- `POST` `v1/{+topic}:publish` — `projects.topics.publish`
-- `GET` `v1/{+topic}/snapshots` — `projects.topics.snapshots.list`
-- `GET` `v1/{+topic}/subscriptions` — `projects.topics.subscriptions.list`
-- `DELETE` `v1/{+subscription}` — `projects.subscriptions.delete`
-- `PATCH` `v1/{+name}` — `projects.subscriptions.patch`
-- `POST` `v1/{+subscription}:modifyAckDeadline` — `projects.subscriptions.modifyAckDeadline`
-- `GET` `v1/{+project}/subscriptions` — `projects.subscriptions.list`
-- `POST` `v1/{+subscription}:pull` — `projects.subscriptions.pull`
-- `POST` `v1/{+subscription}:modifyPushConfig` — `projects.subscriptions.modifyPushConfig`
-- `PUT` `v1/{+name}` — `projects.subscriptions.create`
-- `GET` `v1/{+subscription}` — `projects.subscriptions.get`
-- `POST` `v1/{+subscription}:seek` — `projects.subscriptions.seek`
-- `POST` `v1/{+subscription}:detach` — `projects.subscriptions.detach`
-- `POST` `v1/{+subscription}:acknowledge` — `projects.subscriptions.acknowledge`
-- `GET` `v1/{+name}` — `projects.schemas.get`
-- `POST` `v1/{+name}:commit` — `projects.schemas.commit`
-- `DELETE` `v1/{+name}` — `projects.schemas.delete`
-- `POST` `v1/{+parent}/schemas:validateMessage` — `projects.schemas.validateMessage`
-- `POST` `v1/{+name}:rollback` — `projects.schemas.rollback`
-- `POST` `v1/{+parent}/schemas` — `projects.schemas.create`
-- `GET` `v1/{+name}:listRevisions` — `projects.schemas.listRevisions`
-- `POST` `v1/{+parent}/schemas:validate` — `projects.schemas.validate`
-- `DELETE` `v1/{+name}:deleteRevision` — `projects.schemas.deleteRevision`
-- `GET` `v1/{+parent}/schemas` — `projects.schemas.list`
 - `DELETE` `v1/{+snapshot}` — `projects.snapshots.delete`
 - `GET` `v1/{+snapshot}` — `projects.snapshots.get`
 - `GET` `v1/{+project}/snapshots` — `projects.snapshots.list`
 - `PATCH` `v1/{+name}` — `projects.snapshots.patch`
 - `PUT` `v1/{+name}` — `projects.snapshots.create`
+- `DELETE` `v1/{+name}` — `projects.schemas.delete`
+- `GET` `v1/{+name}:listRevisions` — `projects.schemas.listRevisions`
+- `DELETE` `v1/{+name}:deleteRevision` — `projects.schemas.deleteRevision`
+- `GET` `v1/{+name}` — `projects.schemas.get`
+- `GET` `v1/{+parent}/schemas` — `projects.schemas.list`
+- `POST` `v1/{+name}:rollback` — `projects.schemas.rollback`
+- `POST` `v1/{+parent}/schemas:validate` — `projects.schemas.validate`
+- `POST` `v1/{+name}:commit` — `projects.schemas.commit`
+- `POST` `v1/{+parent}/schemas` — `projects.schemas.create`
+- `POST` `v1/{+parent}/schemas:validateMessage` — `projects.schemas.validateMessage`
+- `PATCH` `v1/{+name}` — `projects.subscriptions.patch`
+- `POST` `v1/{+subscription}:seek` — `projects.subscriptions.seek`
+- `POST` `v1/{+subscription}:modifyAckDeadline` — `projects.subscriptions.modifyAckDeadline`
+- `PUT` `v1/{+name}` — `projects.subscriptions.create`
+- `GET` `v1/{+project}/subscriptions` — `projects.subscriptions.list`
+- `POST` `v1/{+subscription}:acknowledge` — `projects.subscriptions.acknowledge`
+- `POST` `v1/{+subscription}:pull` — `projects.subscriptions.pull`
+- `DELETE` `v1/{+subscription}` — `projects.subscriptions.delete`
+- `POST` `v1/{+subscription}:detach` — `projects.subscriptions.detach`
+- `GET` `v1/{+subscription}` — `projects.subscriptions.get`
+- `POST` `v1/{+subscription}:modifyPushConfig` — `projects.subscriptions.modifyPushConfig`
+- `GET` `v1/{+project}/topics` — `projects.topics.list`
+- `GET` `v1/{+topic}` — `projects.topics.get`
+- `DELETE` `v1/{+topic}` — `projects.topics.delete`
+- `PUT` `v1/{+name}` — `projects.topics.create`
+- `POST` `v1/{+topic}:publish` — `projects.topics.publish`
+- `PATCH` `v1/{+name}` — `projects.topics.patch`
+- `GET` `v1/{+topic}/subscriptions` — `projects.topics.subscriptions.list`
+- `GET` `v1/{+topic}/snapshots` — `projects.topics.snapshots.list`
 
 ## Missing endpoints
 
@@ -52,18 +52,18 @@ _None._
 
 ## IAM endpoints (deferred)
 
-- `POST` `v1/{+resource}:testIamPermissions` — `projects.topics.testIamPermissions`
-- `GET` `v1/{+resource}:getIamPolicy` — `projects.topics.getIamPolicy`
-- `POST` `v1/{+resource}:setIamPolicy` — `projects.topics.setIamPolicy`
-- `POST` `v1/{+resource}:testIamPermissions` — `projects.subscriptions.testIamPermissions`
-- `POST` `v1/{+resource}:setIamPolicy` — `projects.subscriptions.setIamPolicy`
-- `GET` `v1/{+resource}:getIamPolicy` — `projects.subscriptions.getIamPolicy`
-- `GET` `v1/{+resource}:getIamPolicy` — `projects.schemas.getIamPolicy`
-- `POST` `v1/{+resource}:setIamPolicy` — `projects.schemas.setIamPolicy`
-- `POST` `v1/{+resource}:testIamPermissions` — `projects.schemas.testIamPermissions`
-- `POST` `v1/{+resource}:testIamPermissions` — `projects.snapshots.testIamPermissions`
 - `GET` `v1/{+resource}:getIamPolicy` — `projects.snapshots.getIamPolicy`
+- `POST` `v1/{+resource}:testIamPermissions` — `projects.snapshots.testIamPermissions`
 - `POST` `v1/{+resource}:setIamPolicy` — `projects.snapshots.setIamPolicy`
+- `GET` `v1/{+resource}:getIamPolicy` — `projects.schemas.getIamPolicy`
+- `POST` `v1/{+resource}:testIamPermissions` — `projects.schemas.testIamPermissions`
+- `POST` `v1/{+resource}:setIamPolicy` — `projects.schemas.setIamPolicy`
+- `POST` `v1/{+resource}:testIamPermissions` — `projects.subscriptions.testIamPermissions`
+- `GET` `v1/{+resource}:getIamPolicy` — `projects.subscriptions.getIamPolicy`
+- `POST` `v1/{+resource}:setIamPolicy` — `projects.subscriptions.setIamPolicy`
+- `GET` `v1/{+resource}:getIamPolicy` — `projects.topics.getIamPolicy`
+- `POST` `v1/{+resource}:testIamPermissions` — `projects.topics.testIamPermissions`
+- `POST` `v1/{+resource}:setIamPolicy` — `projects.topics.setIamPolicy`
 
 ## API reference
 
