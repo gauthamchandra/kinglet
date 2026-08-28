@@ -5,7 +5,7 @@
 **Status:** Implemented
 **API version:** v1
 **Data plane:** Emulated in-process
-**Endpoint coverage:** 28/71 (39%)
+**Endpoint coverage:** 24/71 (34%)
 
 Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decrypt, MAC, random bytes.
 
@@ -26,17 +26,13 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 - `POST` `v1/{+name}:encrypt` — `projects.locations.keyRings.cryptoKeys.encrypt`
 - `POST` `v1/{+name}:macVerify` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.macVerify`
 - `POST` `v1/{+name}:destroy` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.destroy`
-- `POST` `v1/{+name}:decapsulate` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.decapsulate`
 - `GET` `v1/{+parent}/cryptoKeyVersions` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.list`
 - `POST` `v1/{+parent}/cryptoKeyVersions` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.create`
-- `POST` `v1/{+name}:rawEncrypt` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.rawEncrypt`
 - `GET` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.get`
 - `POST` `v1/{+name}:asymmetricDecrypt` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.asymmetricDecrypt`
 - `POST` `v1/{+name}:asymmetricSign` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.asymmetricSign`
 - `POST` `v1/{+name}:restore` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.restore`
-- `POST` `v1/{+name}:rawDecrypt` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.rawDecrypt`
 - `GET` `v1/{+name}/publicKey` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.getPublicKey`
-- `GET` `v1/{+name}:exportTrustedKeyWrappedCryptoKeyVersion` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.exportTrustedKeyWrappedCryptoKeyVersion`
 - `PATCH` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.patch`
 - `POST` `v1/{+name}:macSign` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.macSign`
 
@@ -83,8 +79,12 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 - `GET` `v1/{+parent}/importJobs` — `projects.locations.keyRings.importJobs.list`
 - `DELETE` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.delete`
 - `DELETE` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.delete`
+- `POST` `v1/{+name}:decapsulate` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.decapsulate`
 - `POST` `v1/{+parent}/cryptoKeyVersions:importTrustedKeyWrappedCryptoKeyVersion` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.importTrustedKeyWrappedCryptoKeyVersion`
+- `POST` `v1/{+name}:rawEncrypt` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.rawEncrypt`
 - `POST` `v1/{+parent}/cryptoKeyVersions:import` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.import`
+- `POST` `v1/{+name}:rawDecrypt` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.rawDecrypt`
+- `GET` `v1/{+name}:exportTrustedKeyWrappedCryptoKeyVersion` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.exportTrustedKeyWrappedCryptoKeyVersion`
 
 ## IAM endpoints (deferred)
 

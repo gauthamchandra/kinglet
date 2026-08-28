@@ -5,7 +5,7 @@
 **Status:** Experimental
 **API version:** v1
 **Data plane:** Control plane only
-**Endpoint coverage:** 24/40 (60%)
+**Endpoint coverage:** 23/40 (57%)
 
 Cluster, instance, and user CRUD with LRO operations — no connectable PostgreSQL server.
 
@@ -21,7 +21,6 @@ Cluster, instance, and user CRUD with LRO operations — no connectable PostgreS
 - `GET` `v1/{+parent}/clusters` — `projects.locations.clusters.list`
 - `DELETE` `v1/{+name}` — `projects.locations.clusters.delete`
 - `GET` `v1/{+name}` — `projects.locations.clusters.get`
-- `PATCH` `v1/{+name}:upgrade` — `projects.locations.clusters.upgrade`
 - `POST` `v1/{+parent}/clusters` — `projects.locations.clusters.create`
 - `PATCH` `v1/{+name}` — `projects.locations.clusters.patch`
 - `GET` `v1/{+parent}/instances` — `projects.locations.clusters.instances.list`
@@ -48,6 +47,7 @@ Cluster, instance, and user CRUD with LRO operations — no connectable PostgreS
 - `POST` `v1/{+parent}/clusters:createsecondary` — `projects.locations.clusters.createsecondary`
 - `POST` `v1/{+name}:switchover` — `projects.locations.clusters.switchover`
 - `POST` `v1/{+name}:import` — `projects.locations.clusters.import`
+- `PATCH` `v1/{+name}:upgrade` — `projects.locations.clusters.upgrade`
 - `POST` `v1/{+parent}/clusters:restoreFromCloudSQL` — `projects.locations.clusters.restoreFromCloudSQL`
 - `POST` `v1/{+name}:export` — `projects.locations.clusters.export`
 - `POST` `v1/{+name}:injectFault` — `projects.locations.clusters.instances.injectFault`

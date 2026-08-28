@@ -5,7 +5,7 @@
 **Status:** Implemented
 **API version:** v2
 **Data plane:** Emulated in-process
-**Endpoint coverage:** 18/18 (100%)
+**Endpoint coverage:** 16/18 (89%)
 
 Queue lifecycle, task CRUD, and HTTP dispatch.
 
@@ -24,15 +24,14 @@ Queue lifecycle, task CRUD, and HTTP dispatch.
 - `POST` `v2/{+parent}/queues` — `projects.locations.queues.create`
 - `DELETE` `v2/{+name}` — `projects.locations.queues.delete`
 - `GET` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.list`
-- `POST` `v2/{+queue}/tasks/{taskId}:buffer` — `projects.locations.queues.tasks.buffer`
-- `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
 - `POST` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.create`
 - `GET` `v2/{+name}` — `projects.locations.queues.tasks.get`
 - `DELETE` `v2/{+name}` — `projects.locations.queues.tasks.delete`
 
 ## Missing endpoints
 
-_None._
+- `POST` `v2/{+queue}/tasks/{taskId}:buffer` — `projects.locations.queues.tasks.buffer`
+- `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
 
 ## IAM endpoints (deferred)
 

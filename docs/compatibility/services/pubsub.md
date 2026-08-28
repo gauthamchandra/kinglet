@@ -5,7 +5,7 @@
 **Status:** Implemented
 **API version:** v1
 **Data plane:** Emulated in-process
-**Endpoint coverage:** 32/34 (94%)
+**Endpoint coverage:** 34/34 (100%)
 
 Topics, subscriptions, publish/pull, ack, snapshots, schemas, and seek.
 
@@ -33,9 +33,11 @@ Topics, subscriptions, publish/pull, ack, snapshots, schemas, and seek.
 - `GET` `v1/{+name}` — `projects.schemas.get`
 - `POST` `v1/{+name}:commit` — `projects.schemas.commit`
 - `DELETE` `v1/{+name}` — `projects.schemas.delete`
+- `POST` `v1/{+parent}/schemas:validateMessage` — `projects.schemas.validateMessage`
 - `POST` `v1/{+name}:rollback` — `projects.schemas.rollback`
 - `POST` `v1/{+parent}/schemas` — `projects.schemas.create`
 - `GET` `v1/{+name}:listRevisions` — `projects.schemas.listRevisions`
+- `POST` `v1/{+parent}/schemas:validate` — `projects.schemas.validate`
 - `DELETE` `v1/{+name}:deleteRevision` — `projects.schemas.deleteRevision`
 - `GET` `v1/{+parent}/schemas` — `projects.schemas.list`
 - `DELETE` `v1/{+snapshot}` — `projects.snapshots.delete`
@@ -46,8 +48,7 @@ Topics, subscriptions, publish/pull, ack, snapshots, schemas, and seek.
 
 ## Missing endpoints
 
-- `POST` `v1/{+parent}/schemas:validateMessage` — `projects.schemas.validateMessage`
-- `POST` `v1/{+parent}/schemas:validate` — `projects.schemas.validate`
+_None._
 
 ## IAM endpoints (deferred)
 

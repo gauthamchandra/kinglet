@@ -33,17 +33,19 @@ export function discoveryPathToSegments(
   expanded = expanded.replace(/\{\+[^}]+\}/g, '*');
   expanded = expanded.replace(/\{[^}]+\}/g, '*');
 
-  return expanded.split('/').filter(segment => segment.length > 0);
+  return expanded
+    .split('/')
+    .filter(segment => segment.length > 0)
+    .flatMap(splitPathSegment);
 }
 
 export function kingletPathToSegments(path: string): string[] {
-  const normalized = path
-    .trim()
-    .replace(/^\/+/, '')
-    .replace(/\/+$/, '')
-    .replace(/:[^/]+/g, '*');
+  const trimmed = path.trim().replace(/^\/+/, '').replace(/\/+$/, '');
 
-  return normalized.split('/').filter(segment => segment.length > 0);
+  return trimmed
+    .split('/')
+    .filter(segment => segment.length > 0)
+    .flatMap(splitPathSegment);
 }
 
 /** Discovery documents and kinglet routes sometimes use different URL prefixes. */
@@ -100,6 +102,40 @@ export function findMatchingRoute<T extends { method: string; path: string }>(
       route.method.toUpperCase() === discoveryMethod.toUpperCase() &&
       pathsMatch(discoveryPath, discoveryParameters, route.path)
   );
+}
+
+function splitPathSegment(segment: string): string[] {
+  const verbIndex = segment.lastIndexOf(':');
+
+  if (verbIndex <= 0) {
+    return [normalizeParamToken(segment)];
+  }
+
+  const resourcePart = segment.slice(0, verbIndex);
+  const verb = segment.slice(verbIndex + 1);
+
+  if (!looksLikeParameter(resourcePart)) {
+    return [normalizeParamToken(segment)];
+  }
+
+  const resourceSegments = resourcePart
+    .split('/')
+    .filter(part => part.length > 0)
+    .map(normalizeParamToken);
+
+  return [...resourceSegments, verb];
+}
+
+function looksLikeParameter(part: string): boolean {
+  return part.startsWith(':') || part.startsWith('{') || part === '*' || part.includes('*');
+}
+
+function normalizeParamToken(token: string): string {
+  if (token.startsWith(':')) {
+    return '*';
+  }
+
+  return token.replace(/\{name=[^}]+\}/g, '*').replace(/\{[^}]+\}/g, '*');
 }
 
 function regexPatternToWildcardPath(pattern: string): string {

@@ -45,4 +45,51 @@ describe('path matching', () => {
       )
     ).toBe(true);
   });
+
+  test('matches custom verbs exactly', () => {
+    const kingletDestroy =
+      '/v1/projects/:project/locations/:location/keyRings/:keyRing/cryptoKeys/:cryptoKey/cryptoKeyVersions/:version:destroy';
+    const versionNamePattern =
+      '^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+/cryptoKeyVersions/[^/]+$';
+
+    expect(
+      pathsMatch('v1/{+name}:destroy', { name: { pattern: versionNamePattern } }, kingletDestroy)
+    ).toBe(true);
+
+    expect(
+      pathsMatch('v1/{+name}:rawEncrypt', { name: { pattern: versionNamePattern } }, kingletDestroy)
+    ).toBe(false);
+
+    expect(
+      pathsMatch('v1/{+name}:rawDecrypt', { name: { pattern: versionNamePattern } }, kingletDestroy)
+    ).toBe(false);
+  });
+
+  test('matches scheduler job run custom verb', () => {
+    expect(
+      pathsMatch(
+        'v1/{+name}:run',
+        {
+          name: {
+            pattern: '^projects/[^/]+/locations/[^/]+/jobs/[^/]+$',
+          },
+        },
+        '/v1/projects/:project/locations/:location/jobs/:jobId:run'
+      )
+    ).toBe(true);
+  });
+
+  test('does not match different custom verbs at the same depth', () => {
+    expect(
+      pathsMatch(
+        'v1/{+name}:pause',
+        {
+          name: {
+            pattern: '^projects/[^/]+/locations/[^/]+/jobs/[^/]+$',
+          },
+        },
+        '/v1/projects/:project/locations/:location/jobs/:jobId:run'
+      )
+    ).toBe(false);
+  });
 });
