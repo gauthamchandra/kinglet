@@ -35,6 +35,8 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun run lint:fix` - Run Biome linter with auto-fix
 - `bun run format` - Format code with Biome
 - `bun run format:check` - Check formatting without writing
+- `bun run docs:generate` - Regenerate compatibility matrix and API reference docs
+- `bun run docs:check` - Verify generated docs are up to date (also runs on pre-push)
 
 ## Architecture
 
@@ -163,6 +165,7 @@ Each ADR should include: Status, Context, Decision, Rationale, Alternatives Cons
 ## Guidelines
 
 - When implementing a task, be sure to first read through the ADRs that exist in docs/adrs so you understand the historical decisions that have been made.
+- **Sign off every commit** with `git commit -s` (DCO is enforced in CI). In a local clone, `git config format.signoff true` adds the sign-off automatically.
 - Co-locate tests with source files for easier discovery
 - Try to use `bunx` over `npx` wherever possible
 - When moving code to a new location in response to feedback from the user, do not leave useless comments such as "// BEGIN is now called explicitly via begin() method".
