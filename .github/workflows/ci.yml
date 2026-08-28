@@ -70,21 +70,40 @@ jobs:
       #
       # release-please authors its release commits as an app, and an app cannot certify the
       # DCO on anyone's behalf, so bot authors are skipped.
+      #
+      # A sign-off certifies a HUMAN read and stands behind the change, so a coding agent's
+      # own identity is banned from Signed-off-by. Co-authored-by is deliberately left alone —
+      # agent assistance is expected here and crediting it is welcome.
       - name: Verify every commit is signed off
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           missing=0
+          agent_signoff=0
+
+          # Emails of coding agents that must never appear in a Signed-off-by line. Matched
+          # against sign-off trailers only, so an agent can still be a Co-authored-by. Extend
+          # this list as new agents appear.
+          AGENT_SIGNOFF_EMAILS='cursoragent@cursor\.com|noreply@anthropic\.com|copilot@|devin-ai|@cognition\.ai|google-labs-jules|jules@|codex@|@openai\.com'
 
           while read -r sha; do
+            body="$(git show -s --format='%B' "$sha")"
+
+            # Run before the bot skip: release-please commits carry no sign-off and match
+            # nothing, and this also catches an agent that authors as a GitHub App.
+            if printf '%s\n' "$body" | grep -iE '^Signed-off-by:' | grep -qiE "$AGENT_SIGNOFF_EMAILS"; then
+              echo "::error::$(git show -s --format='%h %s' "$sha") is signed off by a coding agent. The DCO sign-off must be the human who read and stands behind the change — ask your human owner to review, then sign off as them. Agents may still be credited with a Co-authored-by trailer."
+              agent_signoff=1
+            fi
+
             author="$(git show -s --format='%an <%ae>' "$sha")"
 
             case "$author" in
               *"[bot]"*) continue ;;
             esac
 
-            if ! git show -s --format='%B' "$sha" | grep -qiF "Signed-off-by: $author"; then
+            if ! printf '%s\n' "$body" | grep -qiF "Signed-off-by: $author"; then
               echo "::error::$(git show -s --format='%h %s' "$sha") is missing \"Signed-off-by: $author\""
               missing=1
             fi
@@ -93,10 +112,19 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             echo "Fix the last commit with:  git commit --amend -s --no-edit"
             echo "Fix the whole branch with: git rebase --signoff main"
+          fi
+
+          if [ "$agent_signoff" -ne 0 ]; then
+            echo "Set git user.name/user.email to the human who owns the change, then re-author and sign off:"
+            echo "  git commit --amend --reset-author -s --no-edit                     (last commit)"
+            echo "  git rebase main --exec 'git commit --amend --reset-author -s --no-edit'  (whole branch)"
+          fi
+
+          if [ "$missing" -ne 0 ] || [ "$agent_signoff" -ne 0 ]; then
             exit 1
           fi
 
-          echo "All commits are signed off."
+          echo "All commits are signed off by a human."
 
   test:
     name: Test
