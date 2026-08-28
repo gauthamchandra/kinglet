@@ -1,11 +1,12 @@
 /**
- * Shared persistence for AlloyDB's name-addressed resources.
+ * Shared persistence for name-addressed GCP resources.
  *
- * <p>Clusters, instances and users are stored identically — a `name`-unique table
- * queried by exact name or by hierarchical prefix — and differ only in table,
- * schema, and how their parent prefix is built. Subclasses supply those three
- * things and add a typed `list*`; everything else lives here so the duplicate
- * guard and pagination semantics are implemented and tested once.
+ * <p>Topics, instances, clusters, and the rest are stored identically — a
+ * `name`-unique table queried by exact name or by hierarchical prefix — and
+ * differ only in table, schema, and how their parent prefix is built. Subclasses
+ * supply those three things and add a typed `list*`; everything else lives here
+ * so the duplicate guard and pagination semantics are implemented and tested
+ * once.
  *
  * <p>Methods are named generically (`create`, not `createCluster`) because the
  * subclass type already names the resource. No business rules belong in here.
@@ -24,22 +25,37 @@ export interface ListByPrefixResult<T> {
   nextPageToken?: string | undefined;
 }
 
+export interface ResourceRepositoryOptions {
+  /**
+   * When true (default), {@link ResourceRepository.create} rejects a duplicate
+   * name. The in-memory provider does not enforce unique indexes, so without
+   * this a duplicate inserts cleanly in memory mode and only fails under SQLite.
+   *
+   * <p>Pass false when the service layer already owns uniqueness — Pub/Sub
+   * topics, subscriptions, snapshots, and schemas do.
+   */
+  readonly rejectDuplicateNames?: boolean;
+}
+
 export abstract class ResourceRepository<T extends NamedRecord> {
   protected readonly storage: StorageManager;
   private readonly tableName: string;
   private readonly tableSchema: TableSchema;
   private readonly resourceLabel: string;
+  private readonly rejectDuplicateNames: boolean;
 
   protected constructor(
     storage: StorageManager,
     tableName: string,
     tableSchema: TableSchema,
-    resourceLabel: string
+    resourceLabel: string,
+    options: ResourceRepositoryOptions = {}
   ) {
     this.storage = storage;
     this.tableName = tableName;
     this.tableSchema = tableSchema;
     this.resourceLabel = resourceLabel;
+    this.rejectDuplicateNames = options.rejectDuplicateNames ?? true;
   }
 
   async initialize(): Promise<void> {
@@ -50,17 +66,13 @@ export abstract class ResourceRepository<T extends NamedRecord> {
     await this.storage.createTable(this.tableName, this.tableSchema);
   }
 
-  /**
-   * <p><b>NOTE:</b> the uniqueness check is not redundant with the table's unique
-   * index. The in-memory storage provider does not enforce unique indexes, so
-   * without this a duplicate would insert cleanly in memory mode and only fail
-   * under SQLite — the inverse of the bug you want in a dev tool.
-   */
   async create(data: Omit<T, keyof BaseRecord>): Promise<T> {
-    const existing = await this.getByName(data.name);
+    if (this.rejectDuplicateNames) {
+      const existing = await this.getByName(data.name);
 
-    if (existing) {
-      throw new Error(`An AlloyDB ${this.resourceLabel} named "${data.name}" already exists`);
+      if (existing) {
+        throw new Error(`A ${this.resourceLabel} named "${data.name}" already exists`);
+      }
     }
 
     return this.storage.create<T>(this.tableName, data);

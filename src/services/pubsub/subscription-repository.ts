@@ -1,41 +1,51 @@
 /**
- * Subscription Repository - persistence layer for Pub/Sub subscriptions
+ * Persistence for Pub/Sub subscriptions. CRUD lives in {@link ResourceRepository}.
+ *
+ * <p>Uniqueness is enforced in the service layer, so the repository does not
+ * reject duplicate names — see {@link ResourceRepositoryOptions.rejectDuplicateNames}.
  */
 
 import type { StorageManager } from '@/core/storage/manager.ts';
+import { ResourceRepository } from '@/core/storage/resource-repository.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { SubscriptionRecord } from './types.ts';
 import { PUBSUB_SUBSCRIPTIONS_TABLE, pubsubSubscriptionsTableSchema } from './types.ts';
 
 export interface ListSubscriptionsResult {
   subscriptions: SubscriptionRecord[];
-  nextPageToken?: string;
+  nextPageToken?: string | undefined;
 }
 
-export class SubscriptionRepository {
-  private storage: StorageManager;
+function buildSubscriptionListPrefix(project: string): string {
+  return `projects/${project}/subscriptions/`;
+}
 
+export class SubscriptionRepository extends ResourceRepository<SubscriptionRecord> {
   constructor(storage: StorageManager) {
-    this.storage = storage;
+    super(storage, PUBSUB_SUBSCRIPTIONS_TABLE, pubsubSubscriptionsTableSchema, 'subscription', {
+      rejectDuplicateNames: false,
+    });
   }
 
-  async initialize(): Promise<void> {
-    await this.storage.createTable(PUBSUB_SUBSCRIPTIONS_TABLE, pubsubSubscriptionsTableSchema);
-  }
-
-  async createSubscription(
+  createSubscription(
     data: Omit<SubscriptionRecord, keyof BaseRecord>
   ): Promise<SubscriptionRecord> {
-    return this.storage.create<SubscriptionRecord>(PUBSUB_SUBSCRIPTIONS_TABLE, data);
+    return this.create(data);
   }
 
-  async getSubscriptionByName(name: string): Promise<SubscriptionRecord | null> {
-    return this.storage.findFirst<SubscriptionRecord>(PUBSUB_SUBSCRIPTIONS_TABLE, {
-      filter: {
-        conditions: [{ field: 'name', operator: 'eq', value: name }],
-      },
-    });
+  getSubscriptionByName(name: string): Promise<SubscriptionRecord | null> {
+    return this.getByName(name);
+  }
+
+  updateSubscription(
+    name: string,
+    data: Partial<Omit<SubscriptionRecord, keyof BaseRecord>>
+  ): Promise<SubscriptionRecord | null> {
+    return this.update(name, data);
+  }
+
+  deleteSubscription(name: string): Promise<boolean> {
+    return this.delete(name);
   }
 
   async listSubscriptions(
@@ -43,28 +53,13 @@ export class SubscriptionRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListSubscriptionsResult> {
-    const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
+    const { records, nextPageToken } = await this.listByPrefix(
+      buildSubscriptionListPrefix(project),
+      pageSize,
+      pageToken
+    );
 
-    const result = await this.storage.find<SubscriptionRecord>(PUBSUB_SUBSCRIPTIONS_TABLE, {
-      filter: {
-        conditions: [
-          { field: 'name', operator: 'like', value: `projects/${project}/subscriptions/%` },
-        ],
-      },
-      pagination: { limit, offset },
-      sort: [{ field: 'name', direction: 'asc' }],
-    });
-
-    const listResult: ListSubscriptionsResult = {
-      subscriptions: result.data,
-    };
-
-    if (result.hasMore) {
-      listResult.nextPageToken = String(offset + limit);
-    }
-
-    return listResult;
+    return { subscriptions: records, nextPageToken };
   }
 
   async listSubscriptionsByTopic(topicName: string): Promise<SubscriptionRecord[]> {
@@ -99,7 +94,6 @@ export class SubscriptionRepository {
       },
     });
 
-    // Filter to only subscriptions with a non-empty pushEndpoint
     return result.data.filter(sub => {
       if (!sub.pushConfig) return false;
 
@@ -111,32 +105,5 @@ export class SubscriptionRepository {
         return false;
       }
     });
-  }
-
-  async updateSubscription(
-    name: string,
-    data: Partial<Omit<SubscriptionRecord, keyof BaseRecord>>
-  ): Promise<SubscriptionRecord | null> {
-    const existing = await this.getSubscriptionByName(name);
-
-    if (!existing) {
-      return null;
-    }
-
-    return this.storage.updateById<SubscriptionRecord>(
-      PUBSUB_SUBSCRIPTIONS_TABLE,
-      existing.id,
-      data
-    );
-  }
-
-  async deleteSubscription(name: string): Promise<boolean> {
-    const existing = await this.getSubscriptionByName(name);
-
-    if (!existing) {
-      return false;
-    }
-
-    return this.storage.deleteById(PUBSUB_SUBSCRIPTIONS_TABLE, existing.id);
   }
 }
