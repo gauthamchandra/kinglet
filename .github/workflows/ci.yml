@@ -127,6 +127,9 @@ jobs:
       - name: Run linter
         run: bun run lint
 
+      - name: Check generated docs
+        run: bun run docs:check
+
       - name: Check formatting
         run: bunx biome format .
 

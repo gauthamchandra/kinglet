@@ -28,6 +28,8 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "healthcheck": "bun run src/healthcheck.ts",
+    "docs:generate": "bun run scripts/generate-docs.ts",
+    "docs:check": "bun run scripts/generate-docs.ts && git diff --exit-code docs/compatibility docs/reference/api",
     "knip": "knip",
     "setup:valkey": "bun run scripts/setup-valkey.ts",
     "postinstall": "bun run scripts/setup-valkey.ts --auto",

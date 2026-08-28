@@ -219,8 +219,10 @@ test catches it.
 
 ### 8. Document it
 
-Add the service to the **Supported Services** table and the **API Endpoints** section in
-[`README.md`](../README.md), including which endpoints are *not* implemented.
+1. Add service metadata to [`docs/service-metadata.json`](../docs/service-metadata.json) (status, data plane, summary).
+2. Register the service in `discovery-document-registry.json`.
+3. Run `bun run docs:generate` and commit the generated compatibility and API reference pages under `docs/compatibility/` and `docs/reference/api/`.
+4. Call out unimplemented endpoints explicitly in the PR description.
 
 ---
 
@@ -236,7 +238,7 @@ Copy this into your PR description.
 - [ ] Error envelope is `{ error: { code, message, status, details? } }` with real GCP status strings
 - [ ] Resource-name format matches (`projects/{p}/locations/{l}/…`)
 - [ ] `pageSize` / `pageToken` / `nextPageToken` implemented where GCP paginates
-- [ ] Unimplemented endpoints and fields listed explicitly in the PR and README
+- [ ] Unimplemented endpoints and fields listed explicitly in the PR and generated compatibility docs
 
 **Structure**
 - [ ] Follows the `types` / `repository` / `service` / `handlers` / `index` layering
