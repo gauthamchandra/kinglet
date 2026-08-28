@@ -116,6 +116,58 @@ existing architecture anticipates.
 - Secrets, credentials, tokens, or absolute paths containing a username.
 - Logging of request or response bodies that could carry user data.
 
+### YAGNI / over-building
+
+Adapted from [ponytail](https://github.com/DietrichGebert/ponytail) (MIT). Review at ponytail
+**full**: stop at the first rung that holds, after reading the change. Lazy about the
+solution, never about fidelity, tests, or required structure.
+
+**Flag** when the diff:
+
+- Adds something with no caller, no discovery-document requirement, and no stated gap
+  (speculative helpers, config for a value that never changes, scaffolding "for later")
+- Reimplements a helper, type, or pattern that already lives in this repo — look in
+  `@/shared` and the service under edit before accepting a new util
+- Hand-rolls what Bun, the Web APIs, or an already-installed dependency already do, or
+  adds a package for a few lines of existing capability
+- Introduces an unrequested abstraction: an interface with one implementation, a factory
+  for one product, a wrapper class around a one-liner
+- Adds an extra layer inside a small service instead of the established
+  `types` / `repository` / `service` / `handlers` / `index` split (or, for growth, the
+  per-resource triples in `src/services/pubsub/`)
+
+**Do not treat as YAGNI.** These look like "extra" code and are required. Other sections
+still apply — missing pagination is a fidelity finding, not a pass:
+
+- The service file split, the four registration sites, and `stop()` in `shutdown()`
+- Discovery-required surface: pagination, the error envelope, resource-name parsers,
+  field names and status codes that match real GCP
+- Co-located tests, error-path tests, and the coverage bar
+- An explicit "not implemented / known gaps" list in the PR or in code
+- An ADR when the change actually warrants one
+
+### Prose budget
+
+The diff already shows *what* changed. Flag narration; keep the residue a maintainer
+cannot infer: why, trade-offs, and known limits.
+
+**Flag:**
+
+- PR free prose ("What does this change?", "Why?", "Anything else?") that walks the file
+  list, restates template checkboxes, or tours the feature — especially once it runs past
+  about **three paragraphs**
+- A commit body that only repeats the subject or lists files. Subject is already capped
+  by commitlint; a body is optional and must add *why*, a trade-off, or how it was verified
+- Review comments that recap the PR or preamble before the finding. Finding or silence.
+
+**Do not flag:**
+
+- Up to about three paragraphs explaining a GCP quirk, a known limit, an honest unknown
+  ("could not determine what real GCP does when X"), or a trade-off the diff cannot show
+- Checklists, the discovery-document URL, "not implemented" lists, and commands actually
+  run. Those are the template, not padding.
+- DCO sign-off and AI disclosure
+
 ---
 
 ## Don't flag
