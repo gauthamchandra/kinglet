@@ -164,6 +164,19 @@ When implementing a feature that introduces a **large-scale architectural change
 
 Each ADR should include: Status, Context, Decision, Rationale, Alternatives Considered, and Consequences. Number sequentially (e.g., `005-descriptive-name.md`).
 
+## Commit sign-off
+
+This is an open-source project under the DCO. Every commit must be signed off under the identity of the **human who requested the work** — the sign-off certifies that a person reviewed the change and stands behind it.
+
+You may run `git commit -s` on that human's behalf, but only after:
+
+- **Asking them and getting an explicit sign-off.** Do not assume approval — ask the human who requested the work to confirm they have reviewed the change and want their name on it. Their sign-off is the whole point; applying it without asking defeats it.
+- **Stamping their identity, not yours.** `git commit -s` derives the `Signed-off-by` name and email straight from git config, so make sure `user.name`/`user.email` are the human's before committing. CI rejects any sign-off carrying a coding-agent identity (Cursor, Claude, Copilot, Devin, …), so signing under your own identity fails the `DCO sign-off` job.
+
+Credit yourself with a `Co-authored-by:` trailer — agent assistance is expected here and that trailer is welcome (it is deliberately not checked).
+
+See CONTRIBUTING.md → Developer Certificate of Origin (DCO) for the full contract.
+
 ## Guidelines
 
 - When implementing a task, be sure to first read through the ADRs that exist in docs/adrs so you understand the historical decisions that have been made.

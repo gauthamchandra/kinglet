@@ -197,6 +197,17 @@ The **DCO sign-off** job in CI checks every commit in the PR and names the exact
 run if one is missing. Commits authored by bots (release-please) are skipped — an app cannot
 certify the DCO on anyone's behalf.
 
+**The sign-off must carry a human's identity.** For the same reason a bot can't certify the
+DCO, a coding agent can't certify it under its own name — the sign-off asserts that a person
+reviewed the code and stands behind it. CI rejects any `Signed-off-by` line carrying a known
+agent identity (Cursor, Claude, Copilot, Devin, …). An agent *may* run `git commit -s` on your
+behalf, but only after you have reviewed the change and given it your sign-off — and with git
+configured to your name and email, so the trailer derives straight from your git config and is
+genuinely yours. Crediting the agent is still welcome — put it in a `Co-authored-by` trailer,
+which is *not* checked. Using agents here is expected (see [AI-assisted
+contributions](#ai-assisted-contributions)); putting a sign-off on code no human reviewed is
+the line.
+
 ---
 
 ## Quality bar
