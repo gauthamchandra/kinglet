@@ -95,7 +95,6 @@ export class DiscoveryEndpoints {
     this.serviceRegistry = serviceRegistry;
     this.documentGenerator = documentGenerator;
 
-    // Set up cache cleanup
     if (this.config.enableCaching) {
       this.startCacheCleanup();
     }
@@ -115,7 +114,6 @@ export class DiscoveryEndpoints {
     headers: Record<string, string> = {}
   ): Promise<Response> {
     try {
-      // Validate query parameters
       const validatedQuery = DiscoveryQuerySchema.parse(query);
 
       this.logger.debug('Discovery REST request', {
@@ -123,14 +121,12 @@ export class DiscoveryEndpoints {
         query: validatedQuery,
       });
 
-      // Check if service exists first
       const availableVersions = this.getAvailableVersions(serviceName)[serviceName] || [];
 
       if (availableVersions.length === 0) {
         return this.createErrorResponse(404, `Service '${serviceName}' not found`, 'NOT_FOUND');
       }
 
-      // Version negotiation
       const version = this.negotiateVersion(serviceName, validatedQuery.version, headers);
 
       if (!version) {
@@ -139,7 +135,6 @@ export class DiscoveryEndpoints {
         });
       }
 
-      // Check cache if enabled
       if (this.config.enableCaching) {
         const cacheKey = this.createCacheKey('discovery', serviceName, version, validatedQuery);
         const cached = this.getFromCache(cacheKey);
@@ -157,20 +152,17 @@ export class DiscoveryEndpoints {
         }
       }
 
-      // Get discovery document
       try {
         const discoveryDocument = this.documentGenerator.generateDiscoveryDocument(
           serviceName,
           version
         );
 
-        // Apply field selection if specified
         const filteredDocument = this.applyFieldSelection(
           discoveryDocument as unknown as Record<string, unknown>,
           validatedQuery.fields
         );
 
-        // Cache the response if caching is enabled
         if (this.config.enableCaching) {
           const cacheKey = this.createCacheKey('discovery', serviceName, version, validatedQuery);
 
@@ -222,14 +214,12 @@ export class DiscoveryEndpoints {
     _headers: Record<string, string> = {}
   ): Promise<Response> {
     try {
-      // Validate query parameters
       const validatedQuery = ServiceListQuerySchema.parse(query);
 
       this.logger.debug('API directory request', {
         query: validatedQuery,
       });
 
-      // Check cache if enabled
       if (this.config.enableCaching) {
         const cacheKey = this.createCacheKey('directory', '', '', validatedQuery);
         const cached = this.getFromCache(cacheKey);
@@ -241,10 +231,8 @@ export class DiscoveryEndpoints {
         }
       }
 
-      // Get directory document
       const directoryDocument = this.documentGenerator.generateDirectoryDocument();
 
-      // Apply filtering
       let items = directoryDocument.items;
 
       if (validatedQuery.name) {
@@ -264,7 +252,6 @@ export class DiscoveryEndpoints {
         items,
       };
 
-      // Cache the response if caching is enabled
       if (this.config.enableCaching) {
         const cacheKey = this.createCacheKey('directory', '', '', validatedQuery);
 
@@ -306,7 +293,6 @@ export class DiscoveryEndpoints {
         endpoint,
       });
 
-      // Validate service exists
       const services = this.serviceRegistry.getServicesByName(serviceName);
       const service = services.find(s => s.version === version);
 
@@ -318,7 +304,6 @@ export class DiscoveryEndpoints {
         );
       }
 
-      // Handle different discovery endpoints
       switch (endpoint) {
         case 'methods': {
           const serviceInfo: ServiceInfo = {
@@ -404,27 +389,22 @@ export class DiscoveryEndpoints {
   ): { valid: boolean; errors?: string[] } {
     const errors: string[] = [];
 
-    // Validate service name
     if (!serviceName || typeof serviceName !== 'string') {
       errors.push('Service name is required and must be a string');
     }
 
-    // Validate version if provided
     if (query.version && typeof query.version !== 'string') {
       errors.push('Version must be a string');
     }
 
-    // Validate fields parameter
     if (query.fields && typeof query.fields !== 'string') {
       errors.push('Fields parameter must be a string');
     }
 
-    // Validate alt parameter
     if (query.alt && !['json', 'media', 'proto'].includes(query.alt as string)) {
       errors.push('Alt parameter must be one of: json, media, proto');
     }
 
-    // Validate boolean parameters
     const booleanParams = ['prettyPrint'];
 
     for (const param of booleanParams) {
@@ -461,7 +441,6 @@ export class DiscoveryEndpoints {
       return versionInfo ? { [serviceName]: versionInfo.versions.map(v => v.version) } : {};
     }
 
-    // Get all service versions
     const services = this.serviceRegistry.discoverServices();
     const versionsByService: Record<string, string[]> = {};
 
@@ -530,19 +509,16 @@ export class DiscoveryEndpoints {
       return null;
     }
 
-    // If specific version requested, validate it
     if (requestedVersion) {
       return availableVersions.includes(requestedVersion) ? requestedVersion : null;
     }
 
-    // Check Accept-Version header
     const acceptVersion = headers['accept-version'] || headers['Accept-Version'];
 
     if (acceptVersion && availableVersions.includes(acceptVersion)) {
       return acceptVersion;
     }
 
-    // Return latest/default version
     const versionInfo = this.serviceRegistry.getServiceVersions(serviceName);
 
     return versionInfo?.defaultVersion ?? availableVersions[0] ?? null;
@@ -792,7 +768,6 @@ export class DiscoveryEndpoints {
         responseData = JSON.stringify(data, null, 2);
     }
 
-    // Handle JSONP callback
     if (query.callback && alt === 'json') {
       contentType = 'application/javascript';
       responseData = `${query.callback}(${responseData});`;

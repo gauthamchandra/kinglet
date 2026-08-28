@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { SubscriptionRecord } from './types.ts';
 import { PUBSUB_SUBSCRIPTIONS_TABLE, pubsubSubscriptionsTableSchema } from './types.ts';
 
@@ -42,8 +43,8 @@ export class SubscriptionRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListSubscriptionsResult> {
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<SubscriptionRecord>(PUBSUB_SUBSCRIPTIONS_TABLE, {
       filter: {

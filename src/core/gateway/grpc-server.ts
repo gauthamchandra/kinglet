@@ -1,6 +1,5 @@
 /**
  * gRPC Server implementation
- * Provides the foundation gRPC server with service registration and reflection support
  */
 
 import * as grpc from '@grpc/grpc-js';
@@ -16,11 +15,6 @@ export interface GrpcServiceDefinition {
   implementation: grpc.UntypedServiceImplementation;
 }
 
-export interface HealthCheckService {
-  check(call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>): void;
-  watch(call: grpc.ServerWritableStream<unknown, unknown>): void;
-}
-
 export class GrpcServer {
   private server: grpc.Server;
   private config: Config['server'];
@@ -32,12 +26,6 @@ export class GrpcServer {
     this.config = config;
     this.logger = logger;
     this.server = new grpc.Server();
-
-    // Set up health check service by default
-    this.setupHealthCheckService();
-
-    // Set up reflection service for debugging
-    this.setupReflectionService();
   }
 
   /**
@@ -180,66 +168,6 @@ export class GrpcServer {
    */
   getServiceDefinition(name: string): GrpcServiceDefinition | undefined {
     return this.services.get(name);
-  }
-
-  /**
-   * Set up the health check service
-   */
-  private setupHealthCheckService(): void {
-    const _healthService: HealthCheckService = {
-      check: (_call, callback) => {
-        // Simple health check - always return SERVING
-        const response = {
-          status: 'SERVING', // or 'NOT_SERVING', 'UNKNOWN', 'SERVICE_UNKNOWN'
-        };
-
-        this.logger.debug('Health check requested');
-        callback(null, response);
-      },
-
-      watch: call => {
-        // Health check streaming - for now just send SERVING status
-        const response = {
-          status: 'SERVING',
-        };
-
-        call.write(response);
-
-        // Set up periodic health status updates
-        const interval = setInterval(() => {
-          if (!call.destroyed && !call.cancelled) {
-            call.write(response);
-          } else {
-            clearInterval(interval);
-          }
-        }, 30000); // Send update every 30 seconds
-
-        call.on('cancelled', () => {
-          clearInterval(interval);
-          this.logger.debug('Health check watch cancelled');
-        });
-
-        call.on('error', error => {
-          clearInterval(interval);
-          this.logger.warn('Health check watch error:', error);
-        });
-      },
-    };
-
-    // Health check service would be registered here if we had the proto file
-    // For now, we'll add it as a placeholder in our service registry
-    this.logger.debug(
-      `Health check service configured with ${Object.keys(_healthService).length} methods`
-    );
-  }
-
-  /**
-   * Set up the server reflection service for debugging
-   */
-  private setupReflectionService(): void {
-    // Server reflection would be set up here to enable tools like grpcurl
-    // This allows clients to discover available services and methods
-    this.logger.debug('gRPC reflection service configured (placeholder)');
   }
 
   /**

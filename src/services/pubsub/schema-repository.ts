@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { SchemaRecord } from './types.ts';
 import { PUBSUB_SCHEMAS_TABLE, pubsubSchemasTableSchema } from './types.ts';
 
@@ -40,8 +41,8 @@ export class SchemaRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListSchemasResult> {
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<SchemaRecord>(PUBSUB_SCHEMAS_TABLE, {
       filter: {

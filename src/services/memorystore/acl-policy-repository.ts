@@ -4,7 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { parseOffsetToken } from '@/shared/utils/pagination.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { AclPolicyRecord, AclPolicyRevisionRecord } from './types.ts';
 import {
   aclPolicyRevisionTableSchema,
@@ -70,7 +70,7 @@ export class AclPolicyRepository {
     pageToken?: string
   ): Promise<ListAclPoliciesResult> {
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? 100;
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
     const prefix = `projects/${project}/locations/${location}/aclPolicies/`;
 
     const result = await this.storage.find<AclPolicyRecord>(MEMORYSTORE_ACL_POLICIES_TABLE, {
@@ -157,7 +157,7 @@ export class AclPolicyRepository {
     pageToken?: string
   ): Promise<ListAclPolicyRevisionsResult> {
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? 100;
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<AclPolicyRevisionRecord>(
       MEMORYSTORE_ACL_POLICY_REVISIONS_TABLE,

@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { WorkflowRecord, WorkflowRevisionRecord } from './types.ts';
 import {
   WORKFLOW_REVISIONS_TABLE,
@@ -81,8 +82,8 @@ export class WorkflowRepository {
   ): Promise<ListWorkflowsResult> {
     const prefix = `projects/${project}/locations/${location}/workflows/`;
 
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<WorkflowRecord>(WORKFLOWS_TABLE, {
       filter: {
@@ -111,8 +112,8 @@ export class WorkflowRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListRevisionsResult> {
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<WorkflowRevisionRecord>(WORKFLOW_REVISIONS_TABLE, {
       filter: {

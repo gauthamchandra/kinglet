@@ -173,26 +173,10 @@ export function createStandardLoader(): ConfigLoader {
   const loader = new ConfigLoader();
   const nodeEnv = process.env.NODE_ENV || 'development';
 
-  // Load configuration in this order (later sources override earlier ones):
-  // 1. Default configuration
-  // 2. Environment-specific configuration
-  // 3. Local configuration (ignored by git)
-  // 4. Environment variables
-
-  // Default configuration
+  // Later sources override earlier: default → env-specific → local → env vars.
   loader.addJsonFile(join(process.cwd(), 'config', 'default.json'), 'default');
-
-  // Environment-specific configuration
-  const envConfigPath = join(process.cwd(), 'config', `${nodeEnv}.json`);
-
-  loader.addJsonFile(envConfigPath, `environment:${nodeEnv}`);
-
-  // Local configuration (optional)
-  const localConfigPath = join(process.cwd(), 'config', 'local.json');
-
-  loader.addJsonFile(localConfigPath, 'local');
-
-  // Environment variables (highest precedence)
+  loader.addJsonFile(join(process.cwd(), 'config', `${nodeEnv}.json`), `environment:${nodeEnv}`);
+  loader.addJsonFile(join(process.cwd(), 'config', 'local.json'), 'local');
   loader.addEnvironment();
 
   return loader;

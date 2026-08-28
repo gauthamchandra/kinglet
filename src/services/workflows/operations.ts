@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { OperationRecord, OperationResponse } from './types.ts';
 import {
   buildOperationName,
@@ -80,8 +81,8 @@ export class OperationsStore {
   ): Promise<ListOperationsResult> {
     const prefix = `projects/${project}/locations/${location}/operations/`;
 
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<OperationRecord>(WORKFLOW_OPERATIONS_TABLE, {
       filter: {

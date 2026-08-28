@@ -66,7 +66,8 @@ export class GrpcRestBridge {
   registerService(metadata: ServiceMetadata): void {
     this.services.set(metadata.name, metadata);
 
-    // Index routes for fast lookup - use method name as key since paths have parameters
+    // Index by method name — REST paths contain parameters, so the path itself
+    // is not a stable lookup key.
     for (const [methodName, rule] of metadata.transcodingRules) {
       const routeKey = `${rule.restEndpoint.httpMethod}:${methodName}`;
 
@@ -93,7 +94,6 @@ export class GrpcRestBridge {
     }
 
     try {
-      // Transform HTTP request to gRPC request format
       const grpcRequest = rule.requestTransformer(httpRequest);
 
       this.logger.debug(
@@ -177,7 +177,7 @@ export class GrpcRestBridge {
         grpcMethod: {
           service: serviceName,
           method: ruleConfig.grpcMethod,
-          isStreaming: false, // TODO: Detect from proto definition
+          isStreaming: false,
           isClientStreaming: false,
           isServerStreaming: false,
         },
@@ -228,7 +228,6 @@ export class GrpcRestBridge {
     const method = httpRequest.method.toUpperCase();
     const path = url.pathname;
 
-    // Pattern matching through all registered rules
     for (const rule of this.routeToService.values()) {
       if (rule.restEndpoint.httpMethod === method && rule.restEndpoint.pathPattern.test(path)) {
         return rule;
@@ -265,10 +264,8 @@ export class GrpcRestBridge {
     const segments = pathTemplate.split('/');
     const processedSegments = segments.map(segment => {
       if (segment.match(/^\{[^}]+\}$/)) {
-        // This is a parameter segment, replace with capture group
         return '([^/]+)';
       } else {
-        // This is a literal segment, escape special characters
         return segment.replace(/[.+?^$|[\]\\*]/g, '\\$&');
       }
     });
@@ -285,8 +282,6 @@ export class GrpcRestBridge {
     return (httpRequest: TranscodingRequest): unknown => {
       const url = new URL(httpRequest.url);
       const path = url.pathname;
-
-      // Extract path parameters
       const rule = this.findTranscodingRule(httpRequest);
 
       if (!rule) {
@@ -306,17 +301,14 @@ export class GrpcRestBridge {
         });
       }
 
-      // Build gRPC request
       const grpcRequest: Record<string, unknown> = {
         ...pathValues,
       };
 
-      // Add query parameters
       for (const [key, value] of url.searchParams.entries()) {
         grpcRequest[key] = value;
       }
 
-      // Add request body if present
       if (
         httpRequest.body &&
         (httpRequest.method === 'POST' ||
@@ -349,7 +341,6 @@ export class GrpcRestBridge {
       let status = 200;
       let body = grpcResponse;
 
-      // Handle different response types
       if (grpcResponse === null || grpcResponse === undefined) {
         status = 204; // No Content
         body = undefined;
@@ -358,7 +349,6 @@ export class GrpcRestBridge {
         grpcResponse !== null &&
         'items' in grpcResponse
       ) {
-        // List response
         status = 200;
         body = grpcResponse;
       } else if (typeof grpcResponse === 'object') {
@@ -435,7 +425,6 @@ export class GrpcRestBridge {
  * Factory function to create common transcoding rules for GCP-like APIs
  */
 export function createGcpTranscodingRules(
-  _serviceName: string,
   resourceName: string,
   resourcePath: string
 ): Array<{
@@ -446,21 +435,16 @@ export function createGcpTranscodingRules(
   responseTransform?: (res: unknown) => TranscodingResponse;
 }> {
   return [
-    // Create resource
     {
       grpcMethod: `Create${resourceName}`,
       httpMethod: 'POST',
       httpPath: resourcePath,
     },
-
-    // Get resource
     {
       grpcMethod: `Get${resourceName}`,
       httpMethod: 'GET',
       httpPath: `${resourcePath}/{name}`,
     },
-
-    // List resources
     {
       grpcMethod: `List${resourceName}s`,
       httpMethod: 'GET',
@@ -484,15 +468,11 @@ export function createGcpTranscodingRules(
         };
       },
     },
-
-    // Update resource
     {
       grpcMethod: `Update${resourceName}`,
       httpMethod: 'PATCH',
       httpPath: `${resourcePath}/{name}`,
     },
-
-    // Delete resource
     {
       grpcMethod: `Delete${resourceName}`,
       httpMethod: 'DELETE',
@@ -516,17 +496,11 @@ export function createPubSubTranscodingRules(): Array<{
   responseTransform?: (res: unknown) => TranscodingResponse;
 }> {
   const baseRules = [
-    ...createGcpTranscodingRules('Publisher', 'Topic', '/v1/projects/{project}/topics'),
-    ...createGcpTranscodingRules(
-      'Subscriber',
-      'Subscription',
-      '/v1/projects/{project}/subscriptions'
-    ),
+    ...createGcpTranscodingRules('Topic', '/v1/projects/{project}/topics'),
+    ...createGcpTranscodingRules('Subscription', '/v1/projects/{project}/subscriptions'),
   ];
 
-  // Add Pub/Sub specific methods
   const pubsubSpecificRules = [
-    // Publish messages
     {
       grpcMethod: 'Publish',
       httpMethod: 'POST',
@@ -545,8 +519,6 @@ export function createPubSubTranscodingRules(): Array<{
         };
       },
     },
-
-    // Pull messages
     {
       grpcMethod: 'Pull',
       httpMethod: 'POST',
@@ -569,8 +541,6 @@ export function createPubSubTranscodingRules(): Array<{
         };
       },
     },
-
-    // Acknowledge messages
     {
       grpcMethod: 'Acknowledge',
       httpMethod: 'POST',

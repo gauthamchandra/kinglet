@@ -4,6 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord, QueryCondition } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import { TasksError } from './queue-service.ts';
 import type { QueueRecord } from './types.ts';
 import { QueueState, TASKS_QUEUES_TABLE, tasksQueuesTableSchema } from './types.ts';
@@ -51,8 +52,8 @@ export class QueueRepository {
   ): Promise<ListQueuesResult> {
     const prefix = `projects/${project}/locations/${location}/queues/`;
 
-    const offset = pageToken ? parseInt(pageToken, 10) : 0;
-    const limit = pageSize ?? 100;
+    const offset = parseOffsetToken(pageToken);
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const conditions: QueryCondition[] = [{ field: 'name', operator: 'like', value: `${prefix}%` }];
 

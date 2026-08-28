@@ -163,10 +163,7 @@ export class ServiceRegistry {
     this.logger = logger;
     this.config = { ...DEFAULT_REGISTRY_CONFIG, ...config };
 
-    // Initialize event listener maps
     this.initializeEventListeners();
-
-    // Start health checking
     this.startHealthChecking();
 
     this.logger.info('Service Registry initialized', {
@@ -179,21 +176,15 @@ export class ServiceRegistry {
    * Register a service with the registry
    */
   async registerService(service: ServiceDefinition): Promise<void> {
-    // Validate service definition
     this.validateServiceDefinition(service);
 
-    // Check if service already exists
     if (this.services.has(service.id)) {
       throw new Error(`Service with ID '${service.id}' already registered`);
     }
 
-    // Register the service
     this.services.set(service.id, service);
-
-    // Update name-based index
     this.updateServiceNameIndex(service);
 
-    // Initialize health status
     this.serviceHealth.set(service.id, {
       serviceId: service.id,
       status: 'unknown',
@@ -202,7 +193,6 @@ export class ServiceRegistry {
       consecutiveFailures: 0,
     });
 
-    // Perform initial health check
     await this.performHealthCheck(service.id);
 
     this.logger.info(`Service registered: ${service.name} v${service.version}`, {
@@ -211,7 +201,6 @@ export class ServiceRegistry {
       protocols: service.protocols.map(p => p.name),
     });
 
-    // Emit registration event
     this.emit('service:registered', {
       serviceId: service.id,
       serviceName: service.name,
@@ -230,10 +219,8 @@ export class ServiceRegistry {
       return false;
     }
 
-    // Remove from main registry
     this.services.delete(serviceId);
 
-    // Update name-based index
     const nameSet = this.servicesByName.get(service.name);
 
     if (nameSet) {
@@ -243,14 +230,12 @@ export class ServiceRegistry {
       }
     }
 
-    // Remove health status
     this.serviceHealth.delete(serviceId);
 
     this.logger.info(`Service deregistered: ${service.name} v${service.version}`, {
       serviceId,
     });
 
-    // Emit deregistration event
     this.emit('service:deregistered', {
       serviceId,
       serviceName: service.name,
@@ -267,29 +252,24 @@ export class ServiceRegistry {
   discoverServices(query: ServiceQuery = {}): ServiceDefinition[] {
     let results = Array.from(this.services.values());
 
-    // Filter by name
     if (query.name) {
       results = results.filter(service => service.name === query.name);
     }
 
-    // Filter by version
     if (query.version) {
       results = results.filter(service => service.version === query.version);
     }
 
-    // Filter by tag
     if (query.tag) {
       const tag = query.tag;
 
       results = results.filter(service => service.tags?.includes(tag));
     }
 
-    // Filter by protocol
     if (query.protocol) {
       results = results.filter(service => service.protocols.some(p => p.name === query.protocol));
     }
 
-    // Filter by health status
     if (query.healthyOnly) {
       results = results.filter(service => {
         const health = this.serviceHealth.get(service.id);
@@ -454,12 +434,10 @@ export class ServiceRegistry {
       throw new Error('Service must support at least one protocol');
     }
 
-    // Validate endpoint
     if (!service.endpoint.host || !service.endpoint.port) {
       throw new Error('Service endpoint must have host and port');
     }
 
-    // Validate protocols
     for (const protocol of service.protocols) {
       if (!['http', 'grpc'].includes(protocol.name)) {
         throw new Error(`Unsupported protocol: ${protocol.name}`);
@@ -501,7 +479,6 @@ export class ServiceRegistry {
   private async performAllHealthChecks(): Promise<void> {
     const serviceIds = Array.from(this.services.keys());
 
-    // Perform health checks in parallel
     await Promise.allSettled(serviceIds.map(serviceId => this.performHealthCheck(serviceId)));
   }
 
@@ -521,13 +498,11 @@ export class ServiceRegistry {
     let details: HealthDetails | undefined;
 
     try {
-      // Perform actual health check
       const healthResult = await this.doHealthCheck(service);
 
       newStatus = healthResult.status;
       details = healthResult.details;
 
-      // Update consecutive failures counter
       if (newStatus === 'healthy') {
         const healthUpdate: ServiceHealth = {
           ...currentHealth,
@@ -579,7 +554,6 @@ export class ServiceRegistry {
       });
     }
 
-    // Check if status changed
     if (currentHealth.status !== newStatus) {
       this.emit('health:changed', {
         serviceId,
@@ -590,7 +564,6 @@ export class ServiceRegistry {
       });
     }
 
-    // Auto-deregister unhealthy services if configured
     if (this.config.enableAutoDeregistration) {
       const updatedHealth = this.serviceHealth.get(serviceId);
 
@@ -648,7 +621,6 @@ export class ServiceRegistry {
     } catch (error) {
       const err = error as Error;
 
-      // Check if it's a timeout
       if (err.name === 'TimeoutError') {
         return { status: 'degraded' };
       }
@@ -687,7 +659,6 @@ export class ServiceRegistry {
 
     for (const listener of listeners) {
       try {
-        // Handle both sync and async listeners
         const result = listener(data);
 
         if (result instanceof Promise) {

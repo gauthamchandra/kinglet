@@ -247,17 +247,14 @@ export class DiscoveryDocumentGenerator {
       schemas: this.generateSchemas(serviceInfo.schemas),
     };
 
-    // Add methods if they exist at the top level
     if (serviceInfo.methods.length > 0) {
       document.methods = this.generateMethods(serviceInfo.methods);
     }
 
-    // Add resources
     if (serviceInfo.resources.length > 0) {
       document.resources = this.generateResources(serviceInfo.resources);
     }
 
-    // Add authentication if methods require scopes
     const hasScopes = this.hasAuthScopes(serviceInfo);
 
     if (hasScopes) {

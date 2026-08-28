@@ -4,7 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { parseOffsetToken } from '@/shared/utils/pagination.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { BackupCollectionRecord, BackupRecord } from './types.ts';
 import {
   backupCollectionTableSchema,
@@ -101,7 +101,7 @@ export class BackupRepository {
     pageToken?: string
   ): Promise<ListBackupCollectionsResult> {
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? 100;
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
     const prefix = `projects/${project}/locations/${location}/backupCollections/`;
 
     const result = await this.storage.find<BackupCollectionRecord>(
@@ -152,7 +152,7 @@ export class BackupRepository {
     pageToken?: string
   ): Promise<ListBackupsResult> {
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? 100;
+    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<BackupRecord>(MEMORYSTORE_BACKUPS_TABLE, {
       filter: {

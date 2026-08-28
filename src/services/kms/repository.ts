@@ -5,6 +5,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { CryptoKeyRecord, CryptoKeyVersionRecord, KeyRingRecord } from './types.ts';
 import {
   KMS_CRYPTO_KEY_VERSIONS_TABLE,
@@ -21,10 +22,10 @@ interface PagedResult<T> {
 }
 
 function pageBounds(pageSize?: number, pageToken?: string): { offset: number; limit: number } {
-  const offset = pageToken ? parseInt(pageToken, 10) : 0;
-  const limit = pageSize != null && pageSize > 0 ? pageSize : 100;
+  const offset = parseOffsetToken(pageToken);
+  const limit = pageSize != null && pageSize > 0 ? pageSize : DEFAULT_LIST_PAGE_SIZE;
 
-  return { offset: Number.isNaN(offset) ? 0 : offset, limit };
+  return { offset, limit };
 }
 
 export class KeyRingRepository {
