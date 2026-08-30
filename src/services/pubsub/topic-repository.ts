@@ -1,39 +1,49 @@
 /**
- * Topic Repository - persistence layer for Pub/Sub topics
+ * Persistence for Pub/Sub topics. CRUD lives in {@link ResourceRepository}.
+ *
+ * <p>Uniqueness is enforced in the service layer, so the repository does not
+ * reject duplicate names — see {@link ResourceRepositoryOptions.rejectDuplicateNames}.
  */
 
 import type { StorageManager } from '@/core/storage/manager.ts';
+import { ResourceRepository } from '@/core/storage/resource-repository.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { TopicRecord } from './types.ts';
 import { PUBSUB_TOPICS_TABLE, pubsubTopicsTableSchema } from './types.ts';
 
 export interface ListTopicsResult {
   topics: TopicRecord[];
-  nextPageToken?: string;
+  nextPageToken?: string | undefined;
 }
 
-export class TopicRepository {
-  private storage: StorageManager;
+function buildTopicListPrefix(project: string): string {
+  return `projects/${project}/topics/`;
+}
 
+export class TopicRepository extends ResourceRepository<TopicRecord> {
   constructor(storage: StorageManager) {
-    this.storage = storage;
-  }
-
-  async initialize(): Promise<void> {
-    await this.storage.createTable(PUBSUB_TOPICS_TABLE, pubsubTopicsTableSchema);
-  }
-
-  async createTopic(data: Omit<TopicRecord, keyof BaseRecord>): Promise<TopicRecord> {
-    return this.storage.create<TopicRecord>(PUBSUB_TOPICS_TABLE, data);
-  }
-
-  async getTopicByName(name: string): Promise<TopicRecord | null> {
-    return this.storage.findFirst<TopicRecord>(PUBSUB_TOPICS_TABLE, {
-      filter: {
-        conditions: [{ field: 'name', operator: 'eq', value: name }],
-      },
+    super(storage, PUBSUB_TOPICS_TABLE, pubsubTopicsTableSchema, 'topic', {
+      rejectDuplicateNames: false,
     });
+  }
+
+  createTopic(data: Omit<TopicRecord, keyof BaseRecord>): Promise<TopicRecord> {
+    return this.create(data);
+  }
+
+  getTopicByName(name: string): Promise<TopicRecord | null> {
+    return this.getByName(name);
+  }
+
+  updateTopic(
+    name: string,
+    data: Partial<Omit<TopicRecord, keyof BaseRecord>>
+  ): Promise<TopicRecord | null> {
+    return this.update(name, data);
+  }
+
+  deleteTopic(name: string): Promise<boolean> {
+    return this.delete(name);
   }
 
   async listTopics(
@@ -41,48 +51,12 @@ export class TopicRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListTopicsResult> {
-    const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
+    const { records, nextPageToken } = await this.listByPrefix(
+      buildTopicListPrefix(project),
+      pageSize,
+      pageToken
+    );
 
-    const result = await this.storage.find<TopicRecord>(PUBSUB_TOPICS_TABLE, {
-      filter: {
-        conditions: [{ field: 'name', operator: 'like', value: `projects/${project}/topics/%` }],
-      },
-      pagination: { limit, offset },
-      sort: [{ field: 'name', direction: 'asc' }],
-    });
-
-    const listResult: ListTopicsResult = {
-      topics: result.data,
-    };
-
-    if (result.hasMore) {
-      listResult.nextPageToken = String(offset + limit);
-    }
-
-    return listResult;
-  }
-
-  async updateTopic(
-    name: string,
-    data: Partial<Omit<TopicRecord, keyof BaseRecord>>
-  ): Promise<TopicRecord | null> {
-    const existing = await this.getTopicByName(name);
-
-    if (!existing) {
-      return null;
-    }
-
-    return this.storage.updateById<TopicRecord>(PUBSUB_TOPICS_TABLE, existing.id, data);
-  }
-
-  async deleteTopic(name: string): Promise<boolean> {
-    const existing = await this.getTopicByName(name);
-
-    if (!existing) {
-      return false;
-    }
-
-    return this.storage.deleteById(PUBSUB_TOPICS_TABLE, existing.id);
+    return { topics: records, nextPageToken };
   }
 }

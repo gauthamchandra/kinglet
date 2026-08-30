@@ -1,49 +1,44 @@
 /**
- * Instance Repository - persistence layer for Memorystore instances
+ * Persistence for Memorystore instances. CRUD lives in {@link ResourceRepository}.
  */
 
 import type { StorageManager } from '@/core/storage/manager.ts';
+import { ResourceRepository } from '@/core/storage/resource-repository.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
-import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
 import type { InstanceRecord } from './types.ts';
 import { instanceTableSchema, MEMORYSTORE_INSTANCES_TABLE } from './types.ts';
 
 export interface ListInstancesResult {
   instances: InstanceRecord[];
-  nextPageToken?: string;
+  nextPageToken?: string | undefined;
 }
 
-export class InstanceRepository {
-  private storage: StorageManager;
+function buildInstanceListPrefix(project: string, location: string): string {
+  return `projects/${project}/locations/${location}/instances/`;
+}
 
+export class InstanceRepository extends ResourceRepository<InstanceRecord> {
   constructor(storage: StorageManager) {
-    this.storage = storage;
+    super(storage, MEMORYSTORE_INSTANCES_TABLE, instanceTableSchema, 'Memorystore instance');
   }
 
-  async initialize(): Promise<void> {
-    const existingTables = await this.storage.listTables();
-
-    if (existingTables.includes(MEMORYSTORE_INSTANCES_TABLE)) return;
-
-    await this.storage.createTable(MEMORYSTORE_INSTANCES_TABLE, instanceTableSchema);
+  createInstance(data: Omit<InstanceRecord, keyof BaseRecord>): Promise<InstanceRecord> {
+    return this.create(data);
   }
 
-  async createInstance(data: Omit<InstanceRecord, keyof BaseRecord>): Promise<InstanceRecord> {
-    const existing = await this.getInstanceByName(data.name);
-
-    if (existing) {
-      throw new Error(`A Memorystore instance named "${data.name}" already exists`);
-    }
-
-    return this.storage.create<InstanceRecord>(MEMORYSTORE_INSTANCES_TABLE, data);
+  getInstanceByName(name: string): Promise<InstanceRecord | null> {
+    return this.getByName(name);
   }
 
-  async getInstanceByName(name: string): Promise<InstanceRecord | null> {
-    return this.storage.findFirst<InstanceRecord>(MEMORYSTORE_INSTANCES_TABLE, {
-      filter: {
-        conditions: [{ field: 'name', operator: 'eq', value: name }],
-      },
-    });
+  updateInstance(
+    name: string,
+    data: Partial<Omit<InstanceRecord, keyof BaseRecord>>
+  ): Promise<InstanceRecord | null> {
+    return this.update(name, data);
+  }
+
+  deleteInstance(name: string): Promise<boolean> {
+    return this.delete(name);
   }
 
   async listInstances(
@@ -52,44 +47,13 @@ export class InstanceRepository {
     pageSize?: number,
     pageToken?: string
   ): Promise<ListInstancesResult> {
-    const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
-    const prefix = `projects/${project}/locations/${location}/instances/`;
+    const { records, nextPageToken } = await this.listByPrefix(
+      buildInstanceListPrefix(project, location),
+      pageSize,
+      pageToken
+    );
 
-    const result = await this.storage.find<InstanceRecord>(MEMORYSTORE_INSTANCES_TABLE, {
-      filter: {
-        conditions: [{ field: 'name', operator: 'like', value: `${prefix}%` }],
-      },
-      pagination: { limit, offset },
-      sort: [{ field: 'name', direction: 'asc' }],
-    });
-
-    const listResult: ListInstancesResult = { instances: result.data };
-
-    if (result.hasMore) {
-      listResult.nextPageToken = String(offset + limit);
-    }
-
-    return listResult;
-  }
-
-  async updateInstance(
-    name: string,
-    data: Partial<Omit<InstanceRecord, keyof BaseRecord>>
-  ): Promise<InstanceRecord | null> {
-    const existing = await this.getInstanceByName(name);
-
-    if (!existing) return null;
-
-    return this.storage.updateById<InstanceRecord>(MEMORYSTORE_INSTANCES_TABLE, existing.id, data);
-  }
-
-  async deleteInstance(name: string): Promise<boolean> {
-    const existing = await this.getInstanceByName(name);
-
-    if (!existing) return false;
-
-    return this.storage.deleteById(MEMORYSTORE_INSTANCES_TABLE, existing.id);
+    return { instances: records, nextPageToken };
   }
 
   /**

@@ -3,7 +3,7 @@
  */
 
 import type { StorageManager } from '@/core/storage/manager.ts';
-import { ResourceRepository } from './resource-repository.ts';
+import { ResourceRepository } from '@/core/storage/resource-repository.ts';
 import type { ClusterRecord } from './types.ts';
 import { ALLOYDB_CLUSTERS_TABLE, clusterTableSchema } from './types.ts';
 

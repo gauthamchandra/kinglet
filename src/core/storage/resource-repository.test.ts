@@ -4,7 +4,7 @@ import type { BaseRecord, TableSchema } from '@/core/storage/types.ts';
 import type { ListByPrefixResult, NamedRecord } from './resource-repository.ts';
 import { ResourceRepository } from './resource-repository.ts';
 
-const WIDGETS_TABLE = 'alloydb_test_widgets';
+const WIDGETS_TABLE = 'test_named_resources';
 
 interface WidgetRecord extends NamedRecord {
   note: string;
@@ -22,8 +22,8 @@ const widgetTableSchema: TableSchema = {
 
 /** Exercises the base contract directly rather than through one real resource. */
 class WidgetRepository extends ResourceRepository<WidgetRecord> {
-  constructor(storage: StorageManager) {
-    super(storage, WIDGETS_TABLE, widgetTableSchema, 'widget');
+  constructor(storage: StorageManager, rejectDuplicateNames = true) {
+    super(storage, WIDGETS_TABLE, widgetTableSchema, 'widget', { rejectDuplicateNames });
   }
 
   listUnder(prefix: string, pageSize?: number, pageToken?: string) {
@@ -89,6 +89,16 @@ describe('create', () => {
     await repository.create(widget(`${PREFIX}w1`));
 
     await expect(repository.create(widget(`${PREFIX}w1`))).rejects.toThrow(/widget/i);
+  });
+
+  test('create_whenRejectDuplicateNamesIsFalse_insertsWithoutCheckingUniqueness', async () => {
+    const unguarded = new WidgetRepository(storage, false);
+
+    await unguarded.initialize();
+    await unguarded.create(widget(`${PREFIX}w1`));
+    await unguarded.create(widget(`${PREFIX}w1`));
+
+    expect(await storage.count(WIDGETS_TABLE)).toBe(2);
   });
 });
 
