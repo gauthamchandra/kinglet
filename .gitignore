@@ -60,6 +60,10 @@ Thumbs.db
 tmp/
 temp/
 
+# Terraform — ignore lock files except the pinned harness lock in terraform/
+.terraform.lock.hcl
+!terraform/.terraform.lock.hcl
+
 # Data directory (for local development)
 data/
 

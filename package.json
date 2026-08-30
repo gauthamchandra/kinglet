@@ -23,6 +23,7 @@
     "test:coverage": "bun test --coverage",
     "test:coverage:check": "bun test --coverage && bun run scripts/check-coverage.ts",
     "test:e2e": "cd e2e && bun test",
+    "test:terraform": "./scripts/terraform-e2e.sh",
     "lint": "bunx tsc --noEmit && biome check src/ && knip",
     "lint:fix": "bunx tsc --noEmit && biome check --write src/",
     "format": "biome format --write .",

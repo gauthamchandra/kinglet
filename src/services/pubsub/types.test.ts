@@ -10,6 +10,7 @@ import {
   buildSnapshotName,
   buildSubscriptionName,
   buildTopicName,
+  CreateSubscriptionRequestSchema,
   handlePubSubError,
   PubSubError,
   parseSchemaName,
@@ -283,5 +284,19 @@ describe('handlePubSubError', () => {
     const result = handlePubSubError(err, 'Topic', mockResponseUtils as never);
 
     expect(result.status).toBe(400);
+  });
+});
+
+describe('CreateSubscriptionRequestSchema', () => {
+  test('accepts explicit null optional policy fields from Terraform', () => {
+    const parsed = CreateSubscriptionRequestSchema.safeParse({
+      topic: 'projects/test-project/topics/test-topic',
+      deadLetterPolicy: null,
+      retryPolicy: null,
+      pushConfig: null,
+      expirationPolicy: null,
+    });
+
+    expect(parsed.success).toBe(true);
   });
 });
