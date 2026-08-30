@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.2.0](https://github.com/gauthamchandra/kinglet/compare/v2.1.0...v2.2.0) (2026-08-30)
+
+
+### Features
+
+* **alloydb:** Add AlloyDB for PostgreSQL control-plane emulation ([#41](https://github.com/gauthamchandra/kinglet/issues/41)) ([3b90ec0](https://github.com/gauthamchandra/kinglet/commit/3b90ec01b20afddb6877e941f9e4dc0df48c8e53))
+* **cloudsql:** add Cloud SQL service emulation ([#45](https://github.com/gauthamchandra/kinglet/issues/45)) ([6244ec6](https://github.com/gauthamchandra/kinglet/commit/6244ec6b23527b3c9c7a5b2076929e33be32fc90))
+* **terraform:** add validation harness for Pub/Sub, KMS, and Workflows ([#52](https://github.com/gauthamchandra/kinglet/issues/52)) ([9cd37f4](https://github.com/gauthamchandra/kinglet/commit/9cd37f4216f9f7eb00dbc767a6b3ad4afdce60ca))
+
 ## [2.1.0](https://github.com/gauthamchandra/kinglet/compare/v2.0.0...v2.1.0) (2026-08-19)
 
 
