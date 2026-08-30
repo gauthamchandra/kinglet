@@ -433,28 +433,28 @@ export const CreateSubscriptionRequestSchema = z
           .optional(),
         noWrapper: z.object({ writeMetadata: z.boolean().optional() }).optional(),
       })
-      .optional(),
-    bigqueryConfig: z.record(z.string(), z.unknown()).optional(),
-    cloudStorageConfig: z.record(z.string(), z.unknown()).optional(),
+      .nullish(),
+    bigqueryConfig: z.record(z.string(), z.unknown()).nullish(),
+    cloudStorageConfig: z.record(z.string(), z.unknown()).nullish(),
     ackDeadlineSeconds: z.number().int().min(10).max(600).optional(),
     retainAckedMessages: z.boolean().optional(),
     messageRetentionDuration: z.string().optional(),
     labels: z.record(z.string(), z.string()).optional(),
     enableMessageOrdering: z.boolean().optional(),
-    expirationPolicy: z.object({ ttl: z.string().optional() }).optional(),
-    filter: z.string().optional(),
+    expirationPolicy: z.object({ ttl: z.string().optional() }).nullish(),
+    filter: z.string().nullish(),
     deadLetterPolicy: z
       .object({
         deadLetterTopic: z.string().optional(),
         maxDeliveryAttempts: z.number().int().optional(),
       })
-      .optional(),
+      .nullish(),
     retryPolicy: z
       .object({
         minimumBackoff: z.string().optional(),
         maximumBackoff: z.string().optional(),
       })
-      .optional(),
+      .nullish(),
     enableExactlyOnceDelivery: z.boolean().optional(),
   })
   .passthrough();

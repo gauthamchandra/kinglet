@@ -29,6 +29,7 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun test --coverage` - Run tests with coverage report
 - `bun run test:coverage:check` - Coverage report plus the 80% aggregate gate CI enforces
 - `bun run test:e2e` - Run the end-to-end suite
+- `bun run test:terraform` - Run Terraform validation harness against kinglet (Pub/Sub, KMS, Workflows)
 
 ### Code Quality
 - `bun run lint` - Run Biome linter (+ tsc + knip)
