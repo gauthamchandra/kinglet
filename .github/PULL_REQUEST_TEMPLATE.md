@@ -64,7 +64,7 @@ fine and often correct. Silently partial support is not.
 
 ## Contribution declarations
 
-- [ ] **All commits are signed off** (`git commit -s`). By signing off I certify the [DCO](https://developercertificate.org/) — I have the right to submit this under Apache-2.0 — **and that I have read and stand behind every line of it.**
+- [ ] **All commits are signed off under my identity** (`git commit -s`). By signing off I certify the [DCO](https://developercertificate.org/) — I have the right to submit this under Apache-2.0 — **and that I have read and stand behind every line of it.** An agent may apply my sign-off only after I have reviewed and approved the change; CI rejects sign-offs from coding-agent identities. Credit an agent with a `Co-authored-by` trailer.
 
 - [ ] **AI disclosure.** Tick this box if an AI tool wrote or substantially shaped any part of this change (implementation, tests, or this description).
 
