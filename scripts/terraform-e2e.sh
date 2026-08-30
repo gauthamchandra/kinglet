@@ -27,7 +27,8 @@ cleanup() {
   local exit_code=$?
 
   if [[ -n "${KINGLET_PID}" ]] && kill -0 "${KINGLET_PID}" 2>/dev/null; then
-    kill "${KINGLET_PID}" 2>/dev/null || true
+    # Kill the process group so the backgrounded bun server cannot outlive the harness.
+    kill -- "-${KINGLET_PID}" 2>/dev/null || kill "${KINGLET_PID}" 2>/dev/null || true
     wait "${KINGLET_PID}" 2>/dev/null || true
   fi
 
@@ -97,17 +98,16 @@ start_kinglet_bun() {
   require_cmd bun
 
   log "Starting kinglet via bun on port ${KINGLET_PORT}"
-  (
-    cd "${ROOT_DIR}"
-    STORAGE_TYPE=memory \
-    AUTH_MODE=bypass \
-    MOCK_PROJECT_ID=kinglet-terraform-validation \
-    SERVICES=pubsub,kms,workflows \
-    MEMORYSTORE_DATA_PLANE=false \
-    HTTP_PORT="${KINGLET_PORT}" \
-    bun run src/index.ts
-  ) &
+  pushd "${ROOT_DIR}" >/dev/null
+  STORAGE_TYPE=memory \
+  AUTH_MODE=bypass \
+  MOCK_PROJECT_ID=kinglet-terraform-validation \
+  SERVICES=pubsub,kms,workflows \
+  MEMORYSTORE_DATA_PLANE=false \
+  HTTP_PORT="${KINGLET_PORT}" \
+  bun run src/index.ts &
   KINGLET_PID=$!
+  popd >/dev/null
 }
 
 start_kinglet() {
