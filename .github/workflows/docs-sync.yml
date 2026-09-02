@@ -50,6 +50,11 @@ jobs:
             API reference pages (`docs/reference/api/`) are not updated here — those are enforced on contributor PRs via `bun run docs:check`.
           branch: docs/sync-compatibility-matrix
           delete-branch: true
-          signoff: true
+          # Author as the app, not the actor who happened to touch the cron last. An app cannot
+          # certify the DCO on anyone's behalf, so the CI check skips bot authors — the same
+          # exemption release-please relies on. Leaving the default here produced a commit that
+          # looked human-authored but was signed off by someone else, and CI rightly rejected it.
+          author: 'kinglet-releaser[bot] <266396112+kinglet-releaser[bot]@users.noreply.github.com>'
+          committer: 'kinglet-releaser[bot] <266396112+kinglet-releaser[bot]@users.noreply.github.com>'
           labels: |
             documentation
