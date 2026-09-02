@@ -308,6 +308,39 @@ describe('DataPlaneManager', () => {
     ).rejects.toThrow();
   });
 
+  test('a delete racing a start never leaves a listener for deleted databases', async () => {
+    const root = await makeTemporaryRoot();
+    const manager = makeManager({
+      storageType: 'sqlite',
+      sqlitePath: join(root, 'emulator.db'),
+    });
+
+    await manager.startInstance('p1', 'a', ['postgres']);
+
+    // Interleaved, the delete could land after the restart had opened its
+    // databases but before it published a listener — deleting those databases
+    // and leaving a port that answers, rejects every connection, and belongs
+    // to no instance, so nothing ever closes it.
+    await Promise.all([
+      manager.dropInstance('p1', 'a'),
+      manager.startInstance('p1', 'a', ['postgres']).catch(() => undefined),
+    ]);
+
+    const port = manager.getPort('p1', 'a');
+
+    // Whichever ran second decides the outcome; what must never happen is a
+    // published endpoint whose databases are gone.
+    if (port == null) {
+      expect(manager.getPort('p1', 'a')).toBeNull();
+
+      return;
+    }
+
+    expect(await runQuery(port, 'postgres', 'postgres', '', 'SELECT 1 AS one')).toEqual([
+      { one: 1 },
+    ]);
+  });
+
   test('stopAll tears every instance down', async () => {
     const manager = makeManager();
 

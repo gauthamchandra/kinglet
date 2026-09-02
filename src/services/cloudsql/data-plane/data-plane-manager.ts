@@ -13,6 +13,7 @@
 
 import type { StorageType } from '@/core/storage/types.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { DatabaseKey } from './pglite-database-manager.ts';
 import { PGliteDatabaseManager } from './pglite-database-manager.ts';
 import { PortAllocator } from './port-allocator.ts';
@@ -86,6 +87,14 @@ export class DataPlaneManager implements CloudSqlDataPlane {
   private databaseManager: PGliteDatabaseManager;
   private portAllocator: PortAllocator;
   private instances = new Map<string, RunningInstance>();
+  // Bringing an instance up is a multi-step mutation — open its databases,
+  // bind a port, publish the result — and deleting one runs the same steps in
+  // reverse. Interleaved, a delete landing after the databases were opened but
+  // before the listener was published would delete those databases and leave
+  // the create to publish an endpoint for them anyway: a port that answers,
+  // rejects every connection, and belongs to no instance row, so nothing ever
+  // closes it. Serialising per instance is what makes each of these atomic.
+  private instanceMutex = new ResourceMutex();
 
   constructor(logger: Logger, options: DataPlaneManagerOptions, lookupUser: LookupUser) {
     this.logger = logger;
@@ -106,12 +115,22 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     instance: string,
     databases: string[]
   ): Promise<number | null> {
+    return this.instanceMutex.runExclusively(buildInstanceKey(project, instance), () =>
+      this.startInstanceLocked(project, instance, databases)
+    );
+  }
+
+  private async startInstanceLocked(
+    project: string,
+    instance: string,
+    databases: string[]
+  ): Promise<number | null> {
     const key = buildInstanceKey(project, instance);
     const previousPort = this.instances.get(key)?.port;
 
     // A restart, or a retried create: the old listener has to go before a new
     // one can bind, and its port must be given back rather than leaked.
-    if (previousPort != null) await this.stopInstance(project, instance);
+    if (previousPort != null) await this.stopInstanceLocked(project, instance);
 
     // Opened before anything can connect, so the first client is not raced
     // against a wasm Postgres still booting. Independent of the port, so this
@@ -199,6 +218,12 @@ export class DataPlaneManager implements CloudSqlDataPlane {
   }
 
   async stopInstance(project: string, instance: string): Promise<void> {
+    return this.instanceMutex.runExclusively(buildInstanceKey(project, instance), () =>
+      this.stopInstanceLocked(project, instance)
+    );
+  }
+
+  private async stopInstanceLocked(project: string, instance: string): Promise<void> {
     const key = buildInstanceKey(project, instance);
     const running = this.instances.get(key);
 
@@ -215,7 +240,13 @@ export class DataPlaneManager implements CloudSqlDataPlane {
   }
 
   async dropInstance(project: string, instance: string): Promise<void> {
-    await this.stopInstance(project, instance);
+    return this.instanceMutex.runExclusively(buildInstanceKey(project, instance), () =>
+      this.dropInstanceLocked(project, instance)
+    );
+  }
+
+  private async dropInstanceLocked(project: string, instance: string): Promise<void> {
+    await this.stopInstanceLocked(project, instance);
 
     // Deletes the instance's whole directory tree rather than the databases
     // this manager happens to have open, because an instance that is not
@@ -229,7 +260,11 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     await this.startInstance(project, instance, databases);
   }
 
-  async openDatabase(project: string, instance: string, database: string): Promise<void> {
+  private async openDatabaseLocked(
+    project: string,
+    instance: string,
+    database: string
+  ): Promise<void> {
     const running = this.instances.get(buildInstanceKey(project, instance));
 
     // Nothing is listening for this instance, so there is no session to serve
@@ -242,10 +277,18 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     running.databases.add(database);
   }
 
-  async dropDatabase(project: string, instance: string, database: string): Promise<void> {
-    this.instances.get(buildInstanceKey(project, instance))?.databases.delete(database);
+  async openDatabase(project: string, instance: string, database: string): Promise<void> {
+    return this.instanceMutex.runExclusively(buildInstanceKey(project, instance), () =>
+      this.openDatabaseLocked(project, instance, database)
+    );
+  }
 
-    await this.databaseManager.drop({ project, instance, database });
+  async dropDatabase(project: string, instance: string, database: string): Promise<void> {
+    return this.instanceMutex.runExclusively(buildInstanceKey(project, instance), async () => {
+      this.instances.get(buildInstanceKey(project, instance))?.databases.delete(database);
+
+      await this.databaseManager.drop({ project, instance, database });
+    });
   }
 
   async stopAll(): Promise<void> {
