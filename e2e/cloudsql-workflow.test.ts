@@ -35,15 +35,12 @@ beforeAll(async () => {
 
   await storage.initialize({ type: 'memory' });
 
-  // A high port range, away from the 5432 default, so this suite cannot
-  // collide with a Postgres the developer already runs locally or with the
-  // data-plane e2e suite running alongside it.
+  // Control plane only. Every instance created here would otherwise boot a
+  // wasm Postgres this suite never connects to, which on a slower runner is
+  // enough to push a lifecycle test past the default 5s timeout. The data
+  // plane has its own suite in cloudsql-data-plane.test.ts.
   cloudSqlService = new CloudSqlService(storage, new Logger('e2e', 'error'), {
-    enabled: true,
-    portRangeStart: 15600,
-    portRangeEnd: 15620,
-    storageType: 'memory',
-    sqlitePath: './data/emulator.db',
+    enabled: false,
   });
 
   await cloudSqlService.initialize();

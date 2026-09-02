@@ -27,6 +27,12 @@ import { buildRouter } from './e2e-helpers.ts';
 const PORT_RANGE_START = 15700;
 const PORT_RANGE_END = 15720;
 
+// Creating an instance boots a wasm Postgres per database, which is fast but
+// not uniformly so across CI runners. The tests that do it get an explicit
+// budget rather than relying on the 5s default they would otherwise sit at
+// roughly half of.
+const INSTANCE_BOOT_TIMEOUT_MS = 30_000;
+
 const PROJECT = 'e2e-project';
 const INSTANCE = 'data-plane-db';
 const ROOT_PASSWORD = 'root-pass';
@@ -137,7 +143,7 @@ beforeAll(async () => {
   await createInstance(INSTANCE);
 
   instancePort = portOf(INSTANCE);
-});
+}, INSTANCE_BOOT_TIMEOUT_MS);
 
 afterEach(async () => {
   for (const client of clients) await client.end();
@@ -181,21 +187,25 @@ describe('Cloud SQL data plane e2e', () => {
     );
   });
 
-  test('a database added through the admin API is reachable and isolated', async () => {
-    await createDatabase(INSTANCE, 'analytics');
+  test(
+    'a database added through the admin API is reachable and isolated',
+    async () => {
+      await createDatabase(INSTANCE, 'analytics');
 
-    const analytics = connect(instancePort, 'analytics');
+      const analytics = connect(instancePort, 'analytics');
 
-    await analytics.unsafe('CREATE TABLE events (id int)');
-    await analytics.unsafe('INSERT INTO events VALUES (1)');
+      await analytics.unsafe('CREATE TABLE events (id int)');
+      await analytics.unsafe('INSERT INTO events VALUES (1)');
 
-    expect(await rows(analytics, 'SELECT id FROM events')).toEqual([{ id: 1 }]);
+      expect(await rows(analytics, 'SELECT id FROM events')).toEqual([{ id: 1 }]);
 
-    // The default database must not see the other database's table.
-    const postgres = connect(instancePort, 'postgres');
+      // The default database must not see the other database's table.
+      const postgres = connect(instancePort, 'postgres');
 
-    await expect(run(postgres, 'SELECT id FROM events')).rejects.toThrow();
-  });
+      await expect(run(postgres, 'SELECT id FROM events')).rejects.toThrow();
+    },
+    INSTANCE_BOOT_TIMEOUT_MS
+  );
 
   test('the wrong password is refused', async () => {
     const sql = connect(instancePort, 'postgres', 'postgres', 'not-the-password');
@@ -314,100 +324,108 @@ describe('Cloud SQL data plane e2e', () => {
     ]);
   });
 
-  test('a second instance gets its own endpoint and its own data', async () => {
-    await createInstance('second-db');
+  test(
+    'a second instance gets its own endpoint and its own data',
+    async () => {
+      await createInstance('second-db');
 
-    const second = connect(portOf('second-db'), 'postgres');
+      const second = connect(portOf('second-db'), 'postgres');
 
-    await second.unsafe('CREATE TABLE only_here (id int)');
+      await second.unsafe('CREATE TABLE only_here (id int)');
 
-    expect(await rows(second, 'SELECT count(*)::int AS n FROM only_here')).toEqual([{ n: 0 }]);
+      expect(await rows(second, 'SELECT count(*)::int AS n FROM only_here')).toEqual([{ n: 0 }]);
 
-    const first = connect(instancePort, 'postgres');
+      const first = connect(instancePort, 'postgres');
 
-    await expect(run(first, 'SELECT id FROM only_here')).rejects.toThrow();
-  });
+      await expect(run(first, 'SELECT id FROM only_here')).rejects.toThrow();
+    },
+    INSTANCE_BOOT_TIMEOUT_MS
+  );
 });
 
 describe('Cloud SQL data plane persistence', () => {
-  test('an instance and its data survive a restart on durable storage', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'kinglet-cloudsql-e2e-'));
-    const sqlitePath = join(root, 'data', 'emulator.db');
-    const rangeStart = PORT_RANGE_START + 10;
+  test(
+    'an instance and its data survive a restart on durable storage',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'kinglet-cloudsql-e2e-'));
+      const sqlitePath = join(root, 'data', 'emulator.db');
+      const rangeStart = PORT_RANGE_START + 10;
 
-    // `hybrid` is kinglet's default storage type. Both the control-plane rows
-    // and the data plane's Postgres files have to outlive the process for a
-    // restart to be a no-op from the caller's point of view.
-    async function bootService(): Promise<{ service: CloudSqlService; server: Server }> {
-      const storage = new StorageManager();
+      // `hybrid` is kinglet's default storage type. Both the control-plane rows
+      // and the data plane's Postgres files have to outlive the process for a
+      // restart to be a no-op from the caller's point of view.
+      async function bootService(): Promise<{ service: CloudSqlService; server: Server }> {
+        const storage = new StorageManager();
 
-      await storage.initialize(toStorageConfig({ type: 'hybrid', sqlitePath }));
+        await storage.initialize(toStorageConfig({ type: 'hybrid', sqlitePath }));
 
-      const service = new CloudSqlService(storage, new Logger('e2e', 'error'), {
-        enabled: true,
-        portRangeStart: rangeStart,
-        portRangeEnd: rangeStart + 5,
-        storageType: 'hybrid',
-        sqlitePath,
-      });
+        const service = new CloudSqlService(storage, new Logger('e2e', 'error'), {
+          enabled: true,
+          portRangeStart: rangeStart,
+          portRangeEnd: rangeStart + 5,
+          storageType: 'hybrid',
+          sqlitePath,
+        });
 
-      await service.initialize();
+        await service.initialize();
 
-      const httpPort = await getAvailablePort();
-      const server = Bun.serve({ port: httpPort, fetch: buildRouter(service.getRoutes()) });
+        const httpPort = await getAvailablePort();
+        const server = Bun.serve({ port: httpPort, fetch: buildRouter(service.getRoutes()) });
 
-      return { service, server };
-    }
-
-    const first = await bootService();
-
-    const createResponse = await fetch(
-      `http://localhost:${first.server.port}/v1/projects/${PROJECT}/instances`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'durable-db',
-          databaseVersion: 'POSTGRES_16',
-          rootPassword: ROOT_PASSWORD,
-        }),
+        return { service, server };
       }
-    );
 
-    expect(createResponse.status).toBe(200);
+      const first = await bootService();
 
-    const port = first.service.getDataPlanePort(PROJECT, 'durable-db');
+      const createResponse = await fetch(
+        `http://localhost:${first.server.port}/v1/projects/${PROJECT}/instances`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'durable-db',
+            databaseVersion: 'POSTGRES_16',
+            rootPassword: ROOT_PASSWORD,
+          }),
+        }
+      );
 
-    expect(port).not.toBeNull();
+      expect(createResponse.status).toBe(200);
 
-    const before = connect(port ?? 0, 'postgres');
+      const port = first.service.getDataPlanePort(PROJECT, 'durable-db');
 
-    await before.unsafe('CREATE TABLE survivors (id int)');
-    await before.unsafe('INSERT INTO survivors VALUES (99)');
-    await before.end();
+      expect(port).not.toBeNull();
 
-    first.server.stop();
-    await first.service.stop();
+      const before = connect(port ?? 0, 'postgres');
 
-    // A second service over the same files, creating nothing: the instance and
-    // its endpoint have to come back on their own.
-    const second = await bootService();
+      await before.unsafe('CREATE TABLE survivors (id int)');
+      await before.unsafe('INSERT INTO survivors VALUES (99)');
+      await before.end();
 
-    const getResponse = await fetch(
-      `http://localhost:${second.server.port}/v1/projects/${PROJECT}/instances/durable-db`
-    );
+      first.server.stop();
+      await first.service.stop();
 
-    expect(getResponse.status).toBe(200);
-    expect(second.service.getDataPlanePort(PROJECT, 'durable-db')).toBe(port);
+      // A second service over the same files, creating nothing: the instance and
+      // its endpoint have to come back on their own.
+      const second = await bootService();
 
-    const after = connect(port ?? 0, 'postgres');
+      const getResponse = await fetch(
+        `http://localhost:${second.server.port}/v1/projects/${PROJECT}/instances/durable-db`
+      );
 
-    expect(await rows(after, 'SELECT id FROM survivors')).toEqual([{ id: 99 }]);
+      expect(getResponse.status).toBe(200);
+      expect(second.service.getDataPlanePort(PROJECT, 'durable-db')).toBe(port);
 
-    await after.end();
-    second.server.stop();
-    await second.service.stop();
+      const after = connect(port ?? 0, 'postgres');
 
-    await rm(root, { recursive: true, force: true });
-  });
+      expect(await rows(after, 'SELECT id FROM survivors')).toEqual([{ id: 99 }]);
+
+      await after.end();
+      second.server.stop();
+      await second.service.stop();
+
+      await rm(root, { recursive: true, force: true });
+    },
+    INSTANCE_BOOT_TIMEOUT_MS
+  );
 });
