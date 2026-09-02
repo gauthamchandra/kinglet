@@ -145,6 +145,20 @@ describe('QueueService', () => {
       await expect(promise).rejects.toBeInstanceOf(TasksError);
       await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
     });
+
+    test('should clear optional fields when updated with null', async () => {
+      await service.createQueue('p', 'l', 'q', {
+        stackdriverLoggingConfig: {
+          samplingRatio: 0.5,
+        },
+      });
+
+      const cleared = await service.updateQueue('projects/p/locations/l/queues/q', {
+        stackdriverLoggingConfig: null,
+      });
+
+      expect(cleared.stackdriverLoggingConfig).toBeUndefined();
+    });
   });
 
   describe('deleteQueue', () => {

@@ -38,7 +38,8 @@ describe('JobService', () => {
       expect(result.name).toBe('projects/test-project/locations/us-central1/jobs/my-job');
       expect(result.state).toBe('ENABLED');
       expect(result.schedule).toBe('* * * * *');
-      expect(result.httpTarget.uri).toBe('https://example.com');
+      expect(result.httpTarget).toBeDefined();
+      expect(result.httpTarget?.uri).toBe('https://example.com');
       expect(result.scheduleTime).toBeDefined();
     });
 
@@ -86,6 +87,19 @@ describe('JobService', () => {
           // Missing required fields
         } as never)
       ).rejects.toThrow(SchedulerError);
+    });
+
+    test('should create a Pub/Sub target job', async () => {
+      const result = await service.createJob('test-project', 'us-central1', 'pubsub-job', {
+        schedule: '0 10 * * 1',
+        pubsubTarget: {
+          topicName: 'projects/test-project/topics/events',
+          data: Buffer.from('payload').toString('base64'),
+        },
+      });
+
+      expect(result.pubsubTarget?.topicName).toBe('projects/test-project/topics/events');
+      expect(result.httpTarget).toBeUndefined();
     });
   });
 
@@ -180,6 +194,21 @@ describe('JobService', () => {
       await expect(promise).rejects.toBeInstanceOf(SchedulerError);
       await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
     });
+
+    test('should reject updates that set both targets', async () => {
+      await service.createJob('p', 'l', 'j', {
+        schedule: '* * * * *',
+        httpTarget: { uri: 'https://example.com', httpMethod: 'GET' },
+      });
+
+      const promise = service.updateJob('projects/p/locations/l/jobs/j', {
+        httpTarget: { uri: 'https://example.com', httpMethod: 'POST' },
+        pubsubTarget: { topicName: 'projects/p/topics/t' },
+      });
+
+      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+    });
   });
 
   describe('deleteJob', () => {
@@ -264,16 +293,15 @@ describe('JobService', () => {
       expect(result.scheduleTime).toBeDefined();
     });
 
-    test('should throw FAILED_PRECONDITION when resuming non-paused job', async () => {
+    test('should return ENABLED jobs without error when resume is requested again', async () => {
       await service.createJob('p', 'l', 'j', {
         schedule: '* * * * *',
         httpTarget: { uri: 'https://example.com', httpMethod: 'GET' },
       });
 
-      const promise = service.resumeJob('projects/p/locations/l/jobs/j');
+      const result = await service.resumeJob('projects/p/locations/l/jobs/j');
 
-      await expect(promise).rejects.toBeInstanceOf(SchedulerError);
-      await expect(promise).rejects.toHaveProperty('code', 'FAILED_PRECONDITION');
+      expect(result.state).toBe('ENABLED');
     });
   });
 

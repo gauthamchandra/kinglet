@@ -258,18 +258,50 @@ export function normalizeHttpMethod(value: string | number): HttpMethodString {
 // ── Zod Schemas ──
 
 export const RateLimitsSchema = z.object({
-  maxDispatchesPerSecond: z.number().min(0.01).max(500),
-  maxBurstSize: z.number().int().min(0),
-  maxConcurrentDispatches: z.number().int().min(0).max(5000),
+  maxDispatchesPerSecond: z.number().min(0.01).max(500).optional(),
+  maxBurstSize: z.number().int().min(0).optional(),
+  maxConcurrentDispatches: z.number().int().min(0).max(5000).optional(),
 });
 
 export const TaskRetryConfigSchema = z.object({
-  maxAttempts: z.number().int().min(-1).max(100),
-  maxRetryDuration: z.string(),
-  minBackoff: z.string(),
-  maxBackoff: z.string(),
-  maxDoublings: z.number().int().min(0),
+  maxAttempts: z.number().int().min(-1).max(100).optional(),
+  maxRetryDuration: z.string().optional(),
+  minBackoff: z.string().optional(),
+  maxBackoff: z.string().optional(),
+  maxDoublings: z.number().int().min(0).optional(),
 });
+
+export function mergeRateLimits(
+  partial: z.infer<typeof RateLimitsSchema> | null | undefined,
+  base: RateLimits
+): RateLimits {
+  if (!partial) {
+    return base;
+  }
+
+  return {
+    maxDispatchesPerSecond: partial.maxDispatchesPerSecond ?? base.maxDispatchesPerSecond,
+    maxBurstSize: partial.maxBurstSize ?? base.maxBurstSize,
+    maxConcurrentDispatches: partial.maxConcurrentDispatches ?? base.maxConcurrentDispatches,
+  };
+}
+
+export function mergeTaskRetryConfig(
+  partial: z.infer<typeof TaskRetryConfigSchema> | null | undefined,
+  base: TaskRetryConfig
+): TaskRetryConfig {
+  if (!partial) {
+    return base;
+  }
+
+  return {
+    maxAttempts: partial.maxAttempts ?? base.maxAttempts,
+    maxRetryDuration: partial.maxRetryDuration ?? base.maxRetryDuration,
+    minBackoff: partial.minBackoff ?? base.minBackoff,
+    maxBackoff: partial.maxBackoff ?? base.maxBackoff,
+    maxDoublings: partial.maxDoublings ?? base.maxDoublings,
+  };
+}
 
 const StackdriverLoggingConfigSchema = z.object({
   samplingRatio: z.number().min(0).max(1),
@@ -354,19 +386,19 @@ const QueueHttpTargetSchema = z.object({
 });
 
 export const CreateQueueRequestSchema = z.object({
-  rateLimits: RateLimitsSchema.optional(),
-  retryConfig: TaskRetryConfigSchema.optional(),
-  stackdriverLoggingConfig: StackdriverLoggingConfigSchema.optional(),
-  httpTarget: QueueHttpTargetSchema.optional(),
-  appEngineRoutingOverride: AppEngineRoutingOverrideSchema.optional(),
+  rateLimits: RateLimitsSchema.nullish(),
+  retryConfig: TaskRetryConfigSchema.nullish(),
+  stackdriverLoggingConfig: StackdriverLoggingConfigSchema.nullish(),
+  httpTarget: QueueHttpTargetSchema.nullish(),
+  appEngineRoutingOverride: AppEngineRoutingOverrideSchema.nullish(),
 });
 
 export const UpdateQueueRequestSchema = z.object({
-  rateLimits: RateLimitsSchema.optional(),
-  retryConfig: TaskRetryConfigSchema.optional(),
-  stackdriverLoggingConfig: StackdriverLoggingConfigSchema.optional(),
-  httpTarget: QueueHttpTargetSchema.optional(),
-  appEngineRoutingOverride: AppEngineRoutingOverrideSchema.optional(),
+  rateLimits: RateLimitsSchema.nullish(),
+  retryConfig: TaskRetryConfigSchema.nullish(),
+  stackdriverLoggingConfig: StackdriverLoggingConfigSchema.nullish(),
+  httpTarget: QueueHttpTargetSchema.nullish(),
+  appEngineRoutingOverride: AppEngineRoutingOverrideSchema.nullish(),
 });
 
 export const CreateTaskRequestSchema = z.object({
@@ -510,8 +542,10 @@ export function requestToQueueRecord(
   return {
     name,
     state: QueueState.RUNNING,
-    rateLimits: JSON.stringify(body.rateLimits ?? DEFAULT_RATE_LIMITS),
-    retryConfig: JSON.stringify(body.retryConfig ?? DEFAULT_RETRY_CONFIG),
+    rateLimits: JSON.stringify(mergeRateLimits(body.rateLimits ?? undefined, DEFAULT_RATE_LIMITS)),
+    retryConfig: JSON.stringify(
+      mergeTaskRetryConfig(body.retryConfig ?? undefined, DEFAULT_RETRY_CONFIG)
+    ),
     purgeTime: null,
     taskTtl: DEFAULT_TASK_TTL,
     tombstoneTtl: DEFAULT_TOMBSTONE_TTL,

@@ -29,7 +29,9 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun test --coverage` - Run tests with coverage report
 - `bun run test:coverage:check` - Coverage report plus the 80% aggregate gate CI enforces
 - `bun run test:e2e` - Run the end-to-end suite
-- `bun run test:terraform` - Run Terraform validation harness against kinglet (Pub/Sub, KMS, Workflows)
+- `bun run test:terraform` - Run all Terraform validation cases (manifest-driven, one test per service; not part of `bun test`)
+- `bun run test:terraform:case -- <id>` - Run a single case, e.g. `bun run test:terraform:case -- tasks` (TDD loop)
+- `bun test terraform/terraform.test.ts -t "<id>"` - Same single-case filter without npm script
 
 ### Code Quality
 - `bun run lint` - Run Biome linter (+ tsc + knip)
@@ -113,7 +115,7 @@ const spy = spyOn(object, 'method');
 ### Testing Standards
 - **Always use `mock()` instead of `jest.fn()`** - Never import `jest` from `bun:test`
 - **Use pure Bun primitives** - `mock()`, `spyOn()`, etc.
-- **`bun test` does not run e2e** - `bunfig.toml`'s `include` limits it to `src/**/*.test.ts` and `test-utils/**/*.test.ts`. The e2e suite runs via `bun run test:e2e` and has its own CI job
+- **`bun test` does not run e2e or terraform in CI** - `test:coverage:check` scopes coverage runs to `src/`, `test-utils/`, and `scripts/` because Bun 1.3.4 ignores bunfig `pathIgnorePatterns`. Those suites run via `bun run test:e2e` / `bun run test:terraform` and have their own CI jobs
 - **Co-locate tests** with source files for easier discovery
 - **Reset mocks properly** - Use `mockFunction.mockReset()` instead of `jest.clearAllMocks()`
 
@@ -164,19 +166,6 @@ When implementing a feature that introduces a **large-scale architectural change
 - Changing deployment, containerization, or CI/CD architecture
 
 Each ADR should include: Status, Context, Decision, Rationale, Alternatives Considered, and Consequences. Number sequentially (e.g., `005-descriptive-name.md`).
-
-## Commit sign-off
-
-This is an open-source project under the DCO. Every commit must be signed off under the identity of the **human who requested the work** — the sign-off certifies that a person reviewed the change and stands behind it.
-
-You may run `git commit -s` on that human's behalf, but only after:
-
-- **Asking them and getting an explicit sign-off.** Do not assume approval — ask the human who requested the work to confirm they have reviewed the change and want their name on it. Their sign-off is the whole point; applying it without asking defeats it.
-- **Stamping their identity, not yours.** `git commit -s` derives the `Signed-off-by` name and email straight from git config, so make sure `user.name`/`user.email` are the human's before committing. CI rejects any sign-off carrying a coding-agent identity (Cursor, Claude, Copilot, Devin, …), so signing under your own identity fails the `DCO sign-off` job.
-
-Credit yourself with a `Co-authored-by:` trailer — agent assistance is expected here and that trailer is welcome (it is deliberately not checked).
-
-See CONTRIBUTING.md → Developer Certificate of Origin (DCO) for the full contract.
 
 ## Guidelines
 

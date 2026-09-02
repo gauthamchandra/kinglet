@@ -529,4 +529,98 @@ describe('SQLiteStorageProvider', () => {
       expect(typeof updated.status).toBe('number');
     });
   });
+
+  describe('schema sync', () => {
+    test('should add missing columns and relax NOT NULL constraints', async () => {
+      await provider.createTable('legacy_jobs', {
+        name: 'legacy_jobs',
+        columns: [
+          { name: 'id', type: 'string', primaryKey: true },
+          { name: 'name', type: 'string', unique: true },
+          { name: 'httpTarget', type: 'json' },
+          { name: 'retryConfig', type: 'json' },
+        ],
+        timestamps: true,
+      });
+
+      await provider.createTable('legacy_jobs', {
+        name: 'legacy_jobs',
+        columns: [
+          { name: 'id', type: 'string', primaryKey: true },
+          { name: 'name', type: 'string', unique: true },
+          { name: 'httpTarget', type: 'json', nullable: true },
+          { name: 'pubsubTarget', type: 'json', nullable: true },
+          { name: 'retryConfig', type: 'json' },
+        ],
+        timestamps: true,
+      });
+
+      const db = (
+        provider as unknown as { db: { prepare: (sql: string) => { all: () => unknown[] } } }
+      ).db;
+      const columns = db.prepare('PRAGMA table_info(legacy_jobs)').all() as Array<{
+        name: string;
+        notnull: number;
+      }>;
+
+      const httpTarget = columns.find(column => column.name === 'httpTarget');
+      const pubsubTarget = columns.find(column => column.name === 'pubsubTarget');
+
+      expect(httpTarget?.notnull).toBe(0);
+      expect(pubsubTarget).toBeDefined();
+    });
+
+    test('should preserve id column when schema omits it during rebuild', async () => {
+      interface LegacyJobRecord extends BaseRecord {
+        name: string;
+        httpTarget: { uri: string };
+        retryConfig: { retryCount: number };
+      }
+
+      await provider.createTable('legacy_jobs_no_id_schema', {
+        name: 'legacy_jobs_no_id_schema',
+        columns: [
+          { name: 'id', type: 'string', primaryKey: true },
+          { name: 'name', type: 'string', unique: true },
+          { name: 'httpTarget', type: 'json' },
+          { name: 'retryConfig', type: 'json' },
+        ],
+        timestamps: true,
+      });
+
+      const created = await provider.create<LegacyJobRecord>('legacy_jobs_no_id_schema', {
+        name: 'projects/p/locations/l/jobs/j1',
+        httpTarget: { uri: 'https://example.com' },
+        retryConfig: { retryCount: 3 },
+      });
+
+      await provider.createTable('legacy_jobs_no_id_schema', {
+        name: 'legacy_jobs_no_id_schema',
+        columns: [
+          { name: 'name', type: 'string', unique: true },
+          { name: 'httpTarget', type: 'json', nullable: true },
+          { name: 'retryConfig', type: 'json' },
+        ],
+        timestamps: true,
+      });
+
+      const db = (
+        provider as unknown as { db: { prepare: (sql: string) => { all: () => unknown[] } } }
+      ).db;
+      const columns = db.prepare('PRAGMA table_info(legacy_jobs_no_id_schema)').all() as Array<{
+        name: string;
+        pk: number;
+      }>;
+
+      expect(columns.some(column => column.name === 'id' && column.pk === 1)).toBe(true);
+
+      const found = await provider.findById<LegacyJobRecord>(
+        'legacy_jobs_no_id_schema',
+        created.id
+      );
+
+      expect(found).not.toBeNull();
+      expect(found?.name).toBe(created.name);
+    });
+  });
 });

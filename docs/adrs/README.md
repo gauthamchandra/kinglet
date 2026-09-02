@@ -16,6 +16,8 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [007](007-memorystore-valkey-data-plane.md) | Memorystore for Valkey Data Plane | Accepted |
 | [008](008-kms-crypto-emulation.md) | Cloud KMS Crypto Emulation | Accepted |
 | [009](009-shared-route-namespace.md) | Shared Route Namespace Across Services | Accepted |
+| [010](010-sqlite-schema-synchronization.md) | SQLite Schema Synchronization | Accepted |
+| [011](011-terraform-validation-harness.md) | Terraform Validation Harness | Accepted |
 
 ## A note on the project's former name
 

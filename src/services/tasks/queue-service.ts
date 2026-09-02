@@ -9,9 +9,13 @@ import type { QueueResponse } from './types.ts';
 import {
   buildQueueName,
   CreateQueueRequestSchema,
+  mergeRateLimits,
+  mergeTaskRetryConfig,
   QueueState,
   queueRecordToResponse,
+  type RateLimits,
   requestToQueueRecord,
+  type TaskRetryConfig,
   UpdateQueueRequestSchema,
 } from './types.ts';
 
@@ -147,39 +151,45 @@ export class QueueService {
 
     const updates: Record<string, unknown> = {};
 
-    if (
-      request.rateLimits !== undefined &&
-      (!allowedFields || allowedFields.includes('rateLimits'))
-    ) {
-      updates.rateLimits = JSON.stringify(request.rateLimits);
+    if (request.rateLimits != null && (!allowedFields || allowedFields.includes('rateLimits'))) {
+      const existingLimits = JSON.parse(existing.rateLimits) as RateLimits;
+
+      updates.rateLimits = JSON.stringify(mergeRateLimits(request.rateLimits, existingLimits));
     }
 
-    if (
-      request.retryConfig !== undefined &&
-      (!allowedFields || allowedFields.includes('retryConfig'))
-    ) {
-      updates.retryConfig = JSON.stringify(request.retryConfig);
+    if (request.retryConfig != null && (!allowedFields || allowedFields.includes('retryConfig'))) {
+      const existingRetryConfig = JSON.parse(existing.retryConfig) as TaskRetryConfig;
+
+      updates.retryConfig = JSON.stringify(
+        mergeTaskRetryConfig(request.retryConfig, existingRetryConfig)
+      );
     }
 
     if (
       request.stackdriverLoggingConfig !== undefined &&
       (!allowedFields || allowedFields.includes('stackdriverLoggingConfig'))
     ) {
-      updates.stackdriverLoggingConfig = JSON.stringify(request.stackdriverLoggingConfig);
+      updates.stackdriverLoggingConfig =
+        request.stackdriverLoggingConfig === null
+          ? null
+          : JSON.stringify(request.stackdriverLoggingConfig);
     }
 
     if (
       request.httpTarget !== undefined &&
       (!allowedFields || allowedFields.includes('httpTarget'))
     ) {
-      updates.httpTarget = JSON.stringify(request.httpTarget);
+      updates.httpTarget = request.httpTarget === null ? null : JSON.stringify(request.httpTarget);
     }
 
     if (
       request.appEngineRoutingOverride !== undefined &&
       (!allowedFields || allowedFields.includes('appEngineRoutingOverride'))
     ) {
-      updates.appEngineRoutingOverride = JSON.stringify(request.appEngineRoutingOverride);
+      updates.appEngineRoutingOverride =
+        request.appEngineRoutingOverride === null
+          ? null
+          : JSON.stringify(request.appEngineRoutingOverride);
     }
 
     const updated = await this.repo.updateQueue(name, updates);

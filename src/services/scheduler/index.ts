@@ -17,15 +17,17 @@ import { JobService } from './service.ts';
 export class SchedulerService {
   private storage: StorageManager;
   private logger: Logger;
+  private kingletHttpPort: number | undefined;
   private repository: JobRepository | null = null;
   private cronEngine: CronEngine | null = null;
   private jobService: JobService | null = null;
   private handlers: SchedulerHandlers | null = null;
   private executionEngine: ExecutionEngine | null = null;
 
-  constructor(storage: StorageManager, logger: Logger) {
+  constructor(storage: StorageManager, logger: Logger, kingletHttpPort?: number) {
     this.storage = storage;
     this.logger = logger;
+    this.kingletHttpPort = kingletHttpPort;
   }
 
   async initialize(): Promise<void> {
@@ -34,7 +36,9 @@ export class SchedulerService {
 
     this.cronEngine = new CronEngine();
     this.jobService = new JobService(this.repository, this.cronEngine);
-    const executionEngine = new ExecutionEngine(this.repository, this.cronEngine, this.logger);
+    const executionEngine = new ExecutionEngine(this.repository, this.cronEngine, this.logger, {
+      ...(this.kingletHttpPort != null ? { kingletHttpPort: this.kingletHttpPort } : {}),
+    });
 
     this.executionEngine = executionEngine;
     this.jobService.setExecuteCallback(job => executionEngine.executeJob(job));

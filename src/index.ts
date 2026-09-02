@@ -78,7 +78,11 @@ async function main(): Promise<void> {
     }
 
     if (config.services.scheduler.enabled) {
-      schedulerService = new SchedulerService(storageManager, new Logger('Scheduler'));
+      schedulerService = new SchedulerService(
+        storageManager,
+        new Logger('Scheduler'),
+        config.server.httpPort
+      );
       await schedulerService.initialize();
 
       for (const route of schedulerService.getRoutes()) {
