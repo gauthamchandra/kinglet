@@ -276,6 +276,19 @@ export class PGliteDatabaseManager {
       extensions: DATA_PLANE_EXTENSIONS,
     });
 
+    // Re-checked after the boot, not only before it: a drop that began while
+    // this database was still coming up would close it and delete its files,
+    // and returning it anyway would let the caller publish an endpoint whose
+    // backend is already gone. Failing the open makes the caller unwind
+    // instead, which is right — the instance was deleted.
+    if (this.droppingInstances.has(this.buildInstanceId(key))) {
+      await db.close();
+
+      throw new Error(
+        `Cannot open ${id}: instance ${key.project}/${key.instance} is being deleted`
+      );
+    }
+
     const open: TrackedDatabase = {
       db,
       key,

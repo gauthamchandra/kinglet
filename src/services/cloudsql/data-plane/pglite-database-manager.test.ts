@@ -208,6 +208,22 @@ describe('PGliteDatabaseManager', () => {
     expect(existsSync(join(root, 'cloudsql/p1/inst'))).toBe(false);
   });
 
+  test('fails an open that was already in flight when the deletion began', async () => {
+    const { manager, root } = await fileManager();
+
+    // Started first, so it is past the entry guard; the drop begins while the
+    // backend is still booting. Returning it would let a caller bring up a
+    // listener for a database whose files are being deleted underneath it.
+    const opening = manager.open({ project: 'p1', instance: 'inst', database: 'racing' });
+    const dropping = manager.dropInstance('p1', 'inst');
+
+    await expect(opening).rejects.toThrow('is being deleted');
+    await dropping;
+
+    expect(manager.get({ project: 'p1', instance: 'inst', database: 'racing' })).toBeNull();
+    expect(existsSync(join(root, 'cloudsql/p1/inst'))).toBe(false);
+  });
+
   test('allows opens again once the deletion is finished', async () => {
     const { manager } = await fileManager();
 
