@@ -63,6 +63,15 @@ describe('buildDatabaseKey', () => {
   test('scopes a database by project and instance', () => {
     expect(buildDatabaseKey(KEY)).toBe('p1/inst/postgres');
   });
+
+  test('stays unambiguous when a name contains a separator', () => {
+    // A database may legitimately be called `a/b`. Joining raw names would
+    // make this key indistinguishable from instance `inst/a`, database `b`.
+    const withSlash = buildDatabaseKey({ project: 'p1', instance: 'inst', database: 'a/b' });
+    const shifted = buildDatabaseKey({ project: 'p1', instance: 'inst/a', database: 'b' });
+
+    expect(withSlash).not.toBe(shifted);
+  });
 });
 
 describe('encodePathSegment', () => {
@@ -145,6 +154,31 @@ describe('PGliteDatabaseManager', () => {
     await restarted.dropInstance('p1', 'inst');
 
     expect(existsSync(instanceDirectory)).toBe(false);
+  });
+
+  test('closes a database whose name contains a separator', async () => {
+    const { manager, root } = await fileManager();
+    const slashed = { project: 'p1', instance: 'inst', database: 'a/b' };
+
+    await manager.open(slashed);
+
+    // Recovering the database name by splitting the key used to yield `a`, so
+    // the real handle was never closed: the directory was deleted underneath a
+    // live PGlite and reopening handed back the stale handle.
+    await manager.dropInstance('p1', 'inst');
+
+    expect(manager.get(slashed)).toBeNull();
+    expect(existsSync(join(root, 'cloudsql/p1/inst'))).toBe(false);
+  });
+
+  test('closeAll closes a database whose name contains a separator', async () => {
+    const manager = memoryManager();
+    const slashed = { project: 'p1', instance: 'inst', database: 'a/b' };
+
+    await manager.open(slashed);
+    await manager.closeAll();
+
+    expect(manager.get(slashed)).toBeNull();
   });
 
   test('dropInstance closes databases it still holds open', async () => {

@@ -57,6 +57,13 @@ const TERMINATE_MESSAGE_TAG = 0x58; // 'X'
 // can.
 const MAX_PENDING_BATCH_LENGTH = MAX_MESSAGE_LENGTH;
 
+// Reading stops once this much unparsed input is queued and resumes when it
+// drains. Frames arrive faster than a single shared backend can run them — a
+// client can pipeline while an earlier statement is still executing — so
+// without backpressure the unparsed buffer grows for as long as the client
+// keeps writing, however small each individual frame is.
+const READ_PAUSE_THRESHOLD = 8 * 1024 * 1024;
+
 // SQLSTATEs the startup exchange can end in, all of them classes a Postgres
 // client already knows how to report.
 export const SQLSTATE_INVALID_CATALOG_NAME = '3D000';
@@ -198,6 +205,8 @@ interface ConnectionState {
   pendingBatch: Uint8Array[];
   /** Set once the client is processing a batch of frames, so reads never interleave. */
   isProcessing: boolean;
+  /** Set while reads are paused for backpressure, so resume happens exactly once. */
+  isReadPaused: boolean;
   user: string;
   database: string;
   startupPacket: Uint8Array | null;
@@ -235,6 +244,7 @@ export class PostgresWireServer {
             buffer: new Uint8Array(0),
             pendingBatch: [],
             isProcessing: false,
+            isReadPaused: false,
             user: '',
             database: '',
             startupPacket: null,
@@ -243,6 +253,13 @@ export class PostgresWireServer {
         },
         data: (socket, chunk) => {
           socket.data.buffer = concat(socket.data.buffer, chunk);
+
+          // Applied before processing, because processing is asynchronous and
+          // returns immediately while the backend is busy.
+          if (socket.data.buffer.length >= READ_PAUSE_THRESHOLD && !socket.data.isReadPaused) {
+            socket.data.isReadPaused = true;
+            socket.pause();
+          }
 
           void this.processBuffered(socket);
         },
@@ -297,6 +314,11 @@ export class PostgresWireServer {
       );
     } finally {
       state.isProcessing = false;
+
+      if (state.isReadPaused && state.buffer.length < READ_PAUSE_THRESHOLD) {
+        state.isReadPaused = false;
+        socket.resume();
+      }
     }
   }
 

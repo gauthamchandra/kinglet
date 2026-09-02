@@ -44,8 +44,22 @@ export interface OpenDatabase {
   queue: PGliteSessionQueue;
 }
 
+interface TrackedDatabase extends OpenDatabase {
+  /** The names this database was opened under, kept so nothing has to be
+   * recovered by taking a key apart. */
+  key: DatabaseKey;
+}
+
+/**
+ * A key that identifies one database unambiguously.
+ *
+ * <p>Built from the encoded segments rather than the raw names: a database may
+ * legitimately be called `a/b`, and joining raw names would produce a key that
+ * cannot be taken apart again — or worse, one that collides with a different
+ * project/instance/database triple.
+ */
 export function buildDatabaseKey(key: DatabaseKey): string {
-  return `${key.project}/${key.instance}/${key.database}`;
+  return [key.project, key.instance, key.database].map(encodePathSegment).join('/');
 }
 
 /**
@@ -66,12 +80,14 @@ export function encodePathSegment(segment: string): string {
 
 export class PGliteDatabaseManager {
   private options: PGliteDatabaseManagerOptions;
-  private databases = new Map<string, OpenDatabase>();
+  private databases = new Map<string, TrackedDatabase>();
   // Opens are slow (a wasm Postgres boot) and `open` is reentrant per key, so
   // in-flight opens are shared rather than duplicated — two connections
   // arriving together for the same database must not build two PGlites, of
   // which one would be silently dropped along with anything written to it.
-  private opening = new Map<string, Promise<OpenDatabase>>();
+  private opening = new Map<string, Promise<TrackedDatabase>>();
+  // The names behind each in-flight open, for the same reason.
+  private openingKeys = new Map<string, DatabaseKey>();
 
   constructor(options: PGliteDatabaseManagerOptions) {
     this.options = options;
@@ -90,11 +106,13 @@ export class PGliteDatabaseManager {
     const opening = this.createDatabase(id, key);
 
     this.opening.set(id, opening);
+    this.openingKeys.set(id, key);
 
     try {
       return await opening;
     } finally {
       this.opening.delete(id);
+      this.openingKeys.delete(id);
     }
   }
 
@@ -142,14 +160,10 @@ export class PGliteDatabaseManager {
    * name would silently inherit the deleted instance's rows.
    */
   async dropInstance(project: string, instance: string): Promise<void> {
-    const prefix = `${project}/${instance}/`;
+    for (const key of this.trackedKeys()) {
+      if (key.project !== project || key.instance !== instance) continue;
 
-    for (const id of [...this.databases.keys(), ...this.opening.keys()]) {
-      if (!id.startsWith(prefix)) continue;
-
-      const [, , database = ''] = id.split('/');
-
-      await this.close({ project, instance, database });
+      await this.close(key);
     }
 
     if (this.options.storageType === 'memory') return;
@@ -161,15 +175,15 @@ export class PGliteDatabaseManager {
   }
 
   async closeAll(): Promise<void> {
-    const keys = [...this.databases.keys(), ...this.opening.keys()];
+    await Promise.all(this.trackedKeys().map(key => this.close(key)));
+  }
 
-    await Promise.all(
-      keys.map(async id => {
-        const [project = '', instance = '', database = ''] = id.split('/');
-
-        await this.close({ project, instance, database });
-      })
-    );
+  /** Every database currently open or being opened, by the names it was opened under. */
+  private trackedKeys(): DatabaseKey[] {
+    return [
+      ...[...this.databases.values()].map(tracked => tracked.key),
+      ...this.openingKeys.values(),
+    ];
   }
 
   /**
@@ -218,7 +232,7 @@ export class PGliteDatabaseManager {
     return directory;
   }
 
-  private async createDatabase(id: string, key: DatabaseKey): Promise<OpenDatabase> {
+  private async createDatabase(id: string, key: DatabaseKey): Promise<TrackedDatabase> {
     if (this.options.storageType !== 'memory') {
       // PGlite creates only the leaf directory it is pointed at, so the
       // project/instance path above it has to exist first or the very first
@@ -230,8 +244,9 @@ export class PGliteDatabaseManager {
       extensions: DATA_PLANE_EXTENSIONS,
     });
 
-    const open: OpenDatabase = {
+    const open: TrackedDatabase = {
       db,
+      key,
       queue: new PGliteSessionQueue(db as unknown as ProtocolBackend),
     };
 

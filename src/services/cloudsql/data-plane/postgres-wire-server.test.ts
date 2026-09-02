@@ -147,6 +147,10 @@ function allow(queue: PGliteSessionQueue, password: string): ConnectionResolutio
 class TestClient {
   private socket: Awaited<ReturnType<typeof Bun.connect>> | null = null;
   private received = new Uint8Array(0);
+  // Unwritten bytes. The server pauses reading under load, so writes are
+  // accepted only partially and the remainder has to go out on drain — a real
+  // client has to do this, and ignoring it would silently lose data.
+  private unwritten = new Uint8Array(0);
 
   static async connect(port: number): Promise<TestClient> {
     const client = new TestClient();
@@ -162,6 +166,9 @@ class TestClient {
           combined.set(chunk, client.received.length);
           client.received = combined;
         },
+        drain: () => {
+          client.flush();
+        },
         open() {},
         close() {},
         error() {},
@@ -172,7 +179,21 @@ class TestClient {
   }
 
   send(bytes: Uint8Array): void {
-    this.socket?.write(bytes);
+    const combined = new Uint8Array(this.unwritten.length + bytes.length);
+
+    combined.set(this.unwritten);
+    combined.set(bytes, this.unwritten.length);
+    this.unwritten = combined;
+
+    this.flush();
+  }
+
+  private flush(): void {
+    if (!this.socket || this.unwritten.length === 0) return;
+
+    const written = this.socket.write(this.unwritten);
+
+    this.unwritten = this.unwritten.slice(written);
   }
 
   /** Wait until at least one more byte arrives than the caller has seen. */
@@ -186,8 +207,11 @@ class TestClient {
     return this.received;
   }
 
-  async waitForMessages(count: number): Promise<{ tag: string; body: Uint8Array }[]> {
-    const deadline = Date.now() + 2000;
+  async waitForMessages(
+    count: number,
+    timeoutMs = 2000
+  ): Promise<{ tag: string; body: Uint8Array }[]> {
+    const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
       const messages = readBackendMessages(this.received);
@@ -555,6 +579,35 @@ describe('PostgresWireServer', () => {
     const messages = await client.waitForMessages(1);
 
     expect(readErrorFields(messages[0]?.body ?? new Uint8Array(0)).M).toBe('backend exploded');
+  });
+
+  test('keeps up with a client pipelining more than the read buffer holds', async () => {
+    const { queue, received } = makeFakeQueue();
+    const port = startServer(async () => allow(queue, ''));
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    // Frames arrive faster than the single shared backend can run them, so the
+    // unparsed buffer grows until reads are paused. Well past the pause
+    // threshold here: every frame must still be processed, in order, which
+    // only happens if reads are resumed again as the buffer drains.
+    const frameCount = 200;
+    const payload = 'x'.repeat(64 * 1024);
+
+    for (let index = 0; index < frameCount; index++) {
+      client.send(buildQueryMessage(`SELECT ${index}, '${payload}'`));
+    }
+
+    const messages = await client.waitForMessages(frameCount + 1, 20000);
+
+    expect(messages).toHaveLength(frameCount + 1);
+    // received[0] is the startup packet forwarded at authentication.
+    expect(received).toHaveLength(frameCount + 1);
+    // Order matters as much as arrival: a resumed read must not reorder work.
+    expect(received[1]).toContain('SELECT 0,');
+    expect(received[frameCount]).toContain(`SELECT ${frameCount - 1},`);
   });
 
   test('listen is idempotent so a second call cannot double-bind the port', async () => {
