@@ -445,6 +445,20 @@ export class PostgresWireServer {
     // sequence, so the batch and this frame go to the backend together.
     state.pendingBatch.push(namespaced);
 
+    // Rechecked here and not only when batching: the frame that ends a
+    // sequence may itself be a whole frame's worth of bytes, so a batch just
+    // under the limit plus a maximum-sized terminator would otherwise be
+    // assembled — and then copied again by concatAll.
+    if (this.pendingBatchLength(state) > MAX_PENDING_BATCH_LENGTH) {
+      this.fail(
+        socket,
+        SQLSTATE_PROTOCOL_VIOLATION,
+        'extended-query sequence exceeded the maximum size before a Sync'
+      );
+
+      return;
+    }
+
     const batch = state.pendingBatch;
 
     state.pendingBatch = [];
@@ -631,6 +645,7 @@ export class PostgresWireServer {
     if (state.phase === 'closed') return;
 
     state.phase = 'closed';
+    state.pendingBatch = [];
 
     socket.write(buildErrorResponse(sqlState, message));
     socket.end();

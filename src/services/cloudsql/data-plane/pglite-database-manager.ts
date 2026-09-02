@@ -88,6 +88,11 @@ export class PGliteDatabaseManager {
   private opening = new Map<string, Promise<TrackedDatabase>>();
   // The names behind each in-flight open, for the same reason.
   private openingKeys = new Map<string, DatabaseKey>();
+  // Instances whose data is being deleted. An open that started after the
+  // delete began would otherwise register a fresh backend — and recreate the
+  // directory — while the old one was still being removed, leaving the deleted
+  // instance's storage alive under a stale handle.
+  private droppingInstances = new Set<string>();
 
   constructor(options: PGliteDatabaseManagerOptions) {
     this.options = options;
@@ -95,6 +100,12 @@ export class PGliteDatabaseManager {
 
   async open(key: DatabaseKey): Promise<OpenDatabase> {
     const id = buildDatabaseKey(key);
+
+    if (this.droppingInstances.has(this.buildInstanceId(key))) {
+      throw new Error(
+        `Cannot open ${id}: instance ${key.project}/${key.instance} is being deleted`
+      );
+    }
     const existing = this.databases.get(id);
 
     if (existing) return existing;
@@ -160,18 +171,39 @@ export class PGliteDatabaseManager {
    * name would silently inherit the deleted instance's rows.
    */
   async dropInstance(project: string, instance: string): Promise<void> {
-    for (const key of this.trackedKeys()) {
-      if (key.project !== project || key.instance !== instance) continue;
+    const instanceId = this.buildInstanceId({ project, instance, database: '' });
 
-      await this.close(key);
+    this.droppingInstances.add(instanceId);
+
+    try {
+      // Re-checked after each close rather than from a single snapshot: closing
+      // yields, and an open that had already begun can still finish and
+      // register during that window.
+      let remaining = this.instanceKeys(project, instance);
+
+      while (remaining.length > 0) {
+        for (const key of remaining) await this.close(key);
+
+        remaining = this.instanceKeys(project, instance);
+      }
+
+      if (this.options.storageType === 'memory') return;
+
+      await rm(this.resolveInstanceDirectory(project, instance), {
+        recursive: true,
+        force: true,
+      });
+    } finally {
+      this.droppingInstances.delete(instanceId);
     }
+  }
 
-    if (this.options.storageType === 'memory') return;
+  private instanceKeys(project: string, instance: string): DatabaseKey[] {
+    return this.trackedKeys().filter(key => key.project === project && key.instance === instance);
+  }
 
-    await rm(this.resolveInstanceDirectory(project, instance), {
-      recursive: true,
-      force: true,
-    });
+  private buildInstanceId(key: DatabaseKey): string {
+    return [key.project, key.instance].map(encodePathSegment).join('/');
   }
 
   async closeAll(): Promise<void> {

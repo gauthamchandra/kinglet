@@ -75,6 +75,19 @@ function buildPasswordMessage(password: string): Uint8Array {
   return buildTaggedMessage('p', new TextEncoder().encode(`${password}\0`));
 }
 
+/** A Parse frame body: statement name, query text, then a zero parameter count. */
+function buildParseBody(name: string, sql: string): Uint8Array {
+  const encoder = new TextEncoder();
+  const named = encoder.encode(name);
+  const query = encoder.encode(sql);
+  const body = new Uint8Array(named.length + 1 + query.length + 1 + 2);
+
+  body.set(named, 0);
+  body.set(query, named.length + 1);
+
+  return body;
+}
+
 function buildQueryMessage(sql: string): Uint8Array {
   return buildTaggedMessage('Q', new TextEncoder().encode(`${sql}\0`));
 }
@@ -632,6 +645,34 @@ describe('PostgresWireServer', () => {
 
     expect(messages).toHaveLength(2);
     expect(received[1]?.length).toBeGreaterThan(12 * 1024 * 1024);
+  });
+
+  test('rejects a batch pushed over the limit by its terminating frame', async () => {
+    const { queue } = makeFakeQueue();
+    const port = startServer(async () => allow(queue, ''));
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    // The batched frames stay UNDER the sequence limit on their own, so the
+    // check in the batching branch never fires. Only counting the terminating
+    // frame as well catches this — which is the whole point: a maximum-sized
+    // terminator on top of an almost-full batch would otherwise be assembled,
+    // and then copied again when the batch is concatenated.
+    const chunk = 'z'.repeat(8 * 1024 * 1024);
+
+    for (let index = 0; index < 7; index++) {
+      client.send(buildTaggedMessage('P', buildParseBody(`stmt${index}`, `SELECT '${chunk}'`)));
+    }
+
+    client.send(buildQueryMessage(`SELECT '${'z'.repeat(10 * 1024 * 1024)}'`));
+
+    const messages = await client.waitForMessages(2, 20000);
+
+    expect(readErrorFields(messages[1]?.body ?? new Uint8Array(0)).C).toBe(
+      SQLSTATE_PROTOCOL_VIOLATION
+    );
   });
 
   test('listen is idempotent so a second call cannot double-bind the port', async () => {

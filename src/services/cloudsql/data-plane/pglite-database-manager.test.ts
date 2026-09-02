@@ -191,6 +191,33 @@ describe('PGliteDatabaseManager', () => {
     expect(existsSync(join(root, 'cloudsql/p1/inst'))).toBe(false);
   });
 
+  test('refuses an open that races the deletion of its instance', async () => {
+    const { manager, root } = await fileManager();
+
+    await manager.open(KEY);
+
+    // Started while the drop is in flight. Allowed through, it would build a
+    // fresh backend and recreate the directory being removed, leaving the
+    // deleted instance's storage alive behind a handle nothing tracks.
+    const dropping = manager.dropInstance('p1', 'inst');
+    const raced = manager.open({ project: 'p1', instance: 'inst', database: 'late' });
+
+    await expect(raced).rejects.toThrow('is being deleted');
+    await dropping;
+
+    expect(existsSync(join(root, 'cloudsql/p1/inst'))).toBe(false);
+  });
+
+  test('allows opens again once the deletion is finished', async () => {
+    const { manager } = await fileManager();
+
+    await manager.open(KEY);
+    await manager.dropInstance('p1', 'inst');
+
+    // A new instance may legitimately reuse the name.
+    await expect(manager.open(KEY)).resolves.toBeDefined();
+  });
+
   test('dropping an in-memory instance touches no files', async () => {
     const manager = memoryManager();
 
