@@ -1,13 +1,16 @@
 /**
  * End-to-End Test: Cloud SQL Workflow
  *
- * Black-box control-plane lifecycle through HTTP (sqladmin v1 REST surface).
- * There is no @google-cloud/* client for the SQL Admin API; raw REST is the
- * verification path. The connectable Postgres endpoint each of these instances
- * also gets is covered separately by cloudsql-data-plane.test.ts.
+ * Black-box control-plane lifecycle through HTTP (sqladmin v1 REST surface),
+ * verified two ways: raw REST for exact wire shapes, and Google's official
+ * `@googleapis/sqladmin` client, which is generated from the same discovery
+ * document real GCP serves and rejects responses that do not match it. The
+ * connectable Postgres endpoint each of these instances also gets is covered
+ * separately by cloudsql-data-plane.test.ts.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { sqladmin } from '@googleapis/sqladmin';
 import type { Server } from 'bun';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
@@ -204,5 +207,92 @@ describe('Cloud SQL e2e', () => {
     const body = (await resp.json()) as { error: { status: string } };
 
     expect(body.error.status).toBe('FAILED_PRECONDITION');
+  });
+});
+
+describe('Cloud SQL e2e via the official @googleapis/sqladmin client', () => {
+  // Google's own generated client for this API. It builds the request paths
+  // and parses the responses against the published discovery document, so it
+  // catches fidelity drift that hand-written fetch calls would accept.
+  function client() {
+    return sqladmin({
+      version: 'v1',
+      rootUrl: `http://localhost:${emulatorPort}/`,
+      // kinglet does not check credentials; the client requires something.
+      auth: 'kinglet-emulator',
+    });
+  }
+
+  const project = 'client-project';
+
+  test('drives the full instance lifecycle through the generated client', async () => {
+    const admin = client();
+
+    const created = await admin.instances.insert({
+      project,
+      requestBody: {
+        name: 'client-db',
+        databaseVersion: 'POSTGRES_16',
+        region: 'us-central1',
+        rootPassword: 'root-pass',
+      },
+    });
+
+    expect(created.status).toBe(200);
+    expect(created.data.kind).toBe('sql#operation');
+    expect(created.data.operationType).toBe('CREATE');
+    expect(created.data.status).toBe('DONE');
+
+    const fetched = await admin.instances.get({ project, instance: 'client-db' });
+
+    expect(fetched.status).toBe(200);
+    expect(fetched.data.kind).toBe('sql#instance');
+    expect(fetched.data.name).toBe('client-db');
+    expect(fetched.data.state).toBe('RUNNABLE');
+    expect(fetched.data.connectionName).toBe(`${project}:us-central1:client-db`);
+    expect(fetched.data.ipAddresses).toEqual([{ type: 'PRIMARY', ipAddress: '127.0.0.1' }]);
+
+    const listed = await admin.instances.list({ project });
+
+    expect(listed.data.kind).toBe('sql#instancesList');
+    expect(listed.data.items?.map(instance => instance.name)).toEqual(['client-db']);
+  });
+
+  test('manages databases and users through the generated client', async () => {
+    const admin = client();
+
+    await admin.instances.insert({
+      project,
+      requestBody: { name: 'client-db2', databaseVersion: 'POSTGRES_16' },
+    });
+
+    await admin.databases.insert({
+      project,
+      instance: 'client-db2',
+      requestBody: { name: 'analytics' },
+    });
+
+    const databases = await admin.databases.list({ project, instance: 'client-db2' });
+
+    expect(databases.data.kind).toBe('sql#databasesList');
+    expect(databases.data.items?.map(database => database.name)).toEqual(['analytics', 'postgres']);
+
+    await admin.users.insert({
+      project,
+      instance: 'client-db2',
+      requestBody: { name: 'app', password: 'app-pass' },
+    });
+
+    const users = await admin.users.list({ project, instance: 'client-db2' });
+
+    expect(users.data.kind).toBe('sql#usersList');
+    expect(users.data.items?.map(user => user.name)).toEqual(['app', 'postgres']);
+  });
+
+  test('surfaces a missing instance as a 404 the client can parse', async () => {
+    const admin = client();
+    const missing = admin.instances.get({ project, instance: 'no-such-instance' });
+
+    await expect(missing).rejects.toHaveProperty('code', 404);
   });
 });

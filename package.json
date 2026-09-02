@@ -64,6 +64,7 @@
     "@google-cloud/storage": "^7.19.0",
     "@google-cloud/tasks": "^6.2.1",
     "@google-cloud/workflows": "4.3.0",
+    "@googleapis/sqladmin": "^38.0.0",
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.5.2",
