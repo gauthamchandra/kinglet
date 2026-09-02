@@ -7,6 +7,8 @@
 import type { SQLQueryBindings } from 'bun:sqlite';
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type {
   BaseRecord,
   CacheOperations,
@@ -105,6 +107,13 @@ export class SQLiteStorageProvider implements StorageProvider {
     try {
       // Initialize SQLite database
       const dbPath = config.database?.path ?? ':memory:';
+
+      if (dbPath !== ':memory:') {
+        // SQLite creates the database file but not the directory holding it,
+        // so a configured path like ./data/emulator.db fails to open on a
+        // fresh checkout until something makes the directory.
+        mkdirSync(dirname(dbPath), { recursive: true });
+      }
 
       this.db = new Database(dbPath);
 
@@ -247,7 +256,8 @@ export class SQLiteStorageProvider implements StorageProvider {
     }
 
     try {
-      const { whereClause, orderClause, limitClause, params } = this.buildQuery(options);
+      const { whereClause, orderClause, limitClause, params, paginationParamCount } =
+        this.buildQuery(options);
 
       // Build the main query
       let query = `SELECT * FROM ${table}`;
@@ -275,8 +285,12 @@ export class SQLiteStorageProvider implements StorageProvider {
       }
 
       const countStmt = this.db.prepare(countQuery);
+      // The count query repeats the WHERE clause but not the LIMIT/OFFSET, so
+      // it needs exactly the WHERE bindings. Trim the pagination bindings that
+      // were actually added: assuming two would eat a WHERE binding whenever a
+      // LIMIT was added without an OFFSET, which is every findFirst.
       const countResult = countStmt.get(
-        ...params.slice(0, params.length - (limitClause ? 2 : 0))
+        ...params.slice(0, params.length - paginationParamCount)
       ) as { count: number };
       const total = countResult.count;
 
@@ -459,9 +473,22 @@ export class SQLiteStorageProvider implements StorageProvider {
     }
 
     try {
-      const columnDefinitions = schema.columns.map(col => this.formatColumnDefinition(col));
+      // `create` writes an id on every record, so a table without a column
+      // for it cannot hold a single row. `TableSchema.columns` describes the
+      // DOMAIN shape and no service declares identity, so the column is
+      // supplied here rather than demanded of every caller — matching
+      // `rebuildTable`, which likewise carries an existing id across a rebuild
+      // the schema never mentions. A caller that declares one anyway is
+      // honored once, not twice, since a duplicate column name is a DDL error.
+      const columnDefinitions = [
+        'id TEXT PRIMARY KEY',
+        ...schema.columns
+          .filter(col => col.name !== 'id')
+          .map(col => this.formatColumnDefinition(col)),
+      ];
 
-      // Add timestamp columns if requested
+      // Timestamps stay behind the flag, as they are in `rebuildTable`: the
+      // two paths must agree, or a rebuild would drop columns this created.
       if (schema.timestamps) {
         columnDefinitions.push('createdAt DATETIME NOT NULL');
         columnDefinitions.push('updatedAt DATETIME NOT NULL');
@@ -705,6 +732,7 @@ export class SQLiteStorageProvider implements StorageProvider {
     let whereClause = '';
     let orderClause = '';
     let limitClause = '';
+    let paginationParamCount = 0;
 
     // Build WHERE clause
     if (options.filter) {
@@ -726,15 +754,17 @@ export class SQLiteStorageProvider implements StorageProvider {
       if (options.pagination.limit) {
         limitClause = 'LIMIT ?';
         params.push(options.pagination.limit);
+        paginationParamCount++;
 
         if (options.pagination.offset) {
           limitClause += ' OFFSET ?';
           params.push(options.pagination.offset);
+          paginationParamCount++;
         }
       }
     }
 
-    return { whereClause, orderClause, limitClause, params };
+    return { whereClause, orderClause, limitClause, params, paginationParamCount };
   }
 
   private buildWhereClause(filter: QueryFilter): {

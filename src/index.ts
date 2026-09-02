@@ -13,6 +13,7 @@ import {
 import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
+import { toStorageConfig } from '@/core/storage/config.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
 
     storageManager = new StorageManager();
 
-    await storageManager.initialize(config.storage);
+    await storageManager.initialize(toStorageConfig(config.storage));
 
     logger.info('Storage initialized');
 
