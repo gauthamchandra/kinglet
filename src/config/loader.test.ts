@@ -292,4 +292,32 @@ describe('Configuration Loader', () => {
       expect(config.services.memorystore.dataPlane.enabled).toBe(false);
     });
   });
+
+  describe('Cloud SQL configuration', () => {
+    test('loadConfigFromEnv configures the cloudsql data plane from env vars', async () => {
+      const config = await loadConfigFromEnv({
+        CLOUDSQL_PORT_RANGE_START: '15432',
+        CLOUDSQL_PORT_RANGE_END: '15532',
+      });
+
+      expect(config.services.cloudsql.dataPlane.enabled).toBe(true);
+      expect(config.services.cloudsql.dataPlane.portRangeStart).toBe(15432);
+      expect(config.services.cloudsql.dataPlane.portRangeEnd).toBe(15532);
+    });
+
+    test('loadConfigFromEnv omitting cloudsql env vars still parses with the data plane on', async () => {
+      const config = await loadConfigFromEnv({});
+
+      expect(config.services.cloudsql.enabled).toBe(true);
+      expect(config.services.cloudsql.dataPlane.enabled).toBe(true);
+      expect(config.services.cloudsql.dataPlane.portRangeStart).toBe(5432);
+    });
+
+    test('loadConfigFromEnv disables the cloudsql data plane when CLOUDSQL_DATA_PLANE is false', async () => {
+      const config = await loadConfigFromEnv({ CLOUDSQL_DATA_PLANE: 'false' });
+
+      expect(config.services.cloudsql.enabled).toBe(true);
+      expect(config.services.cloudsql.dataPlane.enabled).toBe(false);
+    });
+  });
 });

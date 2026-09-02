@@ -39,6 +39,9 @@ See [Storage modes](storage.md) for details on each storage type.
 | `MEMORYSTORE_VALKEY_BINARY` | — | Override the resolved `valkey-server` binary path |
 | `MEMORYSTORE_PORT_RANGE_START` | `6380` | First port available for data-plane instances |
 | `MEMORYSTORE_PORT_RANGE_END` | `6479` | Last port available for data-plane instances |
+| `CLOUDSQL_DATA_PLANE` | `true` | Serve a real Postgres endpoint per instance (PGlite); `false` for a control plane only |
+| `CLOUDSQL_PORT_RANGE_START` | `5432` | First port available for Cloud SQL instance endpoints |
+| `CLOUDSQL_PORT_RANGE_END` | `5531` | Last port available for Cloud SQL instance endpoints |
 
 ## Logging
 
