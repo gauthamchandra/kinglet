@@ -57,11 +57,16 @@ const TERMINATE_MESSAGE_TAG = 0x58; // 'X'
 // can.
 const MAX_PENDING_BATCH_LENGTH = MAX_MESSAGE_LENGTH;
 
-// Reading stops once this much unparsed input is queued and resumes when it
-// drains. Frames arrive faster than a single shared backend can run them — a
-// client can pipeline while an earlier statement is still executing — so
+// Reading stops once this much *consumable* input is queued and resumes when
+// it drains. Frames arrive faster than a single shared backend can run them —
+// a client can pipeline while an earlier statement is still executing — so
 // without backpressure the unparsed buffer grows for as long as the client
 // keeps writing, however small each individual frame is.
+//
+// Deliberately below MAX_MESSAGE_LENGTH, which is why "consumable" matters: a
+// single legitimate frame may be larger than this threshold, and pausing while
+// it is still arriving would stall the connection forever — the bytes that
+// would let it be consumed are exactly the ones that would no longer be read.
 const READ_PAUSE_THRESHOLD = 8 * 1024 * 1024;
 
 // SQLSTATEs the startup exchange can end in, all of them classes a Postgres
@@ -256,10 +261,7 @@ export class PostgresWireServer {
 
           // Applied before processing, because processing is asynchronous and
           // returns immediately while the backend is busy.
-          if (socket.data.buffer.length >= READ_PAUSE_THRESHOLD && !socket.data.isReadPaused) {
-            socket.data.isReadPaused = true;
-            socket.pause();
-          }
+          this.applyReadBackpressure(socket);
 
           void this.processBuffered(socket);
         },
@@ -315,20 +317,53 @@ export class PostgresWireServer {
     } finally {
       state.isProcessing = false;
 
-      if (state.isReadPaused && state.buffer.length < READ_PAUSE_THRESHOLD) {
-        state.isReadPaused = false;
-        socket.resume();
-      }
+      this.applyReadBackpressure(socket);
     }
   }
 
   /**
-   * Split one complete frame off the front of the buffer, or return null while
-   * the frame is still arriving. Startup packets are length-prefixed with no
-   * tag; every later frame carries a leading tag byte.
+   * Pause or resume reading to match what the backend can keep up with.
+   *
+   * <p>Backpressure applies only while there is work already sitting in the
+   * buffer that this server could run but has not yet. A buffer full of a
+   * frame that is still arriving is the opposite situation — it needs MORE
+   * bytes to make progress — so reading has to continue there no matter how
+   * large it has grown.
    */
-  private takeNextFrame(socket: Socket<ConnectionState>): Uint8Array | null {
+  private applyReadBackpressure(socket: Socket<ConnectionState>): void {
     const state = socket.data;
+
+    if (state.phase === 'closed') return;
+
+    const shouldPause =
+      state.buffer.length >= READ_PAUSE_THRESHOLD && this.holdsCompleteFrame(state);
+
+    if (shouldPause && !state.isReadPaused) {
+      state.isReadPaused = true;
+      socket.pause();
+
+      return;
+    }
+
+    if (!shouldPause && state.isReadPaused) {
+      state.isReadPaused = false;
+      socket.resume();
+    }
+  }
+
+  /** Whether the buffer already holds a whole frame waiting to be run. */
+  private holdsCompleteFrame(state: ConnectionState): boolean {
+    const frameLength = this.frameLengthAtHead(state);
+
+    return frameLength != null && state.buffer.length >= frameLength;
+  }
+
+  /**
+   * Total size of the frame at the head of the buffer, or null while too few
+   * bytes have arrived to know. Does not validate the length — that belongs to
+   * `takeNextFrame`, which can report a violation to the client.
+   */
+  private frameLengthAtHead(state: ConnectionState): number | null {
     const isStartup = state.phase === 'startup';
     const headerSize = isStartup ? 4 : 5;
 
@@ -340,8 +375,23 @@ export class PostgresWireServer {
       state.buffer.byteLength
     );
     const declaredLength = view.getInt32(isStartup ? 0 : 1);
-    const frameLength = isStartup ? declaredLength : declaredLength + 1;
 
+    return isStartup ? declaredLength : declaredLength + 1;
+  }
+
+  /**
+   * Split one complete frame off the front of the buffer, or return null while
+   * the frame is still arriving. Startup packets are length-prefixed with no
+   * tag; every later frame carries a leading tag byte.
+   */
+  private takeNextFrame(socket: Socket<ConnectionState>): Uint8Array | null {
+    const state = socket.data;
+    const isStartup = state.phase === 'startup';
+    const frameLength = this.frameLengthAtHead(state);
+
+    if (frameLength == null) return null;
+
+    const declaredLength = isStartup ? frameLength : frameLength - 1;
     const maxLength = isStartup ? MAX_STARTUP_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
 
     if (declaredLength < 4 || declaredLength > maxLength) {

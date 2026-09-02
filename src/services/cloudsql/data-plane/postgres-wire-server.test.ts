@@ -610,6 +610,30 @@ describe('PostgresWireServer', () => {
     expect(received[frameCount]).toContain(`SELECT ${frameCount - 1},`);
   });
 
+  test('receives a single frame larger than the read-pause threshold', async () => {
+    const { queue, received } = makeFakeQueue();
+    const port = startServer(async () => allow(queue, ''));
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    // One legitimate frame bigger than the pause threshold but under the
+    // per-frame limit. Pausing while it is still arriving would stall the
+    // connection forever: the bytes needed to consume it are exactly the ones
+    // that would stop being read.
+    const oversized = buildQueryMessage(`SELECT '${'y'.repeat(12 * 1024 * 1024)}'`);
+
+    expect(oversized.length).toBeGreaterThan(8 * 1024 * 1024);
+
+    client.send(oversized);
+
+    const messages = await client.waitForMessages(2, 20000);
+
+    expect(messages).toHaveLength(2);
+    expect(received[1]?.length).toBeGreaterThan(12 * 1024 * 1024);
+  });
+
   test('listen is idempotent so a second call cannot double-bind the port', async () => {
     const { queue } = makeFakeQueue();
     const port = startServer(async () => allow(queue, ''));
