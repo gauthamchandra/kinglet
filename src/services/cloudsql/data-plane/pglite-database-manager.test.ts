@@ -10,7 +10,11 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildDatabaseKey, PGliteDatabaseManager } from './pglite-database-manager.ts';
+import {
+  buildDatabaseKey,
+  encodePathSegment,
+  PGliteDatabaseManager,
+} from './pglite-database-manager.ts';
 
 const KEY = { project: 'p1', instance: 'inst', database: 'postgres' };
 
@@ -61,6 +65,19 @@ describe('buildDatabaseKey', () => {
   });
 });
 
+describe('encodePathSegment', () => {
+  test('leaves an ordinary name readable', () => {
+    expect(encodePathSegment('postgres')).toBe('postgres');
+    expect(encodePathSegment('my-app_db1')).toBe('my-app_db1');
+  });
+
+  test('defuses traversal and separators', () => {
+    expect(encodePathSegment('..')).toBe('%2E%2E');
+    expect(encodePathSegment('a/b')).toBe('a%2Fb');
+    expect(encodePathSegment('../../etc')).toBe('%2E%2E%2F%2E%2E%2Fetc');
+  });
+});
+
 describe('PGliteDatabaseManager', () => {
   test('uses an in-memory data source when kinglet itself is in-memory', () => {
     expect(memoryManager().resolveDataSource(KEY)).toBe('memory://');
@@ -72,6 +89,81 @@ describe('PGliteDatabaseManager', () => {
     expect(manager.resolveDataSource(KEY)).toBe(
       `file://${join(root, 'cloudsql/p1/inst/postgres')}`
     );
+  });
+
+  test('keeps a traversing database name inside the data root', async () => {
+    const { manager, root } = await fileManager();
+    const cloudsqlRoot = join(root, 'cloudsql');
+
+    // The admin API does not constrain database names, so `..` reaches this
+    // layer intact. Left unencoded it would resolve to the instance directory,
+    // which `drop` then deletes recursively — taking every other database with
+    // it, and for `a/../../..` kinglet's own SQLite file too.
+    for (const database of ['..', 'a/../../..', '../../../../etc/pwn']) {
+      const source = manager.resolveDataSource({ project: 'p1', instance: 'inst', database });
+
+      expect(source.startsWith(`file://${cloudsqlRoot}/`)).toBe(true);
+    }
+  });
+
+  test('keeps a traversing project or instance name inside the data root', async () => {
+    const { manager, root } = await fileManager();
+    const cloudsqlRoot = join(root, 'cloudsql');
+
+    expect(
+      manager
+        .resolveDataSource({ project: '../..', instance: 'inst', database: 'postgres' })
+        .startsWith(`file://${cloudsqlRoot}/`)
+    ).toBe(true);
+    expect(
+      manager
+        .resolveDataSource({ project: 'p1', instance: '../..', database: 'postgres' })
+        .startsWith(`file://${cloudsqlRoot}/`)
+    ).toBe(true);
+  });
+
+  test('dropInstance deletes an instance whose databases were never opened', async () => {
+    const { manager, root } = await fileManager();
+
+    await manager.open(KEY);
+    await manager.close(KEY);
+
+    const instanceDirectory = join(root, 'cloudsql/p1/inst');
+
+    expect(existsSync(instanceDirectory)).toBe(true);
+
+    // A fresh manager has nothing open — the state of an instance whose data
+    // plane never came back after a restart. Dropping has to work from disk,
+    // or the next instance of the same name inherits these rows.
+    const restarted = new PGliteDatabaseManager({
+      storageType: 'sqlite',
+      sqlitePath: join(root, 'emulator.db'),
+    });
+
+    managers.push(restarted);
+
+    await restarted.dropInstance('p1', 'inst');
+
+    expect(existsSync(instanceDirectory)).toBe(false);
+  });
+
+  test('dropInstance closes databases it still holds open', async () => {
+    const { manager, root } = await fileManager();
+
+    await manager.open(KEY);
+    await manager.dropInstance('p1', 'inst');
+
+    expect(manager.get(KEY)).toBeNull();
+    expect(existsSync(join(root, 'cloudsql/p1/inst'))).toBe(false);
+  });
+
+  test('dropping an in-memory instance touches no files', async () => {
+    const manager = memoryManager();
+
+    await manager.open(KEY);
+
+    await expect(manager.dropInstance('p1', 'inst')).resolves.toBeUndefined();
+    expect(manager.get(KEY)).toBeNull();
   });
 
   test('opens a queryable database and returns the same one on reopen', async () => {

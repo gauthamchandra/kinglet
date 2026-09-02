@@ -461,6 +461,46 @@ describe('PostgresWireServer', () => {
     );
   });
 
+  test('rejects a post-authentication frame declaring an oversized length', async () => {
+    const { queue } = makeFakeQueue();
+    const port = startServer(async () => allow(queue, ''));
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    // A frame header claiming 1 GiB, with none of the body sent. Without a cap
+    // the server would hold everything received so far and keep growing as the
+    // client dribbles bytes it never has to finish.
+    const header = new Uint8Array(5);
+
+    header[0] = 0x51; // 'Q'
+    new DataView(header.buffer).setInt32(1, 1024 * 1024 * 1024);
+    client.send(header);
+
+    const messages = await client.waitForMessages(2);
+
+    expect(readErrorFields(messages[1]?.body ?? new Uint8Array(0)).C).toBe(
+      SQLSTATE_PROTOCOL_VIOLATION
+    );
+  });
+
+  test('accepts a large but legitimate post-authentication frame', async () => {
+    const { queue, received } = makeFakeQueue();
+    const port = startServer(async () => allow(queue, ''));
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    // Comfortably under the cap: a big INSERT must still go through.
+    client.send(buildQueryMessage(`SELECT '${'x'.repeat(200_000)}'`));
+
+    await client.waitForMessages(2);
+
+    expect(received[1]?.length).toBeGreaterThan(200_000);
+  });
+
   test('rejects a non-password reply to the authentication request', async () => {
     const { queue } = makeFakeQueue();
     const port = startServer(async () => allow(queue, 's3cret'));

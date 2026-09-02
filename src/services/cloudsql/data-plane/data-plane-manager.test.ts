@@ -260,6 +260,30 @@ describe('DataPlaneManager', () => {
     await expect(makeManager().dropInstance('p1', 'ghost')).resolves.toBeUndefined();
   });
 
+  test('dropInstance deletes the data of an instance that is not running', async () => {
+    const root = await makeTemporaryRoot();
+    const options = { storageType: 'sqlite' as const, sqlitePath: join(root, 'emulator.db') };
+    const first = makeManager(options);
+    const port = (await first.startInstance('p1', 'a', ['postgres'])) ?? 0;
+
+    await runQuery(port, 'postgres', 'postgres', '', 'CREATE TABLE secrets (id int)');
+    await first.stopAll();
+
+    // A manager that never brought the instance up — what a restart leaves
+    // behind when the data plane cannot restore it. Deleting the instance must
+    // still remove its files, or a new instance of the same name would come up
+    // holding the deleted one's tables.
+    const second = makeManager(options);
+
+    await second.dropInstance('p1', 'a');
+
+    const restarted = (await second.startInstance('p1', 'a', ['postgres'])) ?? 0;
+
+    await expect(
+      runQuery(restarted, 'postgres', 'postgres', '', 'SELECT * FROM secrets')
+    ).rejects.toThrow();
+  });
+
   test('stopAll tears every instance down', async () => {
     const manager = makeManager();
 

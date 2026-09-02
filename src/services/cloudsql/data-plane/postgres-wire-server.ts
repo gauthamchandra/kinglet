@@ -34,6 +34,14 @@ const GSSENC_REQUEST_CODE = 80877104;
 // that sends a bogus length from making this server buffer without limit.
 const MAX_STARTUP_MESSAGE_LENGTH = 10000;
 
+// Post-authentication frames have no equivalent cap in the protocol: the
+// length is a signed 32-bit integer, so a client could declare a 2 GiB frame,
+// dribble the first few bytes, and leave this server holding a buffer that
+// only grows. 64 MiB is far above any statement, bind, or COPY chunk a client
+// realistically sends to a wasm Postgres, and turns that into a clean protocol
+// error instead of unbounded memory growth.
+const MAX_MESSAGE_LENGTH = 64 * 1024 * 1024;
+
 const AUTHENTICATION_CLEARTEXT_PASSWORD = 3;
 
 const PASSWORD_MESSAGE_TAG = 0x70; // 'p'
@@ -289,7 +297,9 @@ export class PostgresWireServer {
     const declaredLength = view.getInt32(isStartup ? 0 : 1);
     const frameLength = isStartup ? declaredLength : declaredLength + 1;
 
-    if (declaredLength < 4 || (isStartup && declaredLength > MAX_STARTUP_MESSAGE_LENGTH)) {
+    const maxLength = isStartup ? MAX_STARTUP_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
+
+    if (declaredLength < 4 || declaredLength > maxLength) {
       this.fail(socket, SQLSTATE_PROTOCOL_VIOLATION, `Invalid message length ${declaredLength}`);
 
       return null;

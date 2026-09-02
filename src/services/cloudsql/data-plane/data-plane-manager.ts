@@ -171,14 +171,14 @@ export class DataPlaneManager implements CloudSqlDataPlane {
   }
 
   async dropInstance(project: string, instance: string): Promise<void> {
-    const running = this.instances.get(buildInstanceKey(project, instance));
-    const databases = running ? [...running.databases] : [];
-
     await this.stopInstance(project, instance);
 
-    for (const database of databases) {
-      await this.databaseManager.drop({ project, instance, database });
-    }
+    // Deletes the instance's whole directory tree rather than the databases
+    // this manager happens to have open, because an instance that is not
+    // running has none: one whose data plane failed to come back after a
+    // restart would keep its files, and the next instance created with the
+    // same name would inherit the deleted one's rows.
+    await this.databaseManager.dropInstance(project, instance);
   }
 
   async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {

@@ -11,7 +11,7 @@
  */
 
 import { mkdir, rm } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { DATA_PLANE_EXTENSIONS } from './extensions.ts';
 import type { ProtocolBackend } from './pglite-session-queue.ts';
@@ -45,6 +45,22 @@ export interface OpenDatabase {
 
 export function buildDatabaseKey(key: DatabaseKey): string {
   return `${key.project}/${key.instance}/${key.database}`;
+}
+
+/**
+ * Make one project/instance/database name safe to use as a directory name.
+ *
+ * <p>These names arrive from the API — the URL path for project and instance,
+ * the request body for database — and the admin API deliberately does not
+ * constrain a database name, since real Cloud SQL accepts far more than a
+ * filesystem path segment does. Percent-encoding keeps that fidelity while
+ * making traversal impossible: `..` becomes `%2E%2E`, `a/b` becomes `a%2Fb`,
+ * and an ordinary name like `postgres` is left untouched and still readable
+ * on disk. `encodeURIComponent` already escapes separators and handles UTF-8;
+ * `.` is the one character it leaves through that matters here.
+ */
+export function encodePathSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(/\./g, '%2E');
 }
 
 export class PGliteDatabaseManager {
@@ -114,6 +130,35 @@ export class PGliteDatabaseManager {
     await rm(this.resolveDataDirectory(key), { recursive: true, force: true });
   }
 
+  /**
+   * Close every open database for an instance and delete the instance's whole
+   * directory tree.
+   *
+   * <p>Deliberately driven by what is on disk rather than by what this manager
+   * currently has open: an instance whose data plane never came back up after a
+   * restart has no open databases, so a drop that only walked the open ones
+   * would leave its files behind — and the next instance created with the same
+   * name would silently inherit the deleted instance's rows.
+   */
+  async dropInstance(project: string, instance: string): Promise<void> {
+    const prefix = `${project}/${instance}/`;
+
+    for (const id of [...this.databases.keys(), ...this.opening.keys()]) {
+      if (!id.startsWith(prefix)) continue;
+
+      const [, , database = ''] = id.split('/');
+
+      await this.close({ project, instance, database });
+    }
+
+    if (this.options.storageType === 'memory') return;
+
+    await rm(this.resolveInstanceDirectory(project, instance), {
+      recursive: true,
+      force: true,
+    });
+  }
+
   async closeAll(): Promise<void> {
     const keys = [...this.databases.keys(), ...this.opening.keys()];
 
@@ -136,14 +181,40 @@ export class PGliteDatabaseManager {
     return `file://${this.resolveDataDirectory(key)}`;
   }
 
+  /** The directory holding every database for one instance. */
+  private resolveInstanceDirectory(project: string, instance: string): string {
+    const root = join(dirname(this.options.sqlitePath), 'cloudsql');
+    const directory = resolve(root, encodePathSegment(project), encodePathSegment(instance));
+
+    return this.requireContainedIn(root, directory);
+  }
+
   private resolveDataDirectory(key: DatabaseKey): string {
-    return join(
-      dirname(this.options.sqlitePath),
-      'cloudsql',
-      key.project,
-      key.instance,
-      key.database
+    const root = join(dirname(this.options.sqlitePath), 'cloudsql');
+    const directory = resolve(
+      this.resolveInstanceDirectory(key.project, key.instance),
+      encodePathSegment(key.database)
     );
+
+    return this.requireContainedIn(root, directory);
+  }
+
+  /**
+   * Refuse to hand back a path outside the data root.
+   *
+   * <p>Encoding above already prevents this; the check stays because these
+   * paths are passed to a recursive delete, where a mistake would take out
+   * kinglet's own SQLite file and every other service's state along with it.
+   * A cheap invariant is worth it at that blast radius.
+   */
+  private requireContainedIn(root: string, directory: string): string {
+    const resolvedRoot = resolve(root);
+
+    if (directory !== resolvedRoot && !directory.startsWith(`${resolvedRoot}${sep}`)) {
+      throw new Error(`Refusing to use a Cloud SQL data directory outside ${resolvedRoot}`);
+    }
+
+    return directory;
   }
 
   private async createDatabase(id: string, key: DatabaseKey): Promise<OpenDatabase> {
