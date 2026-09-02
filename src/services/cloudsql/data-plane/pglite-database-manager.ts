@@ -88,11 +88,13 @@ export class PGliteDatabaseManager {
   private opening = new Map<string, Promise<TrackedDatabase>>();
   // The names behind each in-flight open, for the same reason.
   private openingKeys = new Map<string, DatabaseKey>();
-  // Instances whose data is being deleted. An open that started after the
-  // delete began would otherwise register a fresh backend — and recreate the
-  // directory — while the old one was still being removed, leaving the deleted
-  // instance's storage alive under a stale handle.
-  private droppingInstances = new Set<string>();
+  // Instances and databases whose data is being deleted, by the same ids
+  // `buildInstanceId` and `buildDatabaseKey` produce. An open that overlaps a
+  // delete would otherwise register a fresh backend — and recreate the
+  // directory — while the old one was still being removed, leaving deleted
+  // storage alive under a stale handle, or losing the newly created files to
+  // the delete that was already under way.
+  private dropping = new Set<string>();
 
   constructor(options: PGliteDatabaseManagerOptions) {
     this.options = options;
@@ -101,11 +103,7 @@ export class PGliteDatabaseManager {
   async open(key: DatabaseKey): Promise<OpenDatabase> {
     const id = buildDatabaseKey(key);
 
-    if (this.droppingInstances.has(this.buildInstanceId(key))) {
-      throw new Error(
-        `Cannot open ${id}: instance ${key.project}/${key.instance} is being deleted`
-      );
-    }
+    this.requireNotDropping(key, id);
     const existing = this.databases.get(id);
 
     if (existing) return existing;
@@ -153,11 +151,37 @@ export class PGliteDatabaseManager {
    * is gone rather than something a later database of the same name inherits.
    */
   async drop(key: DatabaseKey): Promise<void> {
-    await this.close(key);
+    const id = buildDatabaseKey(key);
 
-    if (this.options.storageType === 'memory') return;
+    this.dropping.add(id);
 
-    await rm(this.resolveDataDirectory(key), { recursive: true, force: true });
+    try {
+      await this.close(key);
+
+      if (this.options.storageType === 'memory') return;
+
+      await rm(this.resolveDataDirectory(key), { recursive: true, force: true });
+    } finally {
+      this.dropping.delete(id);
+    }
+  }
+
+  /**
+   * Refuse to open a database that is being deleted, or whose instance is.
+   *
+   * <p>Checked both before a backend is built and again after, since building
+   * one yields and a delete can begin in between.
+   */
+  private requireNotDropping(key: DatabaseKey, id: string): void {
+    if (this.dropping.has(this.buildInstanceId(key))) {
+      throw new Error(
+        `Cannot open ${id}: instance ${key.project}/${key.instance} is being deleted`
+      );
+    }
+
+    if (this.dropping.has(id)) {
+      throw new Error(`Cannot open ${id}: the database is being deleted`);
+    }
   }
 
   /**
@@ -173,7 +197,7 @@ export class PGliteDatabaseManager {
   async dropInstance(project: string, instance: string): Promise<void> {
     const instanceId = this.buildInstanceId({ project, instance, database: '' });
 
-    this.droppingInstances.add(instanceId);
+    this.dropping.add(instanceId);
 
     try {
       // Re-checked after each close rather than from a single snapshot: closing
@@ -194,7 +218,7 @@ export class PGliteDatabaseManager {
         force: true,
       });
     } finally {
-      this.droppingInstances.delete(instanceId);
+      this.dropping.delete(instanceId);
     }
   }
 
@@ -280,13 +304,13 @@ export class PGliteDatabaseManager {
     // this database was still coming up would close it and delete its files,
     // and returning it anyway would let the caller publish an endpoint whose
     // backend is already gone. Failing the open makes the caller unwind
-    // instead, which is right — the instance was deleted.
-    if (this.droppingInstances.has(this.buildInstanceId(key))) {
+    // instead, which is right — the resource was deleted.
+    try {
+      this.requireNotDropping(key, id);
+    } catch (error) {
       await db.close();
 
-      throw new Error(
-        `Cannot open ${id}: instance ${key.project}/${key.instance} is being deleted`
-      );
+      throw error;
     }
 
     const open: TrackedDatabase = {

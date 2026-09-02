@@ -224,6 +224,23 @@ describe('PGliteDatabaseManager', () => {
     expect(existsSync(join(root, 'cloudsql/p1/inst'))).toBe(false);
   });
 
+  test('refuses an open that races the deletion of that database', async () => {
+    const { manager, root } = await fileManager();
+
+    await manager.open(KEY);
+
+    // Dropping one database, not the whole instance: the delete would
+    // otherwise remove the directory out from under a backend opened in the
+    // same moment, losing the newly created files.
+    const dropping = manager.drop(KEY);
+    const raced = manager.open(KEY);
+
+    await expect(raced).rejects.toThrow('is being deleted');
+    await dropping;
+
+    expect(existsSync(join(root, 'cloudsql/p1/inst/postgres'))).toBe(false);
+  });
+
   test('allows opens again once the deletion is finished', async () => {
     const { manager } = await fileManager();
 
