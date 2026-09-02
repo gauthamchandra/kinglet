@@ -76,9 +76,10 @@ finding, not a nitpick ([ADR-002](../docs/adrs/002-dual-testing-framework-approa
 - New source files without a co-located `*.test.ts`. Tests sit next to their source, not in a
   separate `__tests__/` tree.
 - Error paths left untested — only happy paths covered.
-- New tests added under `e2e/` without awareness that `bun test` does **not** run them:
-  `bunfig.toml`'s `include` limits it to `src/**` and `test-utils/**`. The e2e suite runs via
-  `bun run test:e2e` in its own CI job.
+- New tests added under `e2e/` or `terraform/` without awareness that the default unit
+  suite does **not** run them: `package.json` scopes `bun run test*` to `src/`,
+  `test-utils/`, and `scripts/`. Run via `bun run test:e2e` / `bun run test:terraform`
+  in their own CI jobs.
 
 ### Architectural decisions
 

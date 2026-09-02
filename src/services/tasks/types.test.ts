@@ -642,7 +642,21 @@ describe('Cloud Tasks Types', () => {
       expect(record.httpTarget).toBeNull();
     });
 
-    test('should apply custom rate limits', () => {
+    test('should apply partial rate limits with GCP merge semantics', () => {
+      const record = requestToQueueRecord('projects/p/locations/l/queues/q', {
+        rateLimits: {
+          maxConcurrentDispatches: 3,
+        },
+      });
+
+      const rateLimits = JSON.parse(record.rateLimits);
+
+      expect(rateLimits.maxConcurrentDispatches).toBe(3);
+      expect(rateLimits.maxDispatchesPerSecond).toBe(DEFAULT_RATE_LIMITS.maxDispatchesPerSecond);
+      expect(rateLimits.maxBurstSize).toBe(DEFAULT_RATE_LIMITS.maxBurstSize);
+    });
+
+    test('should apply fully specified rate limits', () => {
       const record = requestToQueueRecord('projects/p/locations/l/queues/q', {
         rateLimits: {
           maxDispatchesPerSecond: 200,
@@ -656,6 +670,16 @@ describe('Cloud Tasks Types', () => {
       expect(rateLimits.maxDispatchesPerSecond).toBe(200);
       expect(rateLimits.maxBurstSize).toBe(50);
       expect(rateLimits.maxConcurrentDispatches).toBe(500);
+    });
+
+    test('should accept explicit null optional queue fields from Terraform', () => {
+      const result = CreateQueueRequestSchema.safeParse({
+        rateLimits: null,
+        retryConfig: null,
+        httpTarget: null,
+      });
+
+      expect(result.success).toBe(true);
     });
   });
 

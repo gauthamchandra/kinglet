@@ -12,6 +12,7 @@ import { TokenBucket } from './token-bucket.ts';
 import type { QueueRecord, TaskHttpRequest, TaskRecord, TaskRetryConfig } from './types.ts';
 import {
   DEFAULT_RETRY_CONFIG,
+  mergeTaskRetryConfig,
   parseDurationSeconds,
   TaskRetryConfigSchema,
   TaskStatus,
@@ -278,7 +279,9 @@ export class DispatchEngine {
     try {
       const parsed = TaskRetryConfigSchema.safeParse(JSON.parse(retryConfigJson));
 
-      return parsed.success ? parsed.data : DEFAULT_RETRY_CONFIG;
+      return parsed.success
+        ? mergeTaskRetryConfig(parsed.data, DEFAULT_RETRY_CONFIG)
+        : DEFAULT_RETRY_CONFIG;
     } catch {
       return DEFAULT_RETRY_CONFIG;
     }

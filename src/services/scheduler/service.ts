@@ -10,6 +10,9 @@ import {
   CreateJobRequestSchema,
   JobState,
   jobRecordToResponse,
+  mergeRetryConfig,
+  normalizeHttpTarget,
+  type RetryConfig,
   requestToJobRecord,
   UpdateJobRequestSchema,
 } from './types.ts';
@@ -159,11 +162,21 @@ export class JobService {
     }
 
     if (request.httpTarget !== undefined) {
-      updates.httpTarget = JSON.stringify(request.httpTarget);
+      updates.httpTarget = JSON.stringify(normalizeHttpTarget(request.httpTarget));
+      updates.pubsubTarget = null;
     }
 
-    if (request.retryConfig !== undefined) {
-      updates.retryConfig = JSON.stringify(request.retryConfig);
+    if (request.pubsubTarget !== undefined) {
+      updates.pubsubTarget = JSON.stringify(request.pubsubTarget);
+      updates.httpTarget = null;
+    }
+
+    if (request.retryConfig != null) {
+      const existingRetryConfig = JSON.parse(existing.retryConfig) as RetryConfig;
+
+      updates.retryConfig = JSON.stringify(
+        mergeRetryConfig(request.retryConfig, existingRetryConfig)
+      );
     }
 
     if (request.attemptDeadline !== undefined) {
@@ -218,6 +231,10 @@ export class JobService {
 
     if (!existing) {
       throw new SchedulerError('NOT_FOUND', `Job ${name} not found`);
+    }
+
+    if (existing.state === JobState.ENABLED) {
+      return jobRecordToResponse(existing);
     }
 
     if (existing.state !== JobState.PAUSED) {

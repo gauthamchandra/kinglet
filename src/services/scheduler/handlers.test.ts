@@ -53,6 +53,7 @@ describe('SchedulerHandlers', () => {
             maxRetryDuration: '0s',
             minBackoffDuration: '5s',
             maxBackoffDuration: '3600s',
+            maxDoublings: 5,
           },
           attemptDeadline: '180s',
           scheduleTime: '2024-01-01T00:01:00Z',
@@ -71,6 +72,7 @@ describe('SchedulerHandlers', () => {
             maxRetryDuration: '0s',
             minBackoffDuration: '5s',
             maxBackoffDuration: '3600s',
+            maxDoublings: 5,
           },
           attemptDeadline: '180s',
         })
@@ -94,6 +96,7 @@ describe('SchedulerHandlers', () => {
             maxRetryDuration: '0s',
             minBackoffDuration: '5s',
             maxBackoffDuration: '3600s',
+            maxDoublings: 5,
           },
           attemptDeadline: '180s',
         })
@@ -112,6 +115,7 @@ describe('SchedulerHandlers', () => {
             maxRetryDuration: '0s',
             minBackoffDuration: '5s',
             maxBackoffDuration: '3600s',
+            maxDoublings: 5,
           },
           attemptDeadline: '180s',
         })
@@ -129,6 +133,7 @@ describe('SchedulerHandlers', () => {
             maxRetryDuration: '0s',
             minBackoffDuration: '5s',
             maxBackoffDuration: '3600s',
+            maxDoublings: 5,
           },
           attemptDeadline: '180s',
         })
@@ -146,6 +151,7 @@ describe('SchedulerHandlers', () => {
             maxRetryDuration: '0s',
             minBackoffDuration: '5s',
             maxBackoffDuration: '3600s',
+            maxDoublings: 5,
           },
           attemptDeadline: '180s',
         })

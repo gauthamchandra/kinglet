@@ -11,14 +11,25 @@ coverageDir = "./coverage"
 # non-zero for every developer even with all tests passing. The 80% AGGREGATE gate this
 # project actually enforces lives in scripts/check-coverage.ts and runs in CI.
 
-# Exclude test files from coverage reports
+# Exclude test files and non-unit harness code from coverage reports
 coverageExclude = [
   "**/*.test.ts",
   "test-utils/**/*",
-  "e2e/**/*"
+  "e2e/**/*",
+  "terraform/**"
 ]
 
-# Include test files from co-located structure and test-utils directory
+# Keep default discovery away from suites that need their own CI jobs / tooling.
+# package.json scopes `test:coverage:check` to src/, test-utils/, and scripts/ because
+# Bun 1.3.4 (pinned in CI) does not honor pathIgnorePatterns from bunfig.toml.
+# Explicit terraform runs on Bun 1.4+ pass `--path-ignore-patterns 'e2e/**'` so only e2e
+# is pruned; listing terraform/** here would suppress explicitly requested paths on 1.4+.
+pathIgnorePatterns = [
+  "e2e/**",
+  "terraform/**"
+]
+
+# Prefer co-located + test-utils + scripts unit tests when include is honored.
 include = [
   "src/**/*.test.ts",
   "test-utils/**/*.test.ts",

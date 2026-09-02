@@ -19,6 +19,7 @@ function makeJobData(
     timeZone: 'UTC',
     state: JobState.ENABLED,
     httpTarget: JSON.stringify({ uri: 'https://example.com', httpMethod: 'POST' }),
+    pubsubTarget: null,
     retryConfig: JSON.stringify(DEFAULT_RETRY_CONFIG),
     attemptDeadline: '180s',
     lastAttemptTime: null,

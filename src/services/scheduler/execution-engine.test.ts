@@ -7,7 +7,11 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { CronEngine } from './cron-engine.ts';
-import { ExecutionEngine } from './execution-engine.ts';
+import {
+  buildPubsubPublishUrl,
+  createDefaultPubsubPublisher,
+  ExecutionEngine,
+} from './execution-engine.ts';
 import { JobRepository } from './repository.ts';
 import type { JobRecord } from './types.ts';
 import { DEFAULT_RETRY_CONFIG, JobState } from './types.ts';
@@ -27,6 +31,7 @@ function makeJobData(
       headers: { 'X-Test': 'true' },
       body: Buffer.from('hello').toString('base64'),
     }),
+    pubsubTarget: null,
     retryConfig: JSON.stringify(DEFAULT_RETRY_CONFIG),
     attemptDeadline: '180s',
     lastAttemptTime: null,
@@ -42,6 +47,7 @@ describe('ExecutionEngine', () => {
   let cronEngine: CronEngine;
   let engine: ExecutionEngine;
   let mockHttpClient: ReturnType<typeof mock>;
+  let mockPubsubPublisher: ReturnType<typeof mock>;
   const logger = new Logger('test', 'error');
 
   beforeEach(async () => {
@@ -52,8 +58,12 @@ describe('ExecutionEngine', () => {
     cronEngine = new CronEngine();
 
     mockHttpClient = mock(() => Promise.resolve(new Response('OK', { status: 200 })));
+    mockPubsubPublisher = mock(() => Promise.resolve(true));
 
-    engine = new ExecutionEngine(repo, cronEngine, logger, mockHttpClient);
+    engine = new ExecutionEngine(repo, cronEngine, logger, {
+      httpClient: mockHttpClient,
+      pubsubPublisher: mockPubsubPublisher,
+    });
   });
 
   afterEach(async () => {
@@ -304,6 +314,163 @@ describe('ExecutionEngine', () => {
       const options = callArgs[1];
 
       expect(options.body).toBeUndefined();
+    });
+  });
+
+  describe('executeJob target handling', () => {
+    test('should publish Pub/Sub jobs without calling HTTP client', async () => {
+      const pubsubTarget = {
+        topicName: 'projects/p/topics/t',
+        data: Buffer.from('payload').toString('base64'),
+      };
+      const created = await repo.createJob(
+        makeJobData({
+          httpTarget: null,
+          pubsubTarget: JSON.stringify(pubsubTarget),
+        })
+      );
+
+      await engine.executeJob(created);
+
+      expect(mockHttpClient).not.toHaveBeenCalled();
+      expect(mockPubsubPublisher).toHaveBeenCalledTimes(1);
+      expect(mockPubsubPublisher.mock.calls[0]?.[0]).toEqual(pubsubTarget);
+    });
+
+    test('should update schedule metadata after Pub/Sub publish', async () => {
+      const created = await repo.createJob(
+        makeJobData({
+          httpTarget: null,
+          pubsubTarget: JSON.stringify({
+            topicName: 'projects/p/topics/t',
+            data: Buffer.from('payload').toString('base64'),
+          }),
+        })
+      );
+
+      await engine.executeJob(created);
+
+      const updated = await repo.getJobByName(created.name);
+
+      expect(updated?.lastAttemptTime).not.toBeNull();
+      expect(updated?.scheduleTime).not.toBeNull();
+    });
+
+    test('should handle malformed pubsubTarget JSON gracefully', async () => {
+      const created = await repo.createJob(
+        makeJobData({
+          httpTarget: null,
+          pubsubTarget: 'not valid json{',
+        })
+      );
+
+      await engine.executeJob(created);
+
+      expect(mockPubsubPublisher).not.toHaveBeenCalled();
+    });
+
+    test('should retry Pub/Sub publish up to retryCount times', async () => {
+      mockPubsubPublisher.mockResolvedValue(false);
+
+      const created = await repo.createJob(
+        makeJobData({
+          httpTarget: null,
+          pubsubTarget: JSON.stringify({
+            topicName: 'projects/p/topics/t',
+            data: Buffer.from('payload').toString('base64'),
+          }),
+          retryConfig: JSON.stringify({
+            retryCount: 2,
+            maxRetryDuration: '0s',
+            minBackoffDuration: '0s',
+            maxBackoffDuration: '0s',
+          }),
+        })
+      );
+
+      await engine.executeJob(created);
+
+      expect(mockPubsubPublisher).toHaveBeenCalledTimes(3);
+    });
+
+    test('should continue tick when one job publish throws', async () => {
+      mockPubsubPublisher.mockRejectedValue(new Error('Network error'));
+
+      await repo.createJob(
+        makeJobData({
+          name: 'projects/p/locations/l/jobs/failing-job',
+          httpTarget: null,
+          pubsubTarget: JSON.stringify({
+            topicName: 'projects/p/topics/t',
+          }),
+        })
+      );
+      await repo.createJob(
+        makeJobData({
+          name: 'projects/p/locations/l/jobs/http-job',
+        })
+      );
+
+      await engine.tick();
+
+      expect(mockHttpClient).toHaveBeenCalledTimes(1);
+    });
+
+    test('should skip jobs with no execution target', async () => {
+      const created = await repo.createJob(
+        makeJobData({
+          httpTarget: null,
+          pubsubTarget: null,
+        })
+      );
+
+      await engine.executeJob(created);
+
+      expect(mockHttpClient).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('default Pub/Sub publisher helpers', () => {
+    test('buildPubsubPublishUrl returns REST publish endpoint', () => {
+      expect(buildPubsubPublishUrl('projects/demo/topics/events', 9000)).toBe(
+        'http://127.0.0.1:9000/v1/projects/demo/topics/events:publish'
+      );
+    });
+
+    test('buildPubsubPublishUrl rejects malformed topic names', () => {
+      expect(buildPubsubPublishUrl('invalid-topic', 8765)).toBeNull();
+    });
+
+    test('createDefaultPubsubPublisher posts to configured port', async () => {
+      const mockFetch = mock((_url: string, init?: RequestInit) => {
+        expect(_url).toBe('http://127.0.0.1:9123/v1/projects/p/topics/t:publish');
+        expect(init?.method).toBe('POST');
+
+        const body = JSON.parse(String(init?.body)) as {
+          messages: Array<{ data: string }>;
+        };
+
+        expect(body.messages[0]?.data).toBe(Buffer.from('payload').toString('base64'));
+
+        return Promise.resolve(new Response('{}', { status: 200 }));
+      });
+
+      const publisher = createDefaultPubsubPublisher(9123);
+      const originalFetch = globalThis.fetch;
+
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      try {
+        const success = await publisher({
+          topicName: 'projects/p/topics/t',
+          data: Buffer.from('payload').toString('base64'),
+        });
+
+        expect(success).toBe(true);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 

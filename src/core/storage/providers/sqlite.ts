@@ -475,6 +475,9 @@ export class SQLiteStorageProvider implements StorageProvider {
 
       this.db.run(createTableQuery);
 
+      // See ADR-010: synchronize additive/nullability schema changes on existing tables.
+      this.syncTableSchema(name, schema);
+
       // Create indexes
       if (schema.indexes) {
         for (const index of schema.indexes) {
@@ -492,6 +495,130 @@ export class SQLiteStorageProvider implements StorageProvider {
       }
     } catch (error) {
       throw new StorageError('Failed to create table', 'CREATE_TABLE_FAILED', error as Error);
+    }
+  }
+
+  private syncTableSchema(name: string, schema: TableSchema): void {
+    if (!this.db || !this.tableExists(name)) {
+      return;
+    }
+
+    const existingColumns = this.getTableColumnInfo(name);
+    const existingByName = new Map(existingColumns.map(column => [column.name, column]));
+
+    for (const column of schema.columns) {
+      if (!existingByName.has(column.name)) {
+        const definition = this.formatColumnDefinition(column);
+
+        this.db.run(`ALTER TABLE ${name} ADD COLUMN ${definition}`);
+        existingByName.set(column.name, {
+          name: column.name,
+          notnull: column.nullable ? 0 : 1,
+        });
+      }
+    }
+
+    const needsRebuild = schema.columns.some(column => {
+      if (!column.nullable) {
+        return false;
+      }
+
+      const existing = existingByName.get(column.name);
+
+      return existing != null && existing.notnull === 1;
+    });
+
+    if (needsRebuild) {
+      this.rebuildTable(name, schema);
+    }
+  }
+
+  private tableExists(name: string): boolean {
+    if (!this.db) {
+      return false;
+    }
+
+    const stmt = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?"
+    );
+    const result = stmt.get(name) as { name: string } | null;
+
+    return result != null;
+  }
+
+  private getTableColumnInfo(name: string): Array<{ name: string; notnull: number }> {
+    if (!this.db) {
+      return [];
+    }
+
+    const stmt = this.db.prepare(`PRAGMA table_info(${name})`);
+
+    return stmt.all() as Array<{ name: string; notnull: number }>;
+  }
+
+  private rebuildTable(name: string, schema: TableSchema): void {
+    if (!this.db) {
+      return;
+    }
+
+    const tempName = `${name}_migration_tmp`;
+
+    this.db.run(`DROP TABLE IF EXISTS ${tempName}`);
+
+    const existingColumnInfo = this.getTableColumnInfo(name);
+    const existingNames = new Set(existingColumnInfo.map(column => column.name));
+    const schemaColumnNames = new Set(schema.columns.map(column => column.name));
+
+    const preservedColumns: ColumnDefinition[] = [];
+
+    if (existingNames.has('id') && !schemaColumnNames.has('id')) {
+      preservedColumns.push({
+        name: 'id',
+        type: 'string',
+        primaryKey: true,
+        nullable: false,
+      });
+    }
+
+    const effectiveColumns = [...preservedColumns, ...schema.columns];
+    const columnDefinitions = effectiveColumns.map(column => this.formatColumnDefinition(column));
+
+    if (schema.timestamps) {
+      columnDefinitions.push('createdAt DATETIME NOT NULL');
+      columnDefinitions.push('updatedAt DATETIME NOT NULL');
+    }
+
+    this.db.run(
+      `CREATE TABLE ${tempName} (
+          ${columnDefinitions.join(',\n          ')}
+        )`
+    );
+
+    const columnNames = [
+      ...effectiveColumns.map(column => column.name),
+      ...(schema.timestamps ? ['createdAt', 'updatedAt'] : []),
+    ];
+    const copyColumns = columnNames.filter(columnName => existingNames.has(columnName));
+
+    if (copyColumns.length > 0) {
+      this.db.run(
+        `INSERT INTO ${tempName} (${copyColumns.join(', ')}) SELECT ${copyColumns.join(', ')} FROM ${name}`
+      );
+    }
+
+    this.db.run(`DROP TABLE ${name}`);
+    this.db.run(`ALTER TABLE ${tempName} RENAME TO ${name}`);
+
+    if (schema.indexes) {
+      for (const index of schema.indexes) {
+        const indexName = `idx_${name}_${index.name}`;
+        const uniqueClause = index.unique ? 'UNIQUE' : '';
+        const columns = index.columns.join(', ');
+
+        this.db.run(
+          `CREATE ${uniqueClause} INDEX IF NOT EXISTS ${indexName} ON ${name} (${columns})`
+        );
+      }
     }
   }
 

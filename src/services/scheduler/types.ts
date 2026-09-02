@@ -25,6 +25,7 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetryDuration: '0s',
   minBackoffDuration: '5s',
   maxBackoffDuration: '3600s',
+  maxDoublings: 5,
 };
 
 // ── Interfaces ──
@@ -36,11 +37,18 @@ export interface HttpTarget {
   body?: string;
 }
 
+export interface PubsubTarget {
+  topicName: string;
+  data?: string;
+  attributes?: Record<string, string>;
+}
+
 export interface RetryConfig {
   retryCount: number;
   maxRetryDuration: string;
   minBackoffDuration: string;
   maxBackoffDuration: string;
+  maxDoublings: number;
 }
 
 export interface JobResponse {
@@ -49,7 +57,8 @@ export interface JobResponse {
   schedule: string;
   timeZone: string;
   state: string;
-  httpTarget: HttpTarget;
+  httpTarget?: HttpTarget;
+  pubsubTarget?: PubsubTarget;
   retryConfig: RetryConfig;
   attemptDeadline: string;
   scheduleTime?: string;
@@ -65,7 +74,8 @@ export interface JobRecord extends BaseRecord {
   schedule: string;
   timeZone: string;
   state: string;
-  httpTarget: string; // JSON-serialized HttpTarget
+  httpTarget: string | null;
+  pubsubTarget: string | null;
   retryConfig: string; // JSON-serialized RetryConfig
   attemptDeadline: string;
   lastAttemptTime: string | null;
@@ -83,7 +93,8 @@ export const schedulerJobsTableSchema: TableSchema = {
     { name: 'schedule', type: 'string' },
     { name: 'timeZone', type: 'string' },
     { name: 'state', type: 'string' },
-    { name: 'httpTarget', type: 'json' },
+    { name: 'httpTarget', type: 'json', nullable: true },
+    { name: 'pubsubTarget', type: 'json', nullable: true },
     { name: 'retryConfig', type: 'json' },
     { name: 'attemptDeadline', type: 'string' },
     { name: 'lastAttemptTime', type: 'string', nullable: true },
@@ -141,35 +152,101 @@ export const HttpTargetSchema = z.object({
   uri: z.string().min(1),
   httpMethod: z
     .union([z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']), z.number().int()])
-    .transform(val => normalizeHttpMethod(val)),
+    .transform(val => normalizeHttpMethod(val))
+    .optional(),
   headers: z.record(z.string(), z.string()).optional(),
   body: z.string().optional(),
 });
 
+export const PubsubTargetSchema = z.object({
+  topicName: z.string().min(1),
+  data: z.string().optional(),
+  attributes: z.record(z.string(), z.string()).optional(),
+});
+
 export const RetryConfigSchema = z.object({
-  retryCount: z.number().int().min(0),
-  maxRetryDuration: z.string(),
-  minBackoffDuration: z.string(),
-  maxBackoffDuration: z.string(),
+  retryCount: z.number().int().min(0).optional(),
+  maxRetryDuration: z.string().optional(),
+  minBackoffDuration: z.string().optional(),
+  maxBackoffDuration: z.string().optional(),
+  maxDoublings: z.number().int().min(0).optional(),
 });
 
-export const CreateJobRequestSchema = z.object({
-  description: z.string().optional(),
-  schedule: z.string().min(1),
-  timeZone: z.string().optional(),
-  httpTarget: HttpTargetSchema,
-  retryConfig: RetryConfigSchema.optional(),
-  attemptDeadline: z.string().optional(),
-});
+export function normalizeHttpTarget(target: z.infer<typeof HttpTargetSchema>): HttpTarget {
+  const normalized: HttpTarget = {
+    uri: target.uri,
+    httpMethod: target.httpMethod ?? 'POST',
+  };
 
-export const UpdateJobRequestSchema = z.object({
-  description: z.string().optional(),
-  schedule: z.string().min(1).optional(),
-  timeZone: z.string().optional(),
-  httpTarget: HttpTargetSchema.optional(),
-  retryConfig: RetryConfigSchema.optional(),
-  attemptDeadline: z.string().optional(),
-});
+  if (target.headers != null) {
+    normalized.headers = target.headers;
+  }
+
+  if (target.body != null) {
+    normalized.body = target.body;
+  }
+
+  return normalized;
+}
+
+export function mergeRetryConfig(
+  partial: z.infer<typeof RetryConfigSchema> | null | undefined,
+  base: RetryConfig
+): RetryConfig {
+  if (!partial) {
+    return base;
+  }
+
+  return {
+    retryCount: partial.retryCount ?? base.retryCount,
+    maxRetryDuration: partial.maxRetryDuration ?? base.maxRetryDuration,
+    minBackoffDuration: partial.minBackoffDuration ?? base.minBackoffDuration,
+    maxBackoffDuration: partial.maxBackoffDuration ?? base.maxBackoffDuration,
+    maxDoublings: partial.maxDoublings ?? base.maxDoublings,
+  };
+}
+
+export const CreateJobRequestSchema = z
+  .object({
+    description: z.string().optional(),
+    schedule: z.string().min(1),
+    timeZone: z.string().optional(),
+    httpTarget: HttpTargetSchema.optional(),
+    pubsubTarget: PubsubTargetSchema.optional(),
+    retryConfig: RetryConfigSchema.nullish(),
+    attemptDeadline: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const targetCount = Number(data.httpTarget != null) + Number(data.pubsubTarget != null);
+
+    if (targetCount !== 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Exactly one of httpTarget or pubsubTarget must be set',
+        path: ['httpTarget'],
+      });
+    }
+  });
+
+export const UpdateJobRequestSchema = z
+  .object({
+    description: z.string().optional(),
+    schedule: z.string().min(1).optional(),
+    timeZone: z.string().optional(),
+    httpTarget: HttpTargetSchema.optional(),
+    pubsubTarget: PubsubTargetSchema.optional(),
+    retryConfig: RetryConfigSchema.nullish(),
+    attemptDeadline: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.httpTarget != null && data.pubsubTarget != null) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'At most one of httpTarget or pubsubTarget may be set',
+        path: ['httpTarget'],
+      });
+    }
+  });
 
 export type CreateJobRequest = z.infer<typeof CreateJobRequestSchema>;
 
@@ -211,10 +288,18 @@ export function jobRecordToResponse(record: JobRecord): JobResponse {
     schedule: record.schedule,
     timeZone: record.timeZone,
     state: record.state,
-    httpTarget: JSON.parse(record.httpTarget) as HttpTarget,
-    retryConfig: JSON.parse(record.retryConfig) as RetryConfig,
+    retryConfig: mergeRetryConfig(
+      JSON.parse(record.retryConfig) as RetryConfig,
+      DEFAULT_RETRY_CONFIG
+    ),
     attemptDeadline: record.attemptDeadline,
   };
+
+  if (record.pubsubTarget) {
+    response.pubsubTarget = JSON.parse(record.pubsubTarget) as PubsubTarget;
+  } else if (record.httpTarget) {
+    response.httpTarget = JSON.parse(record.httpTarget) as HttpTarget;
+  }
 
   if (record.scheduleTime) {
     response.scheduleTime = record.scheduleTime;
@@ -242,8 +327,11 @@ export function requestToJobRecord(
     schedule: body.schedule,
     timeZone: body.timeZone ?? DEFAULT_TIMEZONE,
     state: JobState.ENABLED,
-    httpTarget: JSON.stringify(body.httpTarget),
-    retryConfig: JSON.stringify(body.retryConfig ?? DEFAULT_RETRY_CONFIG),
+    httpTarget: body.httpTarget ? JSON.stringify(normalizeHttpTarget(body.httpTarget)) : null,
+    pubsubTarget: body.pubsubTarget ? JSON.stringify(body.pubsubTarget) : null,
+    retryConfig: JSON.stringify(
+      mergeRetryConfig(body.retryConfig ?? undefined, DEFAULT_RETRY_CONFIG)
+    ),
     attemptDeadline: body.attemptDeadline ?? DEFAULT_ATTEMPT_DEADLINE,
     lastAttemptTime: null,
     scheduleTime,

@@ -77,6 +77,7 @@ describe('Cloud Scheduler Types', () => {
       expect(DEFAULT_RETRY_CONFIG.maxRetryDuration).toBe('0s');
       expect(DEFAULT_RETRY_CONFIG.minBackoffDuration).toBe('5s');
       expect(DEFAULT_RETRY_CONFIG.maxBackoffDuration).toBe('3600s');
+      expect(DEFAULT_RETRY_CONFIG.maxDoublings).toBe(5);
     });
 
     test('should define default timezone as UTC', () => {
@@ -105,6 +106,7 @@ describe('Cloud Scheduler Types', () => {
           headers: { 'Content-Type': 'application/json' },
           body: Buffer.from('{"key":"value"}').toString('base64'),
         }),
+        pubsubTarget: null,
         retryConfig: JSON.stringify(DEFAULT_RETRY_CONFIG),
         attemptDeadline: '180s',
         lastAttemptTime: null,
@@ -119,8 +121,8 @@ describe('Cloud Scheduler Types', () => {
       expect(response.schedule).toBe('* * * * *');
       expect(response.timeZone).toBe('UTC');
       expect(response.state).toBe('ENABLED');
-      expect(response.httpTarget.uri).toBe('https://example.com/callback');
-      expect(response.httpTarget.httpMethod).toBe('POST');
+      expect(response.httpTarget?.uri).toBe('https://example.com/callback');
+      expect(response.httpTarget?.httpMethod).toBe('POST');
       expect(response.retryConfig).toEqual(DEFAULT_RETRY_CONFIG);
       expect(response.attemptDeadline).toBe('180s');
       expect(response.scheduleTime).toBe('2024-01-01T00:01:00Z');
@@ -139,6 +141,7 @@ describe('Cloud Scheduler Types', () => {
         timeZone: 'UTC',
         state: 'ENABLED',
         httpTarget: JSON.stringify({ uri: 'https://example.com', httpMethod: 'GET' }),
+        pubsubTarget: null,
         retryConfig: JSON.stringify(DEFAULT_RETRY_CONFIG),
         attemptDeadline: '180s',
         lastAttemptTime: '2024-06-15T12:00:00Z',
@@ -177,7 +180,8 @@ describe('Cloud Scheduler Types', () => {
       expect(record.schedule).toBe('0 9 * * 1-5');
       expect(record.timeZone).toBe('America/New_York');
       expect(record.state).toBe('ENABLED');
-      expect(JSON.parse(record.httpTarget)).toEqual(body.httpTarget);
+      expect(record.httpTarget).not.toBeNull();
+      expect(JSON.parse(record.httpTarget as string)).toEqual(body.httpTarget);
       expect(record.scheduleTime).toBe('2024-01-01T09:00:00Z');
       expect(record.attemptDeadline).toBe('180s');
     });
@@ -232,9 +236,26 @@ describe('Cloud Scheduler Types', () => {
       expect(result.success).toBe(false);
     });
 
-    test('should require httpTarget', () => {
+    test('should require exactly one target', () => {
       const input = {
         schedule: '* * * * *',
+      };
+
+      const result = CreateJobRequestSchema.safeParse(input);
+
+      expect(result.success).toBe(false);
+    });
+
+    test('should reject multiple targets', () => {
+      const input = {
+        schedule: '* * * * *',
+        httpTarget: {
+          uri: 'https://example.com',
+          httpMethod: 'GET',
+        },
+        pubsubTarget: {
+          topicName: 'projects/p/topics/t',
+        },
       };
 
       const result = CreateJobRequestSchema.safeParse(input);
@@ -255,7 +276,7 @@ describe('Cloud Scheduler Types', () => {
       expect(result.success).toBe(false);
     });
 
-    test('should require httpTarget.httpMethod', () => {
+    test('should default omitted httpTarget.httpMethod to POST', () => {
       const input = {
         schedule: '* * * * *',
         httpTarget: {
@@ -263,9 +284,58 @@ describe('Cloud Scheduler Types', () => {
         },
       };
 
-      const result = CreateJobRequestSchema.safeParse(input);
+      const data = CreateJobRequestSchema.parse(input);
+      const record = requestToJobRecord(
+        'projects/p/locations/l/jobs/j',
+        data,
+        new Date().toISOString()
+      );
 
-      expect(result.success).toBe(false);
+      expect(JSON.parse(record.httpTarget ?? '')).toEqual({
+        uri: 'https://example.com',
+        httpMethod: 'POST',
+      });
+    });
+
+    test('should accept pubsubTarget jobs', () => {
+      const input = {
+        schedule: '0 9 * * 1',
+        pubsubTarget: {
+          topicName: 'projects/p/topics/t',
+          data: Buffer.from('hello').toString('base64'),
+        },
+      };
+
+      const data = CreateJobRequestSchema.parse(input);
+      const record = requestToJobRecord(
+        'projects/p/locations/l/jobs/pubsub-job',
+        data,
+        '2024-01-01T09:00:00Z'
+      );
+
+      expect(record.httpTarget).toBeNull();
+      expect(JSON.parse(record.pubsubTarget as string)).toEqual(input.pubsubTarget);
+
+      const response = jobRecordToResponse({
+        id: 'id',
+        createdAt: new Date('2024-01-01T00:00:00Z'),
+        updatedAt: new Date('2024-01-01T00:00:00Z'),
+        name: record.name,
+        description: record.description,
+        schedule: record.schedule,
+        timeZone: record.timeZone,
+        state: record.state,
+        httpTarget: record.httpTarget,
+        pubsubTarget: record.pubsubTarget,
+        retryConfig: record.retryConfig,
+        attemptDeadline: record.attemptDeadline,
+        lastAttemptTime: record.lastAttemptTime,
+        scheduleTime: record.scheduleTime,
+        userUpdateTime: record.userUpdateTime,
+      });
+
+      expect(response.pubsubTarget).toEqual(input.pubsubTarget);
+      expect(response.httpTarget).toBeUndefined();
     });
 
     test('should accept optional fields', () => {
@@ -357,7 +427,8 @@ describe('Cloud Scheduler Types', () => {
       expect(result.success).toBe(true);
 
       if (result.success) {
-        expect(result.data.httpTarget.httpMethod).toBe('POST');
+        expect(result.data.httpTarget).toBeDefined();
+        expect(result.data.httpTarget?.httpMethod).toBe('POST');
       }
     });
 
@@ -375,7 +446,8 @@ describe('Cloud Scheduler Types', () => {
       expect(result.success).toBe(true);
 
       if (result.success) {
-        expect(result.data.httpTarget.httpMethod).toBe('POST');
+        expect(result.data.httpTarget).toBeDefined();
+        expect(result.data.httpTarget?.httpMethod).toBe('POST');
       }
     });
   });
@@ -419,6 +491,22 @@ describe('Cloud Scheduler Types', () => {
         httpTarget: {
           uri: 'https://example.com',
           httpMethod: 'INVALID',
+        },
+      };
+
+      const result = UpdateJobRequestSchema.safeParse(input);
+
+      expect(result.success).toBe(false);
+    });
+
+    test('should reject updates that set both targets', () => {
+      const input = {
+        httpTarget: {
+          uri: 'https://example.com',
+          httpMethod: 'POST',
+        },
+        pubsubTarget: {
+          topicName: 'projects/p/topics/t',
         },
       };
 
