@@ -3,10 +3,11 @@
  */
 
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { ConfigSchema } from '@/config/schema.ts';
 import type { RouteContext, RouteRequest } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
-import { CloudSqlService } from './index.ts';
+import { CloudSqlService, DEFAULT_DATA_PLANE_OPTIONS } from './index.ts';
 
 function makeRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
   return {
@@ -42,6 +43,33 @@ describe('CloudSqlService', () => {
     // to. The data plane has its own tests below and in e2e/.
     service = new CloudSqlService(storage, new Logger('CloudSqlTest', 'error'), {
       enabled: false,
+    });
+  });
+
+  test('service data-plane defaults match the config schema defaults', () => {
+    // The service repeats the schema's defaults so it is usable without a
+    // config object (as Memorystore's does). Repeating them is only safe if
+    // they cannot drift apart.
+    const schemaDefaults = ConfigSchema.parse({
+      server: {},
+      storage: {},
+      auth: {},
+      services: {
+        pubsub: {},
+        scheduler: {},
+        tasks: {},
+        secrets: {},
+        storage: {},
+        workflows: {},
+        kms: {},
+      },
+      logging: {},
+    }).services.cloudsql.dataPlane;
+
+    expect(DEFAULT_DATA_PLANE_OPTIONS).toMatchObject({
+      enabled: schemaDefaults.enabled,
+      portRangeStart: schemaDefaults.portRangeStart,
+      portRangeEnd: schemaDefaults.portRangeEnd,
     });
   });
 
@@ -162,8 +190,14 @@ describe('CloudSqlService', () => {
 
       await createInstance(dataPlaneService, 'db-a');
 
+      // Read the port back rather than assuming the allocator handed out the
+      // first in the range.
+      const port = dataPlaneService.getDataPlanePort('p1', 'db-a');
+
+      expect(port).not.toBeNull();
+
       const client = new Bun.SQL({
-        url: `postgres://postgres:s3cret@127.0.0.1:${PORT_RANGE_START}/postgres`,
+        url: `postgres://postgres:s3cret@127.0.0.1:${port}/postgres`,
         tls: false,
         max: 1,
       });

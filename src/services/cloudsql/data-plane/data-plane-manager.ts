@@ -11,6 +11,7 @@
  * it.
  */
 
+import type { StorageType } from '@/core/storage/types.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { DatabaseKey } from './pglite-database-manager.ts';
 import { PGliteDatabaseManager } from './pglite-database-manager.ts';
@@ -58,7 +59,7 @@ export type LookupUser = (
 export interface DataPlaneManagerOptions {
   portRangeStart: number;
   portRangeEnd: number;
-  storageType: 'memory' | 'sqlite' | 'hybrid';
+  storageType: StorageType;
   sqlitePath: string;
 }
 
@@ -106,13 +107,15 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     databases: string[]
   ): Promise<number | null> {
     const key = buildInstanceKey(project, instance);
-    const existing = this.instances.get(key);
+    const previousPort = this.instances.get(key)?.port;
 
     // A restart, or a retried create: the old listener has to go before a new
     // one can bind, and its port must be given back rather than leaked.
-    if (existing) await this.stopInstance(project, instance);
+    if (previousPort != null) await this.stopInstance(project, instance);
 
-    const port = await this.portAllocator.allocate();
+    // Restarting an instance keeps its endpoint, as a real one does: clients
+    // already hold this address.
+    const port = await this.portAllocator.allocate(previousPort);
 
     if (port == null) {
       throw new Error(

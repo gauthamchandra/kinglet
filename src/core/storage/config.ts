@@ -10,7 +10,7 @@
  * one place, so the mapping is testable rather than buried in the entrypoint.
  */
 
-import type { StorageConfig } from './types.js';
+import type { StorageConfig, StorageType } from './types.js';
 
 /**
  * The storage settings as a kinglet user configures them (see
@@ -18,7 +18,7 @@ import type { StorageConfig } from './types.js';
  * config module so the storage layer stays free of a dependency on it.
  */
 export interface EmulatorStorageSettings {
-  readonly type: 'memory' | 'sqlite' | 'hybrid';
+  readonly type: StorageType;
   readonly sqlitePath?: string | undefined;
 }
 

@@ -141,6 +141,15 @@ export class SqlAdminService {
       // advertise an address nothing answers on, and no later call would ever
       // retry the start. Undoing the rows keeps create atomic: it either
       // yields a connectable instance or nothing at all.
+      //
+      // The data plane is dropped rather than merely stopped, because a failed
+      // start may already have written database files. Leaving those behind
+      // would hand the next create of the same name a half-built instance's
+      // data. Dropping is safe here in a way it would not be inside
+      // `startInstance` — which also runs on restart, where deleting a
+      // persisted instance's files because a port was busy would be
+      // catastrophic.
+      await this.dataPlane.dropInstance(project, request.name);
       await this.repo.deleteInstance(project, request.name);
 
       throw new SqlAdminError(
@@ -266,7 +275,21 @@ export class SqlAdminService {
       collation: request.collation,
     });
 
-    await this.dataPlane.openDatabase(project, instance, request.name);
+    try {
+      await this.dataPlane.openDatabase(project, instance, request.name);
+    } catch (error) {
+      // Same contract as createInstance: without this the row would survive a
+      // failed open, so nothing would serve the database and retrying would
+      // only ever return ALREADY_EXISTS.
+      await this.repo.deleteDatabase(project, instance, request.name);
+
+      throw new SqlAdminError(
+        'INTERNAL',
+        `Failed to open database ${request.name} on ${project}/${instance}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
 
     return this.recordOperation(project, OperationType.CREATE_DATABASE, instance);
   }

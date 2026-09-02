@@ -25,7 +25,7 @@ export interface CloudSqlDataPlaneOptions extends Partial<DataPlaneManagerOption
 // Mirrors the config schema's defaults (see src/config/schema.ts). Tests that
 // only exercise the control plane pass `{ enabled: false }` to avoid building
 // wasm Postgres instances they never connect to.
-const DEFAULT_DATA_PLANE_OPTIONS: Required<CloudSqlDataPlaneOptions> = {
+export const DEFAULT_DATA_PLANE_OPTIONS: Required<CloudSqlDataPlaneOptions> = {
   enabled: true,
   portRangeStart: 5432,
   portRangeEnd: 5531,

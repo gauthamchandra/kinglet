@@ -34,24 +34,43 @@ export class PortAllocator {
    * foreign process — the developer's own local Postgres on 5432 is the
    * obvious one — may already own a port this allocator has never handed out.
    */
-  async allocate(): Promise<number | null> {
+  async allocate(preferredPort?: number): Promise<number | null> {
+    // A restart should come back on the address clients are already using.
+    // Without this, restarting an instance would scan from the start of the
+    // range and could silently move it onto a port freed by some other
+    // instance in the meantime.
+    if (preferredPort != null && (await this.claim(preferredPort))) {
+      return preferredPort;
+    }
+
     for (let port = this.options.portRangeStart; port <= this.options.portRangeEnd; port++) {
-      if (this.allocatedPorts.has(port)) continue;
-
-      // Claimed BEFORE the probe below (the only `await` in this loop) so a
-      // concurrent allocate() scanning the same range cannot observe the same
-      // port as free. Released again if the probe finds it occupied.
-      this.allocatedPorts.add(port);
-
-      if (await this.isPortListening(port)) {
-        this.allocatedPorts.delete(port);
-        continue;
-      }
-
-      return port;
+      if (await this.claim(port)) return port;
     }
 
     return null;
+  }
+
+  /**
+   * Take a port if it is free, reporting whether it was taken.
+   *
+   * <p>The port is claimed BEFORE the liveness probe — the only `await` here —
+   * so a concurrent allocate() scanning the same range cannot see it as free
+   * too. The claim is given back if the probe finds it occupied.
+   */
+  private async claim(port: number): Promise<boolean> {
+    if (port < this.options.portRangeStart || port > this.options.portRangeEnd) return false;
+
+    if (this.allocatedPorts.has(port)) return false;
+
+    this.allocatedPorts.add(port);
+
+    if (await this.isPortListening(port)) {
+      this.allocatedPorts.delete(port);
+
+      return false;
+    }
+
+    return true;
   }
 
   release(port: number): void {

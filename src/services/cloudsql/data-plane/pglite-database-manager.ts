@@ -13,6 +13,7 @@
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
+import type { StorageType } from '@/core/storage/types.ts';
 import { DATA_PLANE_EXTENSIONS } from './extensions.ts';
 import type { ProtocolBackend } from './pglite-session-queue.ts';
 import { PGliteSessionQueue } from './pglite-session-queue.ts';
@@ -29,7 +30,7 @@ export interface PGliteDatabaseManagerOptions {
    * running without durable state, so the data plane matches it rather than
    * quietly leaving Postgres data on disk that a restart would resurrect.
    */
-  storageType: 'memory' | 'sqlite' | 'hybrid';
+  storageType: StorageType;
   /**
    * Path to kinglet's SQLite file. Database directories are placed beside it,
    * so a developer who points kinglet at a scratch directory gets their

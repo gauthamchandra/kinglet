@@ -10,12 +10,12 @@
  * for payment, inventory, and shipping endpoints.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import type { Server } from 'bun';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { ExecutionsClient, WorkflowsClient } from '@google-cloud/workflows';
+import type { Server } from 'bun';
 import { StorageManager } from '@/core/storage/manager.ts';
-import { Logger } from '@/shared/utils/logger.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
+import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
 import { buildRouter, createFakeAuth } from './e2e-helpers.ts';
 
@@ -351,7 +351,7 @@ describe('Workflow Execution E2E: Client Library', () => {
           '  steps:',
           '    - process:',
           '        assign:',
-          '          - greeting: ${\"Hello, \" + input.name + \"!\"}',
+          '          - greeting: ${"Hello, " + input.name + "!"}',
           '    - done:',
           '        return:',
           '          message: ${greeting}',
