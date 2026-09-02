@@ -3,7 +3,8 @@
  *
  * Black-box control-plane lifecycle through HTTP (sqladmin v1 REST surface).
  * There is no @google-cloud/* client for the SQL Admin API; raw REST is the
- * verification path. The data plane (connectable Postgres) is deferred.
+ * verification path. The connectable Postgres endpoint each of these instances
+ * also gets is covered separately by cloudsql-data-plane.test.ts.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -31,7 +32,16 @@ beforeAll(async () => {
 
   await storage.initialize({ type: 'memory' });
 
-  cloudSqlService = new CloudSqlService(storage, new Logger('e2e', 'error'));
+  // A high port range, away from the 5432 default, so this suite cannot
+  // collide with a Postgres the developer already runs locally or with the
+  // data-plane e2e suite running alongside it.
+  cloudSqlService = new CloudSqlService(storage, new Logger('e2e', 'error'), {
+    enabled: true,
+    portRangeStart: 15600,
+    portRangeEnd: 15620,
+    storageType: 'memory',
+    sqlitePath: './data/emulator.db',
+  });
 
   await cloudSqlService.initialize();
 

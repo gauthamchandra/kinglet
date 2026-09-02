@@ -37,7 +37,12 @@ describe('CloudSqlService', () => {
   beforeEach(async () => {
     storage = new StorageManager();
     await storage.initialize({ type: 'memory' });
-    service = new CloudSqlService(storage, new Logger('CloudSqlTest', 'error'));
+    // Control-plane wiring only: booting a PGlite per instance would make
+    // these tests bind real ports and build wasm Postgres they never connect
+    // to. The data plane has its own tests below and in e2e/.
+    service = new CloudSqlService(storage, new Logger('CloudSqlTest', 'error'), {
+      enabled: false,
+    });
   });
 
   test('getRoutes throws before initialize', () => {
@@ -100,7 +105,9 @@ describe('CloudSqlService', () => {
 
     await service.stop();
 
-    const revived = new CloudSqlService(storage, new Logger('CloudSqlTest', 'error'));
+    const revived = new CloudSqlService(storage, new Logger('CloudSqlTest', 'error'), {
+      enabled: false,
+    });
 
     await revived.initialize();
 
@@ -114,5 +121,98 @@ describe('CloudSqlService', () => {
     expect(response?.status).toBe(200);
 
     await revived.stop();
+  });
+
+  describe('data plane', () => {
+    const PORT_RANGE_START = 46700;
+
+    async function startService(): Promise<CloudSqlService> {
+      const dataPlaneService = new CloudSqlService(storage, new Logger('CloudSqlTest', 'error'), {
+        enabled: true,
+        portRangeStart: PORT_RANGE_START,
+        portRangeEnd: PORT_RANGE_START + 4,
+        storageType: 'memory',
+        sqlitePath: './data/emulator.db',
+      });
+
+      await dataPlaneService.initialize();
+
+      return dataPlaneService;
+    }
+
+    async function createInstance(target: CloudSqlService, name: string): Promise<void> {
+      const insertRoute = target
+        .getRoutes()
+        .find(route => route.id === 'cloudsql.instances.insert');
+
+      const response = await insertRoute?.handler(
+        makeRequest({
+          method: 'POST',
+          params: { project: 'p1' },
+          body: { name, databaseVersion: 'POSTGRES_16', rootPassword: 's3cret' },
+        }),
+        makeContext()
+      );
+
+      expect(response?.status).toBe(200);
+    }
+
+    test('a created instance is reachable with the root password', async () => {
+      const dataPlaneService = await startService();
+
+      await createInstance(dataPlaneService, 'db-a');
+
+      const client = new Bun.SQL({
+        url: `postgres://postgres:s3cret@127.0.0.1:${PORT_RANGE_START}/postgres`,
+        tls: false,
+        max: 1,
+      });
+
+      const rows: Record<string, unknown>[] = await client.unsafe('SELECT 1 AS one');
+
+      expect(rows.map(row => ({ ...row }))).toEqual([{ one: 1 }]);
+
+      await client.end();
+      await dataPlaneService.stop();
+    });
+
+    test('stop closes the endpoint so its port can be bound again', async () => {
+      const dataPlaneService = await startService();
+
+      await createInstance(dataPlaneService, 'db-a');
+      await dataPlaneService.stop();
+
+      const rebound = Bun.listen({
+        hostname: '127.0.0.1',
+        port: PORT_RANGE_START,
+        socket: { data() {}, open() {}, close() {}, error() {} },
+      });
+
+      expect(rebound.port).toBe(PORT_RANGE_START);
+
+      rebound.stop(true);
+    });
+
+    test('brings persisted instances back up on a fresh service over the same storage', async () => {
+      const first = await startService();
+
+      await createInstance(first, 'db-a');
+      await first.stop();
+
+      const revived = await startService();
+
+      const client = new Bun.SQL({
+        url: `postgres://postgres:s3cret@127.0.0.1:${PORT_RANGE_START}/postgres`,
+        tls: false,
+        max: 1,
+      });
+
+      const rows: Record<string, unknown>[] = await client.unsafe('SELECT 1 AS one');
+
+      expect(rows.map(row => ({ ...row }))).toEqual([{ one: 1 }]);
+
+      await client.end();
+      await revived.stop();
+    });
   });
 });
