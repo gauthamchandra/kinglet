@@ -52,7 +52,9 @@ exactly as ADR-003 describes.
   beside kinglet's SQLite file, so deleting that directory really is a reset.
   Under the default `hybrid` storage an instance and its data survive a
   restart: the control-plane rows come back from SQLite and the data plane
-  re-opens their PGlite directories.
+  re-opens their PGlite directories. That depends on kinglet's own storage
+  actually persisting, which it did not until the storage fix in this same
+  change — every storage type had been running in-memory.
 - **Extensions are fixed at build time.** PGlite links each extension's wasm
   when the database is created, so every database is built with all 26 contrib
   extensions PGlite ships plus pgvector. That is what lets `CREATE EXTENSION
@@ -172,6 +174,15 @@ answers "does my Terraform work?" but not "does my application code work?".
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
   nothing restricts who may connect beyond user and password.
 - `User.type` values other than `BUILT_IN` behave like `BUILT_IN`.
+- **Connections to one database share a Postgres session.** One PGlite is one
+  backend, so there is one session behind every connection to a database.
+  Prepared statements and portals are namespaced per connection on the way
+  through (see `extended-protocol.ts`), and a connection's extended-query
+  sequence reaches the backend as one unit, so ordinary pooled clients work.
+  What cannot be separated is the rest of the session: `SET`, `search_path`,
+  temporary tables, sequence `currval`, and advisory locks are visible to every
+  connection to that database. Code that relies on session isolation between
+  connections will not behave as it does against a real instance.
 - **Emulated users gate the connection but are not Postgres roles.** A `User`
   created through the admin API decides whether a connection is accepted, and
   its password is checked, but the session behind it runs as PGlite's own

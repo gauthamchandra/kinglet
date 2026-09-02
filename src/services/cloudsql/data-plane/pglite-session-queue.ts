@@ -57,6 +57,12 @@ export class PGliteSessionQueue {
   private backend: ProtocolBackend;
   private pending: QueuedMessage[] = [];
   private isDraining = false;
+  // Connections whose socket has gone away. Tracked because a connection can
+  // detach while the very message that opens its transaction is still running:
+  // at that moment it does not yet own the transaction, so detach alone cannot
+  // roll it back, and the backend would be left inside a transaction nobody
+  // can ever finish.
+  private detachedConnectionIds = new Set<string>();
   // The connection whose BEGIN is still open, or null when the backend is not
   // in a transaction. Read after every message, since a message is what opens
   // and closes one.
@@ -102,9 +108,21 @@ export class PGliteSessionQueue {
       message.reject(new Error(`Connection ${connectionId} detached before its message ran`));
     }
 
+    this.detachedConnectionIds.add(connectionId);
+
     if (this.transactionOwnerId !== connectionId) return;
 
-    await this.enqueue(connectionId, ROLLBACK_QUERY_MESSAGE, () => {});
+    await this.rollback(connectionId);
+  }
+
+  private async rollback(connectionId: string): Promise<void> {
+    // The rollback itself must be allowed to run even though the connection is
+    // detached, so it is enqueued before the id is forgotten.
+    const rolledBack = this.enqueue(connectionId, ROLLBACK_QUERY_MESSAGE, () => {});
+
+    this.detachedConnectionIds.delete(connectionId);
+
+    await rolledBack;
   }
 
   private async drain(): Promise<void> {
@@ -157,6 +175,17 @@ export class PGliteSessionQueue {
       // still have opened or aborted a transaction, and a stale owner would
       // wedge the queue.
       this.transactionOwnerId = this.backend.isInTransaction() ? message.connectionId : null;
+    }
+
+    // The connection that just opened this transaction may have already gone
+    // away while its BEGIN was in flight. Nothing else would ever close the
+    // transaction, so every other connection to this database would block on
+    // it forever.
+    if (
+      this.transactionOwnerId != null &&
+      this.detachedConnectionIds.has(this.transactionOwnerId)
+    ) {
+      void this.rollback(this.transactionOwnerId);
     }
   }
 }

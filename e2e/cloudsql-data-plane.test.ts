@@ -252,6 +252,47 @@ describe('Cloud SQL data plane e2e', () => {
     expect(await rows(sql, 'SELECT current_user AS who')).toEqual([{ who: 'postgres' }]);
   });
 
+  test('two connections can run the same parameterised query', async () => {
+    const first = connect(instancePort, 'postgres');
+    const second = connect(instancePort, 'postgres');
+
+    await first.unsafe('CREATE TABLE lookups (id int primary key, label text)');
+    await first.unsafe("INSERT INTO lookups VALUES (1, 'one'), (2, 'two')");
+
+    // Every connection to a database shares one PGlite backend, and clients
+    // derive a prepared-statement name from the query text — so the same
+    // parameterised query on two connections used to collide in the shared
+    // statement namespace with SQLSTATE 42P05. This is what a connection pool
+    // does constantly.
+    const firstRows = await first`SELECT label FROM lookups WHERE id = ${1}`;
+    const secondRows = await second`SELECT label FROM lookups WHERE id = ${2}`;
+
+    expect([...firstRows].map(row => ({ ...row }))).toEqual([{ label: 'one' }]);
+    expect([...secondRows].map(row => ({ ...row }))).toEqual([{ label: 'two' }]);
+  });
+
+  test('a connection pool can hammer one parameterised query concurrently', async () => {
+    const pool = new Bun.SQL({
+      url: `postgres://postgres:${ROOT_PASSWORD}@127.0.0.1:${instancePort}/postgres`,
+      tls: false,
+      max: 5,
+    });
+
+    await pool.unsafe('CREATE TABLE pooled (id int primary key, label text)');
+    await pool.unsafe("INSERT INTO pooled VALUES (1, 'one'), (2, 'two')");
+
+    const results = await Promise.all(
+      Array.from(
+        { length: 20 },
+        (_, index) => pool`SELECT label FROM pooled WHERE id = ${(index % 2) + 1}`
+      )
+    );
+
+    expect(results.map(rows => [...rows].length)).toEqual(Array.from({ length: 20 }, () => 1));
+
+    await pool.end();
+  });
+
   test('two connections can each run a transaction against the same database', async () => {
     const first = connect(instancePort, 'postgres');
     const second = connect(instancePort, 'postgres');

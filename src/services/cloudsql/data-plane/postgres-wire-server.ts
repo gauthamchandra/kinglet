@@ -23,6 +23,11 @@
  */
 
 import type { Socket, TCPSocketListener } from 'bun';
+import {
+  buildConnectionNamespace,
+  isExtendedQueryFrame,
+  namespaceFrameNames,
+} from './extended-protocol.ts';
 import type { PGliteSessionQueue } from './pglite-session-queue.ts';
 
 const PROTOCOL_VERSION_3_0 = 196608;
@@ -46,6 +51,11 @@ const AUTHENTICATION_CLEARTEXT_PASSWORD = 3;
 
 const PASSWORD_MESSAGE_TAG = 0x70; // 'p'
 const TERMINATE_MESSAGE_TAG = 0x58; // 'X'
+
+// Bounds a client that opens an extended-query sequence and never closes it,
+// so the pending batch cannot grow without limit any more than a single frame
+// can.
+const MAX_PENDING_BATCH_LENGTH = MAX_MESSAGE_LENGTH;
 
 // SQLSTATEs the startup exchange can end in, all of them classes a Postgres
 // client already knows how to report.
@@ -175,8 +185,17 @@ type ConnectionPhase = 'startup' | 'password' | 'streaming' | 'closed';
 
 interface ConnectionState {
   id: string;
+  /** Prefix that keeps this connection's prepared statements and portals its own. */
+  namespace: string;
   phase: ConnectionPhase;
   buffer: Uint8Array;
+  /**
+   * Extended-query frames received but not yet sent to the backend. They are
+   * held so the whole sequence reaches the single shared backend as one unit:
+   * the unnamed statement and portal are session state, so another
+   * connection's Parse landing mid-sequence would silently replace them.
+   */
+  pendingBatch: Uint8Array[];
   /** Set once the client is processing a batch of frames, so reads never interleave. */
   isProcessing: boolean;
   user: string;
@@ -207,10 +226,14 @@ export class PostgresWireServer {
       port: this.options.port,
       socket: {
         open: socket => {
+          const id = `conn-${nextConnectionId++}`;
+
           socket.data = {
-            id: `conn-${nextConnectionId++}`,
+            id,
+            namespace: buildConnectionNamespace(id),
             phase: 'startup',
             buffer: new Uint8Array(0),
+            pendingBatch: [],
             isProcessing: false,
             user: '',
             database: '',
@@ -321,13 +344,44 @@ export class PostgresWireServer {
     if (state.phase === 'password') return this.handlePasswordFrame(socket, frame);
 
     if (frame[0] === TERMINATE_MESSAGE_TAG) {
+      // Anything still batched was never completed by a Sync, so the backend
+      // would have discarded it anyway.
+      state.pendingBatch = [];
       await this.releaseConnection(state);
       socket.end();
 
       return;
     }
 
-    await this.forward(socket, frame);
+    const namespaced = namespaceFrameNames(frame, state.namespace);
+
+    if (isExtendedQueryFrame(namespaced[0] ?? 0)) {
+      state.pendingBatch.push(namespaced);
+
+      if (this.pendingBatchLength(state) > MAX_PENDING_BATCH_LENGTH) {
+        this.fail(
+          socket,
+          SQLSTATE_PROTOCOL_VIOLATION,
+          'extended-query sequence exceeded the maximum size before a Sync'
+        );
+      }
+
+      return;
+    }
+
+    // Any other frame — Sync, Flush, a simple Query, COPY data — ends the
+    // sequence, so the batch and this frame go to the backend together.
+    state.pendingBatch.push(namespaced);
+
+    const batch = state.pendingBatch;
+
+    state.pendingBatch = [];
+
+    await this.forward(socket, concatAll(batch));
+  }
+
+  private pendingBatchLength(state: ConnectionState): number {
+    return state.pendingBatch.reduce((total, frame) => total + frame.length, 0);
   }
 
   private async handleStartupFrame(
@@ -522,6 +576,21 @@ export class PostgresWireServer {
     // otherwise block every other connection to the same database.
     await connection?.queue.detach(state.id);
   }
+}
+
+function concatAll(frames: Uint8Array[]): Uint8Array {
+  if (frames.length === 1) return frames[0] ?? new Uint8Array(0);
+
+  const combined = new Uint8Array(frames.reduce((total, frame) => total + frame.length, 0));
+
+  let offset = 0;
+
+  for (const frame of frames) {
+    combined.set(frame, offset);
+    offset += frame.length;
+  }
+
+  return combined;
 }
 
 function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
