@@ -194,8 +194,8 @@ git rebase --signoff main
 ```
 
 The **DCO sign-off** job in CI checks every commit in the PR and names the exact command to
-run if one is missing. Commits authored by bots (release-please) are skipped — an app cannot
-certify the DCO on anyone's behalf.
+run if one is missing. Commits authored by bots (release-please, the weekly compatibility-docs
+sync) are skipped — an app cannot certify the DCO on anyone's behalf.
 
 **The sign-off must carry a human's identity.** For the same reason a bot can't certify the
 DCO, a coding agent can't certify it under its own name — the sign-off asserts that a person

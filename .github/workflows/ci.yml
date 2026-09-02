@@ -68,8 +68,9 @@ jobs:
       # CONTRIBUTING.md makes the sign-off carry the AI-responsibility attestation, not just
       # provenance, so it has to be enforced server-side — nothing local can be relied on.
       #
-      # release-please authors its release commits as an app, and an app cannot certify the
-      # DCO on anyone's behalf, so bot authors are skipped.
+      # release-please and the compatibility-docs sync author their commits as an app, and an
+      # app cannot certify the DCO on anyone's behalf, so bot authors are skipped. Those two
+      # workflows live in this repo and are sanctioned by merge review instead.
       #
       # A sign-off certifies a HUMAN read and stands behind the change, so a coding agent's
       # own identity is banned from Signed-off-by. Co-authored-by is deliberately left alone —
