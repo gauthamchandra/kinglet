@@ -214,6 +214,30 @@ describe('DataPlaneManager', () => {
     await expect(makeManager().stopInstance('p1', 'ghost')).resolves.toBeUndefined();
   });
 
+  test('skips a port that probes free but cannot be bound', async () => {
+    const manager = makeManager();
+    const range = nextRangeStart - 10;
+
+    // Bound to loopback only. The allocator's probe connects to loopback so it
+    // sees this port as taken — but a port held on another interface would
+    // probe free and still refuse the wire server's 0.0.0.0 bind, which is the
+    // case this retry exists for.
+    const squatter = Bun.listen({
+      hostname: '127.0.0.1',
+      port: range,
+      socket: { data() {}, open() {}, close() {}, error() {} },
+    });
+
+    try {
+      const port = await manager.startInstance('p1', 'a', []);
+
+      expect(port).not.toBe(range);
+      expect(port).not.toBeNull();
+    } finally {
+      squatter.stop(true);
+    }
+  });
+
   test('throws once every port in the range is taken', async () => {
     const manager = makeManager();
 

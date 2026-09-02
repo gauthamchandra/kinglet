@@ -72,6 +72,21 @@ function portOf(instance: string): number {
   return port ?? 0;
 }
 
+/**
+ * Assert a 200, reporting what the server actually said when it is not.
+ *
+ * <p>A bare status assertion throws the body away, which is the one thing that
+ * explains a failure — an emulator-side error reaching CI as a bare
+ * `Expected: 200 Received: 500` is unactionable.
+ */
+async function expectOk(response: Response, what: string): Promise<void> {
+  if (response.status === 200) return;
+
+  const body = await response.text();
+
+  throw new Error(`${what} failed with ${response.status}: ${body}`);
+}
+
 async function createInstance(name: string): Promise<void> {
   const response = await fetch(emulatorUrl(`/v1/projects/${PROJECT}/instances`), {
     method: 'POST',
@@ -83,7 +98,7 @@ async function createInstance(name: string): Promise<void> {
     }),
   });
 
-  expect(response.status).toBe(200);
+  await expectOk(response, `Creating instance ${name}`);
 }
 
 async function createDatabase(instance: string, name: string): Promise<void> {
@@ -96,7 +111,7 @@ async function createDatabase(instance: string, name: string): Promise<void> {
     }
   );
 
-  expect(response.status).toBe(200);
+  await expectOk(response, `Creating database ${name} on ${instance}`);
 }
 
 /** Rows as plain objects: Bun's result carries metadata alongside them. */
@@ -349,7 +364,9 @@ describe('Cloud SQL data plane persistence', () => {
     async () => {
       const root = await mkdtemp(join(tmpdir(), 'kinglet-cloudsql-e2e-'));
       const sqlitePath = join(root, 'data', 'emulator.db');
-      const rangeStart = PORT_RANGE_START + 10;
+      // Its own range: overlapping the suite's would have two live managers
+      // allocating from the same ports, racing each other to bind.
+      const rangeStart = PORT_RANGE_END + 1;
 
       // `hybrid` is kinglet's default storage type. Both the control-plane rows
       // and the data plane's Postgres files have to outlive the process for a

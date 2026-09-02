@@ -113,48 +113,89 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     // one can bind, and its port must be given back rather than leaked.
     if (previousPort != null) await this.stopInstance(project, instance);
 
-    // Restarting an instance keeps its endpoint, as a real one does: clients
-    // already hold this address.
-    const port = await this.portAllocator.allocate(previousPort);
-
-    if (port == null) {
-      throw new Error(
-        `Cannot start a Cloud SQL data plane for ${key}: every port in ` +
-          `${this.options.portRangeStart}-${this.options.portRangeEnd} is already in use`
-      );
-    }
-
-    const wireServer = new PostgresWireServer({
-      instanceKey: key,
-      port,
-      resolveConnection: (instanceKey, database, user) =>
-        this.resolveConnection(instanceKey, database, user),
-    });
-
-    const running: RunningInstance = { port, wireServer, databases: new Set() };
-
-    this.instances.set(key, running);
+    // Opened before anything can connect, so the first client is not raced
+    // against a wasm Postgres still booting. Independent of the port, so this
+    // happens once even if binding takes more than one attempt.
+    const opened = new Set<string>();
 
     try {
-      // Databases are opened before the port accepts anything, so the first
-      // connection is not raced against a wasm Postgres still booting.
       for (const database of databases) {
-        await this.openDatabase(project, instance, database);
+        await this.databaseManager.open({ project, instance, database });
+        opened.add(database);
       }
-
-      wireServer.listen();
-
-      // The port is the one thing a developer cannot discover from the API
-      // response, which stays byte-faithful to sqladmin and so has nowhere to
-      // put a kinglet-only field. Logging it at start is how they find it.
-      this.logger.info(`Cloud SQL instance ${key} listening on ${ADVERTISED_HOST}:${port}`);
     } catch (error) {
-      await this.stopInstance(project, instance);
+      for (const database of opened) {
+        await this.databaseManager.close({ project, instance, database });
+      }
 
       throw error;
     }
 
+    const { port, wireServer } = await this.bindListener(key);
+    const running: RunningInstance = { port, wireServer, databases: opened };
+
+    this.instances.set(key, running);
+
+    // The port is the one thing a developer cannot discover from the API
+    // response, which stays byte-faithful to sqladmin and so has nowhere to
+    // put a kinglet-only field. Logging it at start is how they find it.
+    this.logger.info(`Cloud SQL instance ${key} listening on ${ADVERTISED_HOST}:${port}`);
+
     return port;
+  }
+
+  /**
+   * Bind a listener, moving on to the next port when one that looked free
+   * turns out not to be.
+   *
+   * <p>The allocator probes a port by connecting to loopback, but the listener
+   * binds every interface — so a port held on another interface, or claimed by
+   * something else in the moment between the probe and the bind, still fails.
+   * Treating that as "this port is unusable" rather than as a failed start is
+   * what keeps a busy machine from turning a free port lower down the range
+   * into a failed instance create.
+   */
+  private async bindListener(
+    instanceKey: string
+  ): Promise<{ port: number; wireServer: PostgresWireServer }> {
+    const previousPort = this.instances.get(instanceKey)?.port;
+    const rejectedPorts: number[] = [];
+
+    try {
+      while (true) {
+        const port = await this.portAllocator.allocate(previousPort);
+
+        if (port == null) {
+          throw new Error(
+            `Cannot start a Cloud SQL data plane for ${instanceKey}: every port in ` +
+              `${this.options.portRangeStart}-${this.options.portRangeEnd} is already in use`
+          );
+        }
+
+        const wireServer = new PostgresWireServer({
+          instanceKey,
+          port,
+          resolveConnection: (key, database, user) => this.resolveConnection(key, database, user),
+        });
+
+        try {
+          wireServer.listen();
+
+          return { port, wireServer };
+        } catch (error) {
+          // Held until every attempt is done, so the next allocate() cannot
+          // hand back the port that just refused to bind.
+          rejectedPorts.push(port);
+
+          this.logger.debug(
+            `Port ${port} looked free but could not be bound for ${instanceKey}, trying the next`,
+            error
+          );
+        }
+      }
+    } finally {
+      for (const port of rejectedPorts) this.portAllocator.release(port);
+    }
   }
 
   async stopInstance(project: string, instance: string): Promise<void> {
