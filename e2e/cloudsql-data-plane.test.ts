@@ -248,7 +248,7 @@ describe('Cloud SQL data plane e2e', () => {
 
     // The credentials are enforced, but the session behind them is PGlite's own
     // superuser: emulated users are not real roles. Pinned so the limitation in
-    // ADR-010 cannot drift silently.
+    // ADR-013 cannot drift silently.
     expect(await rows(sql, 'SELECT current_user AS who')).toEqual([{ who: 'postgres' }]);
   });
 

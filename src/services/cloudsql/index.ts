@@ -3,7 +3,7 @@
  *
  * Wires together repository, admin service, HTTP handlers, and the PGlite-backed
  * data plane that makes an emulated instance something a Postgres client can
- * actually connect to (see docs/adrs/010-cloudsql-pglite-data-plane.md).
+ * actually connect to (see docs/adrs/013-cloudsql-pglite-data-plane.md).
  */
 
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';

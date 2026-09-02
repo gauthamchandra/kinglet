@@ -29,8 +29,11 @@ COPY --from=install /app/node_modules ./node_modules
 COPY package.json bun.lock tsconfig.json LICENSE ./
 COPY src/ ./src/
 
-# Default ports: 8765 (HTTP), 8766 (gRPC), 6380-6479 (Memorystore data plane)
-EXPOSE 8765 8766 6380-6479
+# Default ports: 8765 (HTTP), 8766 (gRPC), 6380-6479 (Memorystore data plane),
+# 5432-5531 (Cloud SQL data plane — see docs/adrs/013-cloudsql-pglite-data-plane.md).
+# The Cloud SQL data plane needs no package here: PGlite ships as an npm
+# dependency, unlike valkey-server above.
+EXPOSE 8765 8766 6380-6479 5432-5531
 
 # Create data directory for SQLite persistence
 RUN mkdir -p /app/data
