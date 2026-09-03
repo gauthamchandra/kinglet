@@ -11,24 +11,24 @@ Queue lifecycle, task CRUD, and HTTP dispatch.
 
 ## Implemented endpoints
 
-- `GET` `v2/{+name}` — `projects.locations.getCmekConfig`
-- `GET` `v2/{+name}` — `projects.locations.get`
 - `GET` `v2/{+name}/locations` — `projects.locations.list`
 - `PATCH` `v2/{+name}` — `projects.locations.updateCmekConfig`
-- `POST` `v2/{+parent}/queues` — `projects.locations.queues.create`
-- `GET` `v2/{+parent}/queues` — `projects.locations.queues.list`
-- `GET` `v2/{+name}` — `projects.locations.queues.get`
-- `PATCH` `v2/{+name}` — `projects.locations.queues.patch`
+- `GET` `v2/{+name}` — `projects.locations.getCmekConfig`
+- `GET` `v2/{+name}` — `projects.locations.get`
 - `POST` `v2/{+name}:pause` — `projects.locations.queues.pause`
+- `GET` `v2/{+name}` — `projects.locations.queues.get`
 - `DELETE` `v2/{+name}` — `projects.locations.queues.delete`
 - `POST` `v2/{+name}:purge` — `projects.locations.queues.purge`
+- `GET` `v2/{+parent}/queues` — `projects.locations.queues.list`
+- `POST` `v2/{+parent}/queues` — `projects.locations.queues.create`
+- `PATCH` `v2/{+name}` — `projects.locations.queues.patch`
 - `POST` `v2/{+name}:resume` — `projects.locations.queues.resume`
-- `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
-- `POST` `v2/{+queue}/tasks/{taskId}:buffer` — `projects.locations.queues.tasks.buffer`
-- `GET` `v2/{+name}` — `projects.locations.queues.tasks.get`
-- `DELETE` `v2/{+name}` — `projects.locations.queues.tasks.delete`
 - `GET` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.list`
+- `POST` `v2/{+queue}/tasks/{taskId}:buffer` — `projects.locations.queues.tasks.buffer`
 - `POST` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.create`
+- `GET` `v2/{+name}` — `projects.locations.queues.tasks.get`
+- `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
+- `DELETE` `v2/{+name}` — `projects.locations.queues.tasks.delete`
 
 ## Missing endpoints
 
@@ -36,9 +36,9 @@ _None._
 
 ## IAM endpoints (deferred)
 
+- `POST` `v2/{+resource}:getIamPolicy` — `projects.locations.queues.getIamPolicy`
 - `POST` `v2/{+resource}:setIamPolicy` — `projects.locations.queues.setIamPolicy`
 - `POST` `v2/{+resource}:testIamPermissions` — `projects.locations.queues.testIamPermissions`
-- `POST` `v2/{+resource}:getIamPolicy` — `projects.locations.queues.getIamPolicy`
 
 ## API reference
 

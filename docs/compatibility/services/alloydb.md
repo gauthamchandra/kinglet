@@ -13,47 +13,47 @@ Cluster, instance, and user CRUD with LRO operations — no connectable PostgreS
 
 - `GET` `v1/{+name}` — `projects.locations.get`
 - `GET` `v1/{+name}/locations` — `projects.locations.list`
-- `GET` `v1/{+parent}/clusters` — `projects.locations.clusters.list`
-- `DELETE` `v1/{+name}` — `projects.locations.clusters.delete`
-- `PATCH` `v1/{+name}` — `projects.locations.clusters.patch`
-- `POST` `v1/{+parent}/clusters` — `projects.locations.clusters.create`
-- `GET` `v1/{+name}` — `projects.locations.clusters.get`
-- `PATCH` `v1/{+name}` — `projects.locations.clusters.users.patch`
-- `GET` `v1/{+parent}/users` — `projects.locations.clusters.users.list`
-- `DELETE` `v1/{+name}` — `projects.locations.clusters.users.delete`
-- `GET` `v1/{+name}` — `projects.locations.clusters.users.get`
-- `POST` `v1/{+parent}/users` — `projects.locations.clusters.users.create`
-- `GET` `v1/{+name}` — `projects.locations.clusters.instances.get`
-- `GET` `v1/{+parent}/connectionInfo` — `projects.locations.clusters.instances.getConnectionInfo`
-- `PATCH` `v1/{+name}` — `projects.locations.clusters.instances.patch`
-- `GET` `v1/{+parent}/instances` — `projects.locations.clusters.instances.list`
-- `DELETE` `v1/{+name}` — `projects.locations.clusters.instances.delete`
-- `POST` `v1/{+parent}/instances` — `projects.locations.clusters.instances.create`
 - `GET` `v1/{+name}` — `projects.locations.operations.get`
 - `POST` `v1/{+name}:cancel` — `projects.locations.operations.cancel`
 - `DELETE` `v1/{+name}` — `projects.locations.operations.delete`
 - `GET` `v1/{+name}/operations` — `projects.locations.operations.list`
+- `PATCH` `v1/{+name}` — `projects.locations.clusters.patch`
+- `GET` `v1/{+parent}/clusters` — `projects.locations.clusters.list`
+- `DELETE` `v1/{+name}` — `projects.locations.clusters.delete`
+- `POST` `v1/{+parent}/clusters` — `projects.locations.clusters.create`
+- `GET` `v1/{+name}` — `projects.locations.clusters.get`
+- `GET` `v1/{+parent}/instances` — `projects.locations.clusters.instances.list`
+- `DELETE` `v1/{+name}` — `projects.locations.clusters.instances.delete`
+- `POST` `v1/{+parent}/instances` — `projects.locations.clusters.instances.create`
+- `PATCH` `v1/{+name}` — `projects.locations.clusters.instances.patch`
+- `GET` `v1/{+name}` — `projects.locations.clusters.instances.get`
+- `GET` `v1/{+parent}/connectionInfo` — `projects.locations.clusters.instances.getConnectionInfo`
+- `DELETE` `v1/{+name}` — `projects.locations.clusters.users.delete`
+- `PATCH` `v1/{+name}` — `projects.locations.clusters.users.patch`
+- `POST` `v1/{+parent}/users` — `projects.locations.clusters.users.create`
+- `GET` `v1/{+name}` — `projects.locations.clusters.users.get`
+- `GET` `v1/{+parent}/users` — `projects.locations.clusters.users.list`
 - `GET` `v1/{+parent}/supportedDatabaseFlags` — `projects.locations.supportedDatabaseFlags.list`
 
 ## Missing endpoints
 
-- `POST` `v1/{+parent}/clusters:restoreFromCloudSQL` — `projects.locations.clusters.restoreFromCloudSQL`
+- `POST` `v1/{+parent}/clusters:createsecondary` — `projects.locations.clusters.createsecondary`
 - `POST` `v1/{+name}:switchover` — `projects.locations.clusters.switchover`
 - `POST` `v1/{+name}:export` — `projects.locations.clusters.export`
-- `POST` `v1/{+name}:import` — `projects.locations.clusters.import`
-- `POST` `v1/{+parent}/clusters:createsecondary` — `projects.locations.clusters.createsecondary`
 - `PATCH` `v1/{+name}:upgrade` — `projects.locations.clusters.upgrade`
-- `POST` `v1/{+name}:promote` — `projects.locations.clusters.promote`
 - `POST` `v1/{+parent}/clusters:restore` — `projects.locations.clusters.restore`
-- `POST` `v1/{+name}:injectFault` — `projects.locations.clusters.instances.injectFault`
-- `POST` `v1/{+parent}/instances:createsecondary` — `projects.locations.clusters.instances.createsecondary`
+- `POST` `v1/{+name}:promote` — `projects.locations.clusters.promote`
+- `POST` `v1/{+name}:import` — `projects.locations.clusters.import`
+- `POST` `v1/{+parent}/clusters:restoreFromCloudSQL` — `projects.locations.clusters.restoreFromCloudSQL`
 - `POST` `v1/{+name}:restart` — `projects.locations.clusters.instances.restart`
+- `POST` `v1/{+name}:injectFault` — `projects.locations.clusters.instances.injectFault`
 - `POST` `v1/{+name}:failover` — `projects.locations.clusters.instances.failover`
+- `POST` `v1/{+parent}/instances:createsecondary` — `projects.locations.clusters.instances.createsecondary`
+- `GET` `v1/{+parent}/backups` — `projects.locations.backups.list`
 - `DELETE` `v1/{+name}` — `projects.locations.backups.delete`
-- `PATCH` `v1/{+name}` — `projects.locations.backups.patch`
 - `GET` `v1/{+name}` — `projects.locations.backups.get`
 - `POST` `v1/{+parent}/backups` — `projects.locations.backups.create`
-- `GET` `v1/{+parent}/backups` — `projects.locations.backups.list`
+- `PATCH` `v1/{+name}` — `projects.locations.backups.patch`
 
 ## IAM endpoints (deferred)
 
