@@ -68,6 +68,19 @@ Use TypeScript path aliases for clean imports:
 - `@/shared/*` - shared utilities
 - `@/config` - configuration module
 
+## Planning
+
+For non-trivial work, do not start implementation until the caller has seen a short plan
+and answered any questions it raised. The plan should state what will change, what will
+not (known gaps and YAGNI cuts), which tests come first, and any fidelity unknowns.
+
+Non-trivial includes: new or changed emulated endpoints, fidelity fixes that span more
+than one layer, a new service, storage/routing/protocol changes, and anything with more
+than one reasonable design. Docs, CI, lint/format config, and other infrastructure can
+skip this gate.
+
+If the caller already answered the design questions, do not re-ask — proceed.
+
 ## Bun Runtime
 
 This project uses Bun as the primary runtime (see docs/adrs/001-bun-runtime-choice.md). Key preferences:
@@ -119,6 +132,26 @@ const spy = spyOn(object, 'method');
 - **Co-locate tests** with source files for easier discovery
 - **Reset mocks properly** - Use `mockFunction.mockReset()` instead of `jest.clearAllMocks()`
 
+### Test-driven development
+
+For non-trivial, non-infrastructure changes, write the tests first:
+
+1. Add the unit and/or e2e tests that describe the new behaviour. Run them and confirm they
+   fail for the right reason (missing endpoint, wrong status, unimplemented method) — not
+   because of a typo in the test.
+2. Implement until those tests pass. Do not expand the change past what the tests require.
+
+Which suite:
+
+- **Unit** (`bun test`, co-located `*.test.ts`) for internal behaviour — repositories,
+  services, parsers, error mapping.
+- **E2E** (`bun run test:e2e`) when the HTTP/API surface changes — new or changed endpoint,
+  status, envelope, or resource name.
+- **Both** only when both layers change.
+
+Skip TDD for docs, CI, lint/format config, generated docs, and other infrastructure. A
+separate failing-test commit is not required; running red, then implementing, is.
+
 ### Test Assertion Guidelines
 - **Never use `expect(true).toBe(false)` as an unreachable sentinel.** Use `rejects` for async error testing:
 ```ts
@@ -166,6 +199,65 @@ When implementing a feature that introduces a **large-scale architectural change
 - Changing deployment, containerization, or CI/CD architecture
 
 Each ADR should include: Status, Context, Decision, Rationale, Alternatives Considered, and Consequences. Number sequentially (e.g., `005-descriptive-name.md`).
+
+## Commit sign-off
+
+This is an open-source project under the DCO. Every commit must be signed off under the identity of the **human who requested the work** — the sign-off certifies that a person reviewed the change and stands behind it.
+
+You may run `git commit -s` on that human's behalf, but only after:
+
+- **Asking them and getting an explicit sign-off.** Do not assume approval — ask the human who requested the work to confirm they have reviewed the change and want their name on it. Their sign-off is the whole point; applying it without asking defeats it.
+- **Stamping their identity, not yours.** `git commit -s` derives the `Signed-off-by` name and email straight from git config, so make sure `user.name`/`user.email` are the human's before committing. CI rejects any sign-off carrying a coding-agent identity (Cursor, Claude, Copilot, Devin, …), so signing under your own identity fails the `DCO sign-off` job.
+
+Credit yourself with a `Co-authored-by:` trailer — agent assistance is expected here and that trailer is welcome (it is deliberately not checked).
+
+See CONTRIBUTING.md → Developer Certificate of Origin (DCO) for the full contract.
+
+## YAGNI / over-building
+
+Adapted from [ponytail](https://github.com/DietrichGebert/ponytail) (MIT). Same bar as
+`.cursor/BUGBOT.md` (ponytail **full**): stop at the first rung that holds. Be lazy about
+the solution, never about fidelity, tests, or required structure.
+
+Do not:
+
+- Add something with no caller, no discovery-document requirement, and no stated gap
+  (speculative helpers, config for a value that never changes, scaffolding "for later")
+- Reimplement a helper, type, or pattern that already lives in this repo — look in
+  `@/shared` and the service under edit first
+- Hand-roll what Bun, the Web APIs, or an already-installed dependency already do, or add
+  a package for a few lines of existing capability
+- Introduce an unrequested abstraction: an interface with one implementation, a factory
+  for one product, a wrapper class around a one-liner
+- Add an extra layer inside a small service instead of the established
+  `types` / `repository` / `service` / `handlers` / `index` split (or, for growth, the
+  per-resource triples in `src/services/pubsub/`)
+
+These look like extra code and are required — do not cut them:
+
+- The service file split, the four registration sites, and `stop()` in `shutdown()`
+- Discovery-required surface: pagination, the error envelope, resource-name parsers,
+  field names and status codes that match real GCP
+- Co-located tests, error-path tests, and the coverage bar
+- An explicit "not implemented / known gaps" list in the PR or in code
+- An ADR when the change actually warrants one
+
+## Prose budget
+
+The diff already shows *what* changed. Do not narrate it. Leave only what a maintainer
+cannot infer: why, trade-offs, and known limits.
+
+- PR free prose ("What does this change?", "Why?", "Anything else?") — at most about
+  **three paragraphs**. Do not walk the file list, restate template checkboxes, or tour
+  the feature.
+- A commit body is optional. If you write one, add *why*, a trade-off, or how it was
+  verified. Do not repeat the subject or list files.
+- Review comments: the finding, or silence. No recap or preamble.
+
+Allowed: up to about three paragraphs on a GCP quirk, a known limit, an honest unknown
+("could not determine what real GCP does when X"), or a trade-off the diff cannot show.
+Checklists, the discovery-document URL, "not implemented" lists, commands actually run,
+DCO sign-off, and AI disclosure are the template, not padding.
 
 ## Guidelines
 
