@@ -18,6 +18,7 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [009](009-shared-route-namespace.md) | Shared Route Namespace Across Services | Accepted |
 | [010](010-sqlite-schema-synchronization.md) | SQLite Schema Synchronization | Accepted |
 | [011](011-terraform-validation-harness.md) | Terraform Validation Harness | Accepted |
+| [012](012-cloud-armor-emulation.md) | Cloud Armor Security Policy Emulation | Proposed |
 
 ## A note on the project's former name
 
