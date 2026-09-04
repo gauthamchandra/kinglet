@@ -92,10 +92,12 @@ describe('parseDiscoveryDocument', () => {
           create: { httpMethod: 'POST', path: 'v1/{+parent}/jobs' },
         },
       };
+
       const locations = {
         methods: { list: { httpMethod: 'GET', path: 'v1/{+parent}/locations' } },
         resources: { jobs },
       };
+
       const queues = {
         methods: { get: { httpMethod: 'GET', path: 'v1/{+name}' } },
       };
