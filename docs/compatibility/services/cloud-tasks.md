@@ -11,24 +11,24 @@ Queue lifecycle, task CRUD, and HTTP dispatch.
 
 ## Implemented endpoints
 
-- `GET` `v2/{+name}/locations` — `projects.locations.list`
-- `PATCH` `v2/{+name}` — `projects.locations.updateCmekConfig`
-- `GET` `v2/{+name}` — `projects.locations.getCmekConfig`
 - `GET` `v2/{+name}` — `projects.locations.get`
-- `POST` `v2/{+name}:pause` — `projects.locations.queues.pause`
-- `GET` `v2/{+name}` — `projects.locations.queues.get`
-- `DELETE` `v2/{+name}` — `projects.locations.queues.delete`
-- `POST` `v2/{+name}:purge` — `projects.locations.queues.purge`
-- `GET` `v2/{+parent}/queues` — `projects.locations.queues.list`
+- `GET` `v2/{+name}` — `projects.locations.getCmekConfig`
+- `GET` `v2/{+name}/locations` — `projects.locations.list`
 - `POST` `v2/{+parent}/queues` — `projects.locations.queues.create`
+- `DELETE` `v2/{+name}` — `projects.locations.queues.delete`
+- `GET` `v2/{+name}` — `projects.locations.queues.get`
+- `GET` `v2/{+parent}/queues` — `projects.locations.queues.list`
 - `PATCH` `v2/{+name}` — `projects.locations.queues.patch`
+- `POST` `v2/{+name}:pause` — `projects.locations.queues.pause`
+- `POST` `v2/{+name}:purge` — `projects.locations.queues.purge`
 - `POST` `v2/{+name}:resume` — `projects.locations.queues.resume`
-- `GET` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.list`
 - `POST` `v2/{+queue}/tasks/{taskId}:buffer` — `projects.locations.queues.tasks.buffer`
 - `POST` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.create`
-- `GET` `v2/{+name}` — `projects.locations.queues.tasks.get`
-- `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
 - `DELETE` `v2/{+name}` — `projects.locations.queues.tasks.delete`
+- `GET` `v2/{+name}` — `projects.locations.queues.tasks.get`
+- `GET` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.list`
+- `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
+- `PATCH` `v2/{+name}` — `projects.locations.updateCmekConfig`
 
 ## Missing endpoints
 

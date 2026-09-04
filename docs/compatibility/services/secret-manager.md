@@ -15,44 +15,44 @@ _None._
 
 ## Missing endpoints
 
-- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `GET` `v1/{+name}` — `projects.locations.get`
+- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `POST` `v1/{+parent}:addVersion` — `projects.locations.secrets.addVersion`
 - `POST` `v1/{+parent}/secrets` — `projects.locations.secrets.create`
-- `POST` `v1/{+parent}:rotateSecret` — `projects.locations.secrets.rotateSecret`
-- `GET` `v1/{+name}` — `projects.locations.secrets.get`
+- `DELETE` `v1/{+name}` — `projects.locations.secrets.delete`
 - `POST` `v1/{+parent}:enableManagedRotation` — `projects.locations.secrets.enableManagedRotation`
+- `GET` `v1/{+name}` — `projects.locations.secrets.get`
 - `GET` `v1/{+parent}/secrets` — `projects.locations.secrets.list`
 - `PATCH` `v1/{+name}` — `projects.locations.secrets.patch`
-- `DELETE` `v1/{+name}` — `projects.locations.secrets.delete`
-- `POST` `v1/{+name}:disable` — `projects.locations.secrets.versions.disable`
-- `GET` `v1/{+parent}/versions` — `projects.locations.secrets.versions.list`
+- `POST` `v1/{+parent}:rotateSecret` — `projects.locations.secrets.rotateSecret`
 - `GET` `v1/{+name}:access` — `projects.locations.secrets.versions.access`
-- `GET` `v1/{+name}` — `projects.locations.secrets.versions.get`
-- `POST` `v1/{+name}:enable` — `projects.locations.secrets.versions.enable`
 - `POST` `v1/{+name}:destroy` — `projects.locations.secrets.versions.destroy`
-- `GET` `v1/{+name}` — `projects.secrets.get`
-- `POST` `v1/{+parent}:rotateSecret` — `projects.secrets.rotateSecret`
-- `POST` `v1/{+parent}/secrets` — `projects.secrets.create`
+- `POST` `v1/{+name}:disable` — `projects.locations.secrets.versions.disable`
+- `POST` `v1/{+name}:enable` — `projects.locations.secrets.versions.enable`
+- `GET` `v1/{+name}` — `projects.locations.secrets.versions.get`
+- `GET` `v1/{+parent}/versions` — `projects.locations.secrets.versions.list`
 - `POST` `v1/{+parent}:addVersion` — `projects.secrets.addVersion`
-- `PATCH` `v1/{+name}` — `projects.secrets.patch`
+- `POST` `v1/{+parent}/secrets` — `projects.secrets.create`
 - `DELETE` `v1/{+name}` — `projects.secrets.delete`
-- `GET` `v1/{+parent}/secrets` — `projects.secrets.list`
 - `POST` `v1/{+parent}:enableManagedRotation` — `projects.secrets.enableManagedRotation`
-- `POST` `v1/{+name}:enable` — `projects.secrets.versions.enable`
-- `POST` `v1/{+name}:destroy` — `projects.secrets.versions.destroy`
+- `GET` `v1/{+name}` — `projects.secrets.get`
+- `GET` `v1/{+parent}/secrets` — `projects.secrets.list`
+- `PATCH` `v1/{+name}` — `projects.secrets.patch`
+- `POST` `v1/{+parent}:rotateSecret` — `projects.secrets.rotateSecret`
 - `GET` `v1/{+name}:access` — `projects.secrets.versions.access`
+- `POST` `v1/{+name}:destroy` — `projects.secrets.versions.destroy`
+- `POST` `v1/{+name}:disable` — `projects.secrets.versions.disable`
+- `POST` `v1/{+name}:enable` — `projects.secrets.versions.enable`
 - `GET` `v1/{+name}` — `projects.secrets.versions.get`
 - `GET` `v1/{+parent}/versions` — `projects.secrets.versions.list`
-- `POST` `v1/{+name}:disable` — `projects.secrets.versions.disable`
 
 ## IAM endpoints (deferred)
 
-- `POST` `v1/{+resource}:setIamPolicy` — `projects.locations.secrets.setIamPolicy`
 - `GET` `v1/{+resource}:getIamPolicy` — `projects.locations.secrets.getIamPolicy`
+- `POST` `v1/{+resource}:setIamPolicy` — `projects.locations.secrets.setIamPolicy`
 - `POST` `v1/{+resource}:testIamPermissions` — `projects.locations.secrets.testIamPermissions`
-- `POST` `v1/{+resource}:setIamPolicy` — `projects.secrets.setIamPolicy`
 - `GET` `v1/{+resource}:getIamPolicy` — `projects.secrets.getIamPolicy`
+- `POST` `v1/{+resource}:setIamPolicy` — `projects.secrets.setIamPolicy`
 - `POST` `v1/{+resource}:testIamPermissions` — `projects.secrets.testIamPermissions`
 
 ## API reference
