@@ -269,6 +269,19 @@ describe('securityPolicies rule RPCs', () => {
     expect(body.error.message).toContain("securityPolicies/missing' was not found");
   });
 
+  test('getRule GET rejects a non-integer priority', async () => {
+    await request('POST', `${BASE}/securityPolicies`, { name: 'pol' });
+
+    const res = await request('GET', `${BASE}/securityPolicies/pol/getRule`, undefined, {
+      priority: 'not-a-number',
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { status: string } };
+
+    expect(body.error.status).toBe('INVALID_ARGUMENT');
+  });
+
   test('removeRule POST returns 200', async () => {
     await request('POST', `${BASE}/securityPolicies`, {
       name: 'pol',
@@ -302,6 +315,25 @@ describe('securityPolicies rule RPCs', () => {
     );
 
     expect(res.status).toBe(200);
+  });
+
+  test('patchRule POST rejects a non-integer priority', async () => {
+    await request('POST', `${BASE}/securityPolicies`, { name: 'pol' });
+
+    const res = await request(
+      'POST',
+      `${BASE}/securityPolicies/pol/patchRule`,
+      {
+        action: 'deny(403)',
+        match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+      },
+      { priority: 'abc' }
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { status: string } };
+
+    expect(body.error.status).toBe('INVALID_ARGUMENT');
   });
 });
 

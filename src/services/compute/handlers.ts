@@ -205,19 +205,13 @@ export class ComputeHandlers {
     try {
       const project = req.params.project ?? '';
       const securityPolicy = req.params.securityPolicy ?? '';
-      const priorityRaw = req.query.priority as string | undefined;
+      const parsed = parsePriorityQuery(req.query.priority);
 
-      if (priorityRaw == null) {
-        return errorResponse(400, 'INVALID_ARGUMENT', 'priority query parameter is required');
+      if (!parsed.ok) {
+        return parsed.response;
       }
 
-      const priority = Number.parseInt(priorityRaw, 10);
-
-      if (!Number.isInteger(priority)) {
-        return errorResponse(400, 'INVALID_ARGUMENT', 'priority must be an integer');
-      }
-
-      const { operation } = await this.service.removeRule(project, securityPolicy, priority);
+      const { operation } = await this.service.removeRule(project, securityPolicy, parsed.priority);
 
       return { status: 200, body: operation };
     } catch (err) {
@@ -229,20 +223,19 @@ export class ComputeHandlers {
     try {
       const project = req.params.project ?? '';
       const securityPolicy = req.params.securityPolicy ?? '';
-      const priorityRaw = req.query.priority as string | undefined;
+      const parsed = parsePriorityQuery(req.query.priority);
 
-      if (priorityRaw == null) {
-        return errorResponse(400, 'INVALID_ARGUMENT', 'priority query parameter is required');
+      if (!parsed.ok) {
+        return parsed.response;
       }
 
-      const priority = Number.parseInt(priorityRaw, 10);
-      const rule = await this.service.getRule(project, securityPolicy, priority);
+      const rule = await this.service.getRule(project, securityPolicy, parsed.priority);
 
       if (rule == null) {
         return errorResponse(
           404,
           'NOT_FOUND',
-          `No rule found with priority ${priority} in policy ${securityPolicy}`
+          `No rule found with priority ${parsed.priority} in policy ${securityPolicy}`
         );
       }
 
@@ -256,19 +249,18 @@ export class ComputeHandlers {
     try {
       const project = req.params.project ?? '';
       const securityPolicy = req.params.securityPolicy ?? '';
-      const priorityRaw = req.query.priority as string | undefined;
+      const parsed = parsePriorityQuery(req.query.priority);
 
-      if (priorityRaw == null) {
-        return errorResponse(400, 'INVALID_ARGUMENT', 'priority query parameter is required');
+      if (!parsed.ok) {
+        return parsed.response;
       }
 
-      const priority = Number.parseInt(priorityRaw, 10);
       const ruleBody = (req.body ?? {}) as Record<string, unknown>;
 
       const { operation } = await this.service.patchRule(
         project,
         securityPolicy,
-        priority,
+        parsed.priority,
         ruleBody
       );
 
@@ -324,6 +316,35 @@ export class ComputeHandlers {
 }
 
 // ── Helpers ──
+
+function parsePriorityQuery(
+  raw: unknown
+): { ok: true; priority: number } | { ok: false; response: RouteResponse } {
+  if (raw == null || raw === '') {
+    return {
+      ok: false,
+      response: errorResponse(400, 'INVALID_ARGUMENT', 'priority query parameter is required'),
+    };
+  }
+
+  if (typeof raw !== 'string' || !/^-?\d+$/.test(raw)) {
+    return {
+      ok: false,
+      response: errorResponse(400, 'INVALID_ARGUMENT', 'priority must be an integer'),
+    };
+  }
+
+  const priority = Number.parseInt(raw, 10);
+
+  if (!Number.isInteger(priority)) {
+    return {
+      ok: false,
+      response: errorResponse(400, 'INVALID_ARGUMENT', 'priority must be an integer'),
+    };
+  }
+
+  return { ok: true, priority };
+}
 
 function errorResponse(code: number, status: string, message: string): RouteResponse {
   return {
