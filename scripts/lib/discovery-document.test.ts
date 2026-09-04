@@ -43,9 +43,39 @@ describe('parseDiscoveryDocument', () => {
     expect(doc.version).toBe('v1');
     expect(doc.methods).toHaveLength(2);
     expect(doc.methods.map(method => method.id)).toEqual([
-      'projects.locations.list',
       'projects.locations.jobs.run',
+      'projects.locations.list',
     ]);
+  });
+
+  test('orders methods independently of discovery key order', () => {
+    const build = (reversed: boolean) => {
+      const jobs = {
+        methods: {
+          run: { httpMethod: 'POST', path: 'v1/{+name}:run' },
+          create: { httpMethod: 'POST', path: 'v1/{+parent}/jobs' },
+        },
+      };
+      const locations = {
+        methods: { list: { httpMethod: 'GET', path: 'v1/{+parent}/locations' } },
+        resources: { jobs },
+      };
+      const queues = {
+        methods: { get: { httpMethod: 'GET', path: 'v1/{+name}' } },
+      };
+
+      return JSON.stringify({
+        title: 'Example API',
+        version: 'v1',
+        resources: reversed
+          ? { projects: { resources: { queues, locations } } }
+          : { projects: { resources: { locations, queues } } },
+      });
+    };
+
+    expect(parseDiscoveryDocument(build(false)).methods).toEqual(
+      parseDiscoveryDocument(build(true)).methods
+    );
   });
 });
 

@@ -54,6 +54,10 @@ export function parseDiscoveryDocument(json: string): DiscoveryDocument {
     });
   });
 
+  // Discovery JSON key order is not stable across fetches; sort so regenerated docs
+  // do not churn. Byte comparison rather than localeCompare keeps it locale-independent.
+  methods.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
   return {
     title: doc.title ?? 'Unknown API',
     version: doc.version ?? 'unknown',
