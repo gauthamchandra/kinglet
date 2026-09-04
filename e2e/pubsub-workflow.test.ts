@@ -7,12 +7,12 @@
  *   2. Official @google-cloud/pubsub client library
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { v1 } from '@google-cloud/pubsub';
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import type { Server } from 'bun';
+import { v1 } from '@google-cloud/pubsub';
 import { StorageManager } from '@/core/storage/manager.ts';
-import { PubSubService } from '@/services/pubsub/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
+import { PubSubService } from '@/services/pubsub/index.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
 import { buildRouter, createFakeAuth } from './e2e-helpers.ts';
 

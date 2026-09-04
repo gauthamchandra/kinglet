@@ -5,7 +5,7 @@
  * E2E tests verify complete workflows across all services and components.
  */
 
-import { afterAll, beforeAll } from 'bun:test';
+import { beforeAll, afterAll } from 'bun:test';
 import type { Config } from '@/shared/types/index.ts';
 import { getAvailablePorts } from '../test-utils/helpers.ts';
 
