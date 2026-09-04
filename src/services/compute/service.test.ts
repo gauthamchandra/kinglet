@@ -166,13 +166,61 @@ describe('insert', () => {
   });
 
   test('creates an operation record with DONE status', async () => {
-    const { operation } = await service.insert('proj', 'pol', {});
+    const { policy, operation } = await service.insert('proj', 'pol', {});
 
     expect(operation.kind).toBe('compute#operation');
     expect(operation.status).toBe('DONE');
     expect(operation.targetLink).toContain('proj');
     expect(operation.targetLink).toContain('pol');
     expect(operation.operationType).toBe('insert');
+    expect(operation.name).toBe(operation.id);
+    expect(operation.targetId).toBe(policy.id);
+  });
+
+  test('persists type and recaptchaOptionsConfig on GET', async () => {
+    await service.insert('proj', 'pol', {
+      type: 'CLOUD_ARMOR',
+      recaptchaOptionsConfig: { redirectSiteKey: 'site-key' },
+    });
+
+    const policy = await service.get('proj', 'pol');
+
+    expect(policy?.type).toBe('CLOUD_ARMOR');
+    expect(policy?.recaptchaOptionsConfig).toEqual({ redirectSiteKey: 'site-key' });
+  });
+
+  test('rejects throttle without rateLimitOptions', async () => {
+    const promise = service.insert('proj', 'pol', {
+      rules: [
+        {
+          priority: 100,
+          action: 'throttle',
+          match: { expr: { expression: 'true' } },
+        },
+      ],
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(SecurityPolicyServiceError);
+    await expect(promise).rejects.toHaveProperty('status', 'INVALID_ARGUMENT');
+    await expect(promise).rejects.toThrow('rateLimitOptions is required');
+  });
+
+  test('persists and validates advancedOptionsConfig.jsonParsing', async () => {
+    const { policy } = await service.insert('proj', 'pol', {
+      advancedOptionsConfig: { jsonParsing: 'STANDARD', requestBodyInspectionSize: '16KB' },
+    });
+
+    expect(policy.advancedOptionsConfig).toEqual({
+      jsonParsing: 'STANDARD',
+      requestBodyInspectionSize: '16KB',
+    });
+
+    const invalid = service.insert('proj', 'bad', {
+      advancedOptionsConfig: { jsonParsing: 'YES' },
+    });
+
+    await expect(invalid).rejects.toBeInstanceOf(SecurityPolicyServiceError);
+    await expect(invalid).rejects.toThrow('Invalid jsonParsing');
   });
 
   test('rejects throttle->rate_based_ban transition within same insert', async () => {
@@ -438,10 +486,13 @@ describe('getOperation', () => {
 
     const operationId = op.id;
     const retrieved = await service.getOperation('proj', operationId);
+    const retrievedByName = await service.getOperation('proj', op.name);
 
     expect(retrieved).not.toBeNull();
     expect(retrieved?.id).toBe(operationId);
+    expect(retrieved?.name).toBe(operationId);
     expect(retrieved?.status).toBe('DONE');
+    expect(retrievedByName?.id).toBe(operationId);
   });
 
   test('returns null for unknown operation', async () => {

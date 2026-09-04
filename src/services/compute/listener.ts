@@ -8,7 +8,12 @@
 import type { Server } from 'bun';
 import { evaluate } from './armor/evaluate.ts';
 import { buildRequestAttributes, isValidIp } from './armor/request.ts';
-import type { EvaluationResult, SecurityPolicy } from './armor/types.ts';
+import type {
+  EvaluationResult,
+  JsonParsing,
+  RequestAttributeInput,
+  SecurityPolicy,
+} from './armor/types.ts';
 import type { SecurityPolicyResponse } from './types.ts';
 
 // ── Kinglet-only header names (only referenced here) ──
@@ -33,6 +38,7 @@ export interface ListenerRequestInput {
   body: string;
   scheme: string;
   userIpRequestHeaders: readonly string[];
+  jsonParsing?: JsonParsing;
 }
 
 export type ListenerRequestResult =
@@ -75,7 +81,7 @@ export function buildRequestAttributesFromListenerRequest(
     strippedHeaders['x-forwarded-for'] = originIp;
   }
 
-  const attributes = buildRequestAttributes({
+  const requestInput: RequestAttributeInput = {
     method: input.method,
     path: input.path,
     originIp,
@@ -84,7 +90,13 @@ export function buildRequestAttributesFromListenerRequest(
     body: input.body,
     scheme: input.scheme,
     userIpRequestHeaders: input.userIpRequestHeaders,
-  });
+  };
+
+  if (input.jsonParsing != null) {
+    requestInput.jsonParsing = input.jsonParsing;
+  }
+
+  const attributes = buildRequestAttributes(requestInput);
 
   return { attributes };
 }
@@ -94,6 +106,26 @@ export function buildRequestAttributesFromListenerRequest(
 export interface ArmorDecision {
   status: number;
   headers: Record<string, string>;
+}
+
+export function jsonParsingFromPolicy(policy: SecurityPolicyResponse): JsonParsing | undefined {
+  const config = policy.advancedOptionsConfig;
+
+  if (config == null || typeof config !== 'object') {
+    return undefined;
+  }
+
+  const jsonParsing = (config as { jsonParsing?: unknown }).jsonParsing;
+
+  if (
+    jsonParsing === 'DISABLED' ||
+    jsonParsing === 'STANDARD' ||
+    jsonParsing === 'STANDARD_WITH_GRAPHQL'
+  ) {
+    return jsonParsing;
+  }
+
+  return undefined;
 }
 
 export function userIpRequestHeadersFromPolicy(policy: SecurityPolicyResponse): readonly string[] {
@@ -268,7 +300,7 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
         return new Response('', { status: 503 });
       }
 
-      const adapterResult = buildRequestAttributesFromListenerRequest({
+      const adapterInput: ListenerRequestInput = {
         method,
         path,
         query,
@@ -277,7 +309,15 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
         body,
         scheme: 'http',
         userIpRequestHeaders: userIpRequestHeadersFromPolicy(policyOrError),
-      });
+      };
+
+      const jsonParsing = jsonParsingFromPolicy(policyOrError);
+
+      if (jsonParsing != null) {
+        adapterInput.jsonParsing = jsonParsing;
+      }
+
+      const adapterResult = buildRequestAttributesFromListenerRequest(adapterInput);
 
       if ('error' in adapterResult) {
         return new Response('', { status: 400 });

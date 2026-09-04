@@ -61,7 +61,11 @@ export const securityPoliciesTableSchema: TableSchema = {
     { name: 'extraFields', type: 'json', nullable: true },
   ],
   indexes: [
-    { name: 'idx_compute_security_policies_project_name', columns: ['project', 'name'], unique: true },
+    {
+      name: 'idx_compute_security_policies_project_name',
+      columns: ['project', 'name'],
+      unique: true,
+    },
     { name: 'idx_compute_security_policies_project', columns: ['project'] },
   ],
   timestamps: true,
@@ -96,8 +100,8 @@ export function buildSecurityPolicySelfLink(project: string, policyName: string)
   return `https://www.googleapis.com/compute/v1/projects/${project}/global/securityPolicies/${policyName}`;
 }
 
-export function buildOperationName(project: string, operationId: string): string {
-  return `projects/${project}/global/operations/${operationId}`;
+export function buildOperationName(operationId: string): string {
+  return operationId;
 }
 
 export function buildOperationSelfLink(project: string, operationId: string): string {

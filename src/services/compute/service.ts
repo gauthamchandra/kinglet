@@ -10,7 +10,7 @@ import { validateExpression, validateSrcIpRanges } from './armor/expression.ts';
 import { assertRateLimitActionTransition, validateRateLimitOptions } from './armor/rate-limit.ts';
 import { canonicalizeIp } from './armor/request.ts';
 import type { SecurityPolicyMatch, SecurityPolicyRule } from './armor/types.ts';
-import { ArmorError, DEFAULT_RULE_PRIORITY } from './armor/types.ts';
+import { ArmorError, DEFAULT_RULE_PRIORITY, REQUEST_BODY_INSPECTION_BYTES } from './armor/types.ts';
 import { ComputeRepository } from './repository.ts';
 import type {
   GlobalOperationRecord,
@@ -63,13 +63,7 @@ function statusToHttpCode(status: ComputeErrorStatus): number {
 
 // ── Known extra fields the Terraform provider sends ──
 
-const KNOWN_POLICY_FIELDS = new Set([
-  'name',
-  'rules',
-  'advancedOptionsConfig',
-  'type',
-  'recaptchaOptionsConfig',
-]);
+const KNOWN_POLICY_FIELDS = new Set(['name', 'rules', 'advancedOptionsConfig']);
 
 // ── Result types ──
 
@@ -132,7 +126,6 @@ export class SecurityPolicyService {
     }
 
     const now = new Date().toISOString();
-    const policyId = generateId();
     const fingerprint = generateFingerprint();
     const selfLink = buildSecurityPolicySelfLink(project, name);
 
@@ -153,7 +146,7 @@ export class SecurityPolicyService {
     });
 
     const description2 = body.description as string | undefined;
-    const operation = await this.createOperation(project, 'insert', selfLink, policyId, record.id);
+    const operation = await this.createOperation(project, 'insert', selfLink, record.id);
 
     const policy = recordToResponse(record, description2);
 
@@ -200,13 +193,7 @@ export class SecurityPolicyService {
 
     await this.repository.deletePolicy(record.id);
 
-    const operation = await this.createOperation(
-      project,
-      'delete',
-      record.selfLink,
-      record.id,
-      record.id
-    );
+    const operation = await this.createOperation(project, 'delete', record.selfLink, record.id);
 
     const policy = recordToResponse(record);
 
@@ -244,8 +231,10 @@ export class SecurityPolicyService {
     }
 
     if (body.advancedOptionsConfig !== undefined) {
+      const advancedOptionsConfig = extractAdvancedOptionsConfig(body);
+
       updateData.advancedOptionsConfig =
-        body.advancedOptionsConfig != null ? JSON.stringify(body.advancedOptionsConfig) : null;
+        advancedOptionsConfig != null ? JSON.stringify(advancedOptionsConfig) : null;
     }
 
     const extraFields = extractExtraFields(body);
@@ -267,13 +256,7 @@ export class SecurityPolicyService {
       throw new SecurityPolicyServiceError(`Policy ${name} disappeared during patch`, 'NOT_FOUND');
     }
 
-    const operation = await this.createOperation(
-      project,
-      'patch',
-      record.selfLink,
-      record.id,
-      record.id
-    );
+    const operation = await this.createOperation(project, 'patch', record.selfLink, record.id);
 
     const policy = recordToResponse(updated, description ?? getDescription(record));
 
@@ -320,13 +303,7 @@ export class SecurityPolicyService {
       );
     }
 
-    const operation = await this.createOperation(
-      project,
-      'addRule',
-      record.selfLink,
-      record.id,
-      record.id
-    );
+    const operation = await this.createOperation(project, 'addRule', record.selfLink, record.id);
 
     return { policy: recordToResponse(updated), operation };
   }
@@ -369,13 +346,7 @@ export class SecurityPolicyService {
       );
     }
 
-    const operation = await this.createOperation(
-      project,
-      'removeRule',
-      record.selfLink,
-      record.id,
-      record.id
-    );
+    const operation = await this.createOperation(project, 'removeRule', record.selfLink, record.id);
 
     return { policy: recordToResponse(updated), operation };
   }
@@ -452,13 +423,7 @@ export class SecurityPolicyService {
       );
     }
 
-    const operation = await this.createOperation(
-      project,
-      'patchRule',
-      record.selfLink,
-      record.id,
-      record.id
-    );
+    const operation = await this.createOperation(project, 'patchRule', record.selfLink, record.id);
 
     return { policy: recordToResponse(updated), operation };
   }
@@ -473,13 +438,7 @@ export class SecurityPolicyService {
       );
     }
 
-    const operation = await this.createOperation(
-      project,
-      'setLabels',
-      record.selfLink,
-      record.id,
-      record.id
-    );
+    const operation = await this.createOperation(project, 'setLabels', record.selfLink, record.id);
 
     return { operation };
   }
@@ -501,13 +460,12 @@ export class SecurityPolicyService {
     project: string,
     operationType: string,
     targetLink: string,
-    targetId: string,
-    _recordId: string
+    targetId: string
   ): Promise<GlobalOperationResponse> {
     const operationId = generateId();
     const now = new Date().toISOString();
     const operationSelfLink = buildOperationSelfLink(project, operationId);
-    const operationName = buildOperationName(project, operationId);
+    const operationName = buildOperationName(operationId);
 
     const record = await this.repository.createOperation({
       operationId,
@@ -611,7 +569,14 @@ function validateSingleRule(raw: Record<string, unknown>): SecurityPolicyRule {
     validateMatch(match, action);
   }
 
-  if ((action === 'throttle' || action === 'rate_based_ban') && raw.rateLimitOptions != null) {
+  if (action === 'throttle' || action === 'rate_based_ban') {
+    if (raw.rateLimitOptions == null) {
+      throw new SecurityPolicyServiceError(
+        `rateLimitOptions is required for action ${action}`,
+        'INVALID_ARGUMENT'
+      );
+    }
+
     try {
       validateRateLimitOptions(action, raw.rateLimitOptions as Record<string, unknown>);
     } catch (err) {
@@ -732,7 +697,53 @@ function normalizeCidr(range: string): string {
 }
 
 function extractAdvancedOptionsConfig(body: Record<string, unknown>): unknown {
-  return body.advancedOptionsConfig ?? null;
+  const raw = body.advancedOptionsConfig;
+
+  if (raw == null) {
+    return null;
+  }
+
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SecurityPolicyServiceError(
+      'advancedOptionsConfig must be an object',
+      'INVALID_ARGUMENT'
+    );
+  }
+
+  const config = raw as Record<string, unknown>;
+  const jsonParsing = config.jsonParsing;
+
+  if (
+    jsonParsing != null &&
+    jsonParsing !== 'DISABLED' &&
+    jsonParsing !== 'STANDARD' &&
+    jsonParsing !== 'STANDARD_WITH_GRAPHQL'
+  ) {
+    throw new SecurityPolicyServiceError(
+      `Invalid jsonParsing: ${String(jsonParsing)}`,
+      'INVALID_ARGUMENT'
+    );
+  }
+
+  const size = config.requestBodyInspectionSize;
+
+  if (size != null && !(typeof size === 'string' && size in REQUEST_BODY_INSPECTION_BYTES)) {
+    throw new SecurityPolicyServiceError(
+      `Invalid requestBodyInspectionSize: ${String(size)}`,
+      'INVALID_ARGUMENT'
+    );
+  }
+
+  const headers = config.userIpRequestHeaders;
+
+  if (headers != null && (!Array.isArray(headers) || headers.some(h => typeof h !== 'string'))) {
+    throw new SecurityPolicyServiceError(
+      'userIpRequestHeaders must be an array of strings',
+      'INVALID_ARGUMENT'
+    );
+  }
+
+  return raw;
 }
 
 function extractExtraFields(body: Record<string, unknown>): Record<string, unknown> {

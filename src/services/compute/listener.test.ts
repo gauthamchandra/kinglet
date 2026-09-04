@@ -10,6 +10,7 @@ import type { EvaluationResult } from './armor/types.ts';
 import {
   buildRequestAttributesFromListenerRequest,
   handleArmorDecision,
+  jsonParsingFromPolicy,
   redirectTargetFromPolicy,
   selectPolicy,
   userIpRequestHeadersFromPolicy,
@@ -131,9 +132,10 @@ describe('buildRequestAttributesFromListenerRequest: XFF rewriting', () => {
     });
 
     expect(result).not.toHaveProperty('error');
-    expect((result as { attributes: { origin: { ip: string; userIp: string } } }).attributes.origin.userIp).toBe(
-      '198.51.100.9'
-    );
+    expect(
+      (result as { attributes: { origin: { ip: string; userIp: string } } }).attributes.origin
+        .userIp
+    ).toBe('198.51.100.9');
     expect((result as { attributes: { origin: { ip: string } } }).attributes.origin.ip).toBe(
       '10.0.0.1'
     );
@@ -343,6 +345,25 @@ describe('policy adapter helpers', () => {
     );
   });
 
+  test('reads jsonParsing from advancedOptionsConfig', () => {
+    const policy: SecurityPolicyResponse = {
+      kind: 'compute#securityPolicy',
+      id: '1',
+      creationTimestamp: new Date().toISOString(),
+      name: 'pol',
+      selfLink: 'https://example.com/pol',
+      fingerprint: 'abc',
+      rules: [],
+      advancedOptionsConfig: { jsonParsing: 'STANDARD' },
+    };
+
+    expect(jsonParsingFromPolicy(policy)).toBe('STANDARD');
+    expect(jsonParsingFromPolicy({ ...policy, advancedOptionsConfig: undefined })).toBeUndefined();
+    expect(
+      jsonParsingFromPolicy({ ...policy, advancedOptionsConfig: { jsonParsing: 'nope' } })
+    ).toBeUndefined();
+  });
+
   test('reads redirect target from the matched rule', () => {
     const policy: SecurityPolicyResponse = {
       kind: 'compute#securityPolicy',
@@ -385,5 +406,43 @@ describe('kinglet origin header is not visible to CEL', () => {
     }
 
     expect(Object.hasOwn(result.attributes.request.headers, 'x-kinglet-origin-ip')).toBe(false);
+  });
+});
+
+describe('jsonParsing through the listener adapter', () => {
+  test('keeps JSON params out of request.params unless jsonParsing is STANDARD', () => {
+    const disabled = buildRequestAttributesFromListenerRequest({
+      method: 'POST',
+      path: '/',
+      query: '',
+      headers: { 'content-type': 'application/json' },
+      tcpPeer: '127.0.0.1',
+      body: '{"city":"NewYork"}',
+      scheme: 'http',
+      userIpRequestHeaders: [],
+    });
+    const enabled = buildRequestAttributesFromListenerRequest({
+      method: 'POST',
+      path: '/',
+      query: '',
+      headers: { 'content-type': 'application/json' },
+      tcpPeer: '127.0.0.1',
+      body: '{"city":"NewYork","n":1}',
+      scheme: 'http',
+      userIpRequestHeaders: [],
+      jsonParsing: 'STANDARD',
+    });
+
+    if ('error' in disabled) {
+      throw new Error(`Expected success, got error: ${disabled.error}`);
+    }
+
+    if ('error' in enabled) {
+      throw new Error(`Expected success, got error: ${enabled.error}`);
+    }
+
+    expect(disabled.attributes.request.params.city).toBeUndefined();
+    expect(enabled.attributes.request.params.city).toBe('NewYork');
+    expect(enabled.attributes.request.params.n).toBe('1');
   });
 });

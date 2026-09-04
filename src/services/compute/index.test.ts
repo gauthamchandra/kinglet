@@ -46,7 +46,8 @@ describe('ComputeService', () => {
   });
 
   test('stop is idempotent', async () => {
-    await service.stop();
-    await service.stop();
+    await expect(service.stop()).resolves.toBeUndefined();
+    await expect(service.stop()).resolves.toBeUndefined();
+    expect(service.getRoutes().length).toBeGreaterThan(0);
   });
 });
