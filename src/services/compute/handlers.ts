@@ -81,6 +81,13 @@ export class ComputeHandlers {
         path: '/compute/v1/projects/:project/global/securityPolicies/:securityPolicy/patchRule',
         handler: (req, ctx) => this.handlePatchRule(req, ctx),
       },
+      // setLabels stub (provider calls this after create/update)
+      {
+        id: 'compute.securityPolicies.setLabels',
+        method: 'POST',
+        path: '/compute/v1/projects/:project/global/securityPolicies/:securityPolicy/setLabels',
+        handler: (req, ctx) => this.handleSetLabels(req, ctx),
+      },
       // globalOperations
       {
         id: 'compute.globalOperations.get',
@@ -266,6 +273,18 @@ export class ComputeHandlers {
         priority,
         ruleBody
       );
+
+      return { status: 200, body: operation };
+    } catch (err) {
+      return handleError(err, this.logger);
+    }
+  }
+
+  private async handleSetLabels(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
+    try {
+      const project = req.params.project ?? '';
+      const securityPolicy = req.params.securityPolicy ?? '';
+      const { operation } = await this.service.setLabels(project, securityPolicy);
 
       return { status: 200, body: operation };
     } catch (err) {

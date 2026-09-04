@@ -65,7 +65,6 @@ function statusToHttpCode(status: ComputeErrorStatus): number {
 
 const KNOWN_POLICY_FIELDS = new Set([
   'name',
-  'description',
   'rules',
   'advancedOptionsConfig',
   'type',
@@ -236,11 +235,6 @@ export class SecurityPolicyService {
     const updateData: Partial<Omit<SecurityPolicyRecord, 'id' | 'createdAt' | 'updatedAt'>> = {
       fingerprint: generateFingerprint(),
     };
-
-    if (description !== undefined) {
-      // Store description in extraFields or as part of rules
-      // Actually store in extraFields alongside unknown beta fields
-    }
 
     if (body.rules !== undefined) {
       const rawRules = body.rules as unknown[];
@@ -467,6 +461,27 @@ export class SecurityPolicyService {
     );
 
     return { policy: recordToResponse(updated), operation };
+  }
+
+  async setLabels(project: string, name: string): Promise<{ operation: GlobalOperationResponse }> {
+    const record = await this.repository.getPolicyByProjectAndName(project, name);
+
+    if (record == null) {
+      throw new SecurityPolicyServiceError(
+        `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
+        'NOT_FOUND'
+      );
+    }
+
+    const operation = await this.createOperation(
+      project,
+      'setLabels',
+      record.selfLink,
+      record.id,
+      record.id
+    );
+
+    return { operation };
   }
 
   async getOperation(

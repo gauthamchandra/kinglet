@@ -18,6 +18,7 @@ provider "google" {
   cloud_scheduler_custom_endpoint = "${var.kinglet_endpoint}/v1/"
   kms_custom_endpoint             = "${var.kinglet_endpoint}/v1/"
   workflows_custom_endpoint       = "${var.kinglet_endpoint}/v1/"
+  compute_custom_endpoint         = "${var.kinglet_endpoint}/compute/v1/"
 
   # Avoid real oauth2.googleapis.com token exchange in CI/local harness runs.
   access_token = var.access_token
