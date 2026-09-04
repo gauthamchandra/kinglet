@@ -73,6 +73,28 @@ describe('insert', () => {
     expect(policy.rules[0]?.action).toBe('deny(403)');
   });
 
+  test('rejects a policy name that is not RFC1035', async () => {
+    const promise = service.insert('proj', 'My-Policy', {});
+
+    await expect(promise).rejects.toBeInstanceOf(SecurityPolicyServiceError);
+    await expect(promise).rejects.toHaveProperty('status', 'INVALID_ARGUMENT');
+  });
+
+  test('rejects an out-of-range deny action', async () => {
+    const promise = service.insert('proj', 'pol', {
+      rules: [
+        {
+          priority: 100,
+          action: 'deny(999)',
+          match: { expr: { expression: 'true' } },
+        },
+      ],
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(SecurityPolicyServiceError);
+    await expect(promise).rejects.toHaveProperty('status', 'INVALID_ARGUMENT');
+  });
+
   test('rejects duplicate policy name', async () => {
     await service.insert('proj', 'pol', {});
 
@@ -556,6 +578,28 @@ describe('patchRule', () => {
     await expect(promise).rejects.toBeInstanceOf(SecurityPolicyServiceError);
     await expect(promise).rejects.toHaveProperty('status', 'FAILED_PRECONDITION');
   });
+
+  test('rejects a priority change that collides with another rule', async () => {
+    await service.insert('proj', 'pol', {
+      rules: [
+        {
+          priority: 100,
+          action: 'deny(403)',
+          match: { expr: { expression: "request.path.startsWith('/a')" } },
+        },
+        {
+          priority: 200,
+          action: 'deny(404)',
+          match: { expr: { expression: "request.path.startsWith('/b')" } },
+        },
+      ],
+    });
+
+    const promise = service.patchRule('proj', 'pol', 200, { priority: 100 });
+
+    await expect(promise).rejects.toBeInstanceOf(SecurityPolicyServiceError);
+    await expect(promise).rejects.toHaveProperty('status', 'INVALID_ARGUMENT');
+  });
 });
 
 describe('getOperation', () => {
@@ -587,6 +631,23 @@ describe('echo unknown beta fields', () => {
     } as Record<string, unknown>);
 
     expect(policy.adaptiveProtectionConfig).toBeDefined();
+  });
+
+  test('does not let extraFields overwrite server identity fields', async () => {
+    const { policy } = await service.insert('proj', 'pol', {
+      fingerprint: 'client-fingerprint',
+      id: 'client-id',
+      kind: 'compute#injected',
+      selfLink: 'https://example.com/injected',
+      error: 'should-not-surface',
+    } as Record<string, unknown>);
+
+    expect(policy.fingerprint).not.toBe('client-fingerprint');
+    expect(policy.fingerprint).toBeTypeOf('string');
+    expect(policy.id).not.toBe('client-id');
+    expect(policy.kind).toBe('compute#securityPolicy');
+    expect(policy.selfLink).toContain('/securityPolicies/pol');
+    expect(policy.error).toBeUndefined();
   });
 });
 

@@ -27,7 +27,11 @@ export function evaluate(policy: SecurityPolicy, attributes: RequestAttributes):
 
   preview = headerResult.preview ?? preview;
 
-  if (headerResult.enforced != null) {
+  const headerPriority = headerResult.enforced?.priority;
+  const remainingBodyRules =
+    headerPriority != null ? bodyRules.filter(rule => rule.priority < headerPriority) : bodyRules;
+
+  if (remainingBodyRules.length === 0) {
     return finish(headerResult.enforced, preview);
   }
 
@@ -36,11 +40,15 @@ export function evaluate(policy: SecurityPolicy, attributes: RequestAttributes):
     inspectionLimitBytes(policy),
     policy.advancedOptionsConfig?.jsonParsing
   );
-  const bodyResult = walkRules(bodyRules, bodyAttributes, policyName, 'body', preview);
+  const bodyResult = walkRules(remainingBodyRules, bodyAttributes, policyName, 'body', preview);
 
   preview = bodyResult.preview ?? preview;
 
-  return finish(bodyResult.enforced, preview);
+  if (bodyResult.enforced != null) {
+    return finish(bodyResult.enforced, preview);
+  }
+
+  return finish(headerResult.enforced, preview);
 }
 
 function finish(

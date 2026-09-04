@@ -75,8 +75,7 @@
       "displayName": "Cloud Armor (Compute)",
       "discoveryUrl": "https://compute.googleapis.com/$discovery/rest?version=v1",
       "version": "v1",
-      "implementationPath": "src/services/compute/",
-      "resources": ["securityPolicies", "globalOperations"]
+      "implementationPath": "src/services/compute/"
     }
   ]
 }

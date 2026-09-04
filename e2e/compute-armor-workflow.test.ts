@@ -86,6 +86,14 @@ describe('Cloud Armor E2E: Security Policy CRUD', () => {
       name: 'e2e-policy',
       rules: [
         {
+          priority: 50,
+          action: 'deny(403)',
+          match: {
+            expr: { expression: "has(request.headers['x-kinglet-origin-ip'])" },
+          },
+          description: 'Must never match: the listener strips this header before CEL',
+        },
+        {
           priority: 1000,
           action: 'deny(403)',
           match: { expr: { expression: "request.path.startsWith('/admin')" } },

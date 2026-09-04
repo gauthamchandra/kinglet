@@ -198,6 +198,8 @@ export function handleArmorDecision(
   return { status, headers };
 }
 
+const ALLOWED_DENY_STATUSES = new Set([403, 404, 429, 502]);
+
 function actionToStatus(action: string): number {
   if (action === 'allow') {
     return 200;
@@ -210,7 +212,11 @@ function actionToStatus(action: string): number {
   const denyMatch = /^deny\((\d+)\)$/.exec(action);
 
   if (denyMatch != null) {
-    return Number.parseInt(denyMatch[1] ?? '403', 10);
+    const code = Number.parseInt(denyMatch[1] ?? '403', 10);
+
+    if (ALLOWED_DENY_STATUSES.has(code)) {
+      return code;
+    }
   }
 
   return 403;

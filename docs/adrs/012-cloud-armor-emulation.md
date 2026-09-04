@@ -50,10 +50,11 @@ done before the HTTP response is written.
 No `evaluate` method on Compute. No `/compute/v1/…/evaluate`. Other
 Compute resources stay unimplemented (404, not a stub 200).
 
-The compatibility registry lists only `securityPolicies` and
-`globalOperations`, so coverage is measured against that subset, not all
-of Compute Engine. `/compute/v1/` gets the same path-prefix treatment
-Storage already has for `/storage/v1/`.
+The compatibility matrix compares kinglet routes against the full
+Compute Engine discovery document so the unimplemented gap is visible.
+Only `securityPolicies` and `globalOperations` are implemented.
+`/compute/v1/` gets the same path-prefix treatment Storage already has
+for `/storage/v1/`.
 
 ### When docs and apply disagree, follow apply
 
@@ -462,7 +463,7 @@ not have to run an origin to check a deny rule. Allow is 200 empty.
 ## Consequences
 
 - Kinglet owns `/compute/v1/`. Further Compute resources go in this
-  module and the registry resource filter.
+  module; the compatibility matrix already lists the full discovery gap.
 - `terraform apply` plus curl on `:8787` is enough to test path, IP,
   header, and rate-limit rules. No origin process is required. Allow
   is 200 empty; block is the Armor deny/exceed status.

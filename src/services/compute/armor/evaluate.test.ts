@@ -111,7 +111,53 @@ describe('evaluate', () => {
     expect(miss.enforced).toBeUndefined();
   });
 
-  test('header-phase allow prevents a later body-phase deny', () => {
+  test('header-phase allow above a body-phase deny prevents the WAF rule', () => {
+    const policy: SecurityPolicy = {
+      name: 'phase-policy',
+      rules: [
+        {
+          priority: 500,
+          action: 'allow',
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['127.0.0.1'] } },
+        },
+        {
+          priority: 1000,
+          action: 'deny(403)',
+          match: { expr: { expression: "request.body.contains('evil')" } },
+        },
+      ],
+    };
+
+    const result = evaluate(policy, attrs({ body: 'evil' }));
+
+    expect(result.enforced?.priority).toBe(500);
+    expect(result.enforced?.action).toBe('allow');
+  });
+
+  test('default allow does not prevent a better-priority body-phase deny', () => {
+    const policy: SecurityPolicy = {
+      name: 'with-default',
+      rules: [
+        {
+          priority: 1000,
+          action: 'deny(403)',
+          match: { expr: { expression: "request.body.contains('evil')" } },
+        },
+        {
+          priority: DEFAULT_RULE_PRIORITY,
+          action: 'allow',
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+        },
+      ],
+    };
+
+    const result = evaluate(policy, attrs({ body: 'evil' }));
+
+    expect(result.enforced?.priority).toBe(1000);
+    expect(result.enforced?.action).toBe('deny(403)');
+  });
+
+  test('body-phase deny beats a later header-phase allow', () => {
     const policy: SecurityPolicy = {
       name: 'phase-policy',
       rules: [
@@ -130,8 +176,8 @@ describe('evaluate', () => {
 
     const result = evaluate(policy, attrs({ body: 'evil' }));
 
-    expect(result.enforced?.priority).toBe(2000);
-    expect(result.enforced?.action).toBe('allow');
+    expect(result.enforced?.priority).toBe(1000);
+    expect(result.enforced?.action).toBe('deny(403)');
   });
 
   test('body-phase rules run after header misses, by priority', () => {
@@ -376,5 +422,39 @@ describe('evaluate', () => {
     now += 60_000;
 
     expect(evaluate(policy, attrs()).enforced?.action).toBe('allow');
+  });
+
+  test('preview throttle reports exceedAction after the threshold', () => {
+    resetRateLimitStore();
+    setRateLimitClock(() => 5_000_000);
+
+    const policy: SecurityPolicy = {
+      name: 'preview-rl',
+      rules: [
+        {
+          priority: 50,
+          preview: true,
+          action: 'throttle',
+          rateLimitOptions: {
+            rateLimitThreshold: { count: 1, intervalSec: 60 },
+            exceedAction: 'deny(429)',
+          },
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+        },
+        {
+          priority: DEFAULT_RULE_PRIORITY,
+          action: 'allow',
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+        },
+      ],
+    };
+
+    const first = evaluate(policy, attrs());
+    const second = evaluate(policy, attrs());
+
+    expect(first.preview?.action).toBe('allow');
+    expect(first.enforced?.action).toBe('allow');
+    expect(second.preview?.action).toBe('deny(429)');
+    expect(second.enforced?.action).toBe('allow');
   });
 });

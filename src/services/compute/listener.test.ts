@@ -234,6 +234,16 @@ describe('handleArmorDecision: status codes', () => {
     expect(headers['x-kinglet-enforced-outcome']).toBe('REDIRECT');
   });
 
+  test('unknown deny status is treated as 403', () => {
+    const result: EvaluationResult = {
+      enforced: { name: policyName, priority: 1000, action: 'deny(999)', outcome: 'DENY' },
+    };
+
+    const { status } = handleArmorDecision(result, policyName);
+
+    expect(status).toBe(403);
+  });
+
   test('deny(502) returns 502', () => {
     const result: EvaluationResult = {
       enforced: { name: policyName, priority: 1000, action: 'deny(502)', outcome: 'DENY' },

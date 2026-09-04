@@ -42,6 +42,9 @@ See [Storage modes](storage.md) for details on each storage type.
 | `CLOUDSQL_DATA_PLANE` | `true` | Serve a real Postgres endpoint per instance (PGlite); `false` for a control plane only |
 | `CLOUDSQL_PORT_RANGE_START` | `5432` | First port available for Cloud SQL instance endpoints |
 | `CLOUDSQL_PORT_RANGE_END` | `5531` | Last port available for Cloud SQL instance endpoints |
+| `ENABLE_COMPUTE` | `true` | Enable Compute Engine (Cloud Armor) service |
+| `COMPUTE_LISTENER_PORT` | `8787` | Cloud Armor evaluation listener port |
+| `COMPUTE_ARMOR_DEFAULT_POLICY` | — | Policy to evaluate when more than one security policy exists |
 
 ## Logging
 

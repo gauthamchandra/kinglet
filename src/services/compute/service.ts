@@ -66,6 +66,24 @@ function statusToHttpCode(status: ComputeErrorStatus): number {
 
 const KNOWN_POLICY_FIELDS = new Set(['name', 'rules', 'advancedOptionsConfig']);
 
+const RESERVED_RESPONSE_FIELDS = new Set([
+  'kind',
+  'id',
+  'creationTimestamp',
+  'name',
+  'selfLink',
+  'fingerprint',
+  'rules',
+  'advancedOptionsConfig',
+  'error',
+]);
+
+const ALLOWED_DENY_STATUSES = new Set([403, 404, 429, 502]);
+
+const ALLOWED_NAMED_ACTIONS = new Set(['allow', 'deny', 'redirect', 'throttle', 'rate_based_ban']);
+
+const RFC1035_NAME = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/;
+
 // ── Result types ──
 
 export interface InsertResult {
@@ -110,6 +128,8 @@ export class SecurityPolicyService {
     name: string,
     body: Record<string, unknown>
   ): Promise<InsertResult> {
+    assertPolicyName(name);
+
     const description = body.description as string | undefined;
 
     if (description != null && description.length > 2048) {
@@ -152,10 +172,9 @@ export class SecurityPolicyService {
         extraFields: Object.keys(extraFields).length > 0 ? JSON.stringify(extraFields) : null,
       });
 
-      const description2 = body.description as string | undefined;
       const operation = await this.createOperation(project, 'insert', selfLink, record.id);
 
-      const policy = recordToResponse(record, description2);
+      const policy = recordToResponse(record, description);
 
       return { policy, operation };
     });
@@ -451,6 +470,17 @@ export class SecurityPolicyService {
       }
 
       const patchedRule = validateSingleRule({ ...existing, ...ruleBody });
+
+      if (
+        patchedRule.priority !== priority &&
+        existingRules.some(r => r.priority === patchedRule.priority)
+      ) {
+        throw new SecurityPolicyServiceError(
+          `Two rules cannot share priority ${patchedRule.priority}`,
+          'INVALID_ARGUMENT'
+        );
+      }
+
       const updatedRules = existingRules.map(r => (r.priority === priority ? patchedRule : r));
 
       const updated = await this.repository.updatePolicy(record.id, {
@@ -536,6 +566,33 @@ export class SecurityPolicyService {
 
 // ── Helpers ──
 
+function assertPolicyName(name: string): void {
+  if (!RFC1035_NAME.test(name)) {
+    throw new SecurityPolicyServiceError(
+      `Invalid value for field 'resource.name': '${name}'. Must be a match of regex '[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?'`,
+      'INVALID_ARGUMENT'
+    );
+  }
+}
+
+function assertRuleAction(action: string): void {
+  if (ALLOWED_NAMED_ACTIONS.has(action) || action.startsWith('redirect(')) {
+    return;
+  }
+
+  const denyMatch = /^deny\((\d+)\)$/.exec(action);
+
+  if (denyMatch != null) {
+    const code = Number.parseInt(denyMatch[1] ?? '', 10);
+
+    if (ALLOWED_DENY_STATUSES.has(code)) {
+      return;
+    }
+  }
+
+  throw new SecurityPolicyServiceError(`Invalid rule action: ${action}`, 'INVALID_ARGUMENT');
+}
+
 function generateId(): string {
   return String(Math.floor(Math.random() * 1e15) + Date.now());
 }
@@ -601,6 +658,8 @@ function validateSingleRule(raw: Record<string, unknown>): SecurityPolicyRule {
   if (action == null || action === '') {
     throw new SecurityPolicyServiceError('Rule action is required', 'INVALID_ARGUMENT');
   }
+
+  assertRuleAction(action);
 
   const description = raw.description as string | undefined;
 
@@ -798,9 +857,11 @@ function extractExtraFields(body: Record<string, unknown>): Record<string, unkno
   const extra: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(body)) {
-    if (!KNOWN_POLICY_FIELDS.has(key)) {
-      extra[key] = value;
+    if (KNOWN_POLICY_FIELDS.has(key) || RESERVED_RESPONSE_FIELDS.has(key)) {
+      continue;
     }
+
+    extra[key] = value;
   }
 
   return extra;
@@ -828,7 +889,12 @@ function recordToResponse(
 
   delete extra.description;
 
+  for (const key of RESERVED_RESPONSE_FIELDS) {
+    delete extra[key];
+  }
+
   const response: SecurityPolicyResponse = {
+    ...extra,
     kind: record.kind,
     id: extractPolicyId(record),
     creationTimestamp: record.creationTimestamp,
@@ -836,7 +902,6 @@ function recordToResponse(
     selfLink: record.selfLink,
     fingerprint: record.fingerprint,
     rules: rules as SecurityPolicyRuleResponse[],
-    ...extra,
   };
 
   if (desc != null) {
