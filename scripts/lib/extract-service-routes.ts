@@ -6,6 +6,7 @@ import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
+import { ComputeService } from '@/services/compute/index.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
 import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
@@ -31,6 +32,7 @@ type ServiceFactory = (storage: StorageManager, logger: Logger) => EmulatedServi
 
 const SERVICE_FACTORIES: Record<string, ServiceFactory> = {
   alloydb: (storage, logger) => new AlloyDbService(storage, logger),
+  compute: (storage, logger) => new ComputeService(storage, logger),
   'cloud-kms': (storage, logger) => new CloudKmsService(storage, logger),
   'cloud-scheduler': (storage, logger) => new SchedulerService(storage, logger),
   'cloud-sql': (storage, logger) => new CloudSqlService(storage, logger),

@@ -49,6 +49,11 @@
       "status": "experimental",
       "dataPlane": "Emulated in-process",
       "summary": "Workflow CRUD, revisions, and LRO operations."
+    },
+    "compute": {
+      "status": "experimental",
+      "dataPlane": "Emulated in-process",
+      "summary": "Cloud Armor security policies and global operations with an in-process CEL evaluation listener."
     }
   }
 }
