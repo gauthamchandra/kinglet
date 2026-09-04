@@ -55,8 +55,8 @@ export function parseDiscoveryDocument(json: string): DiscoveryDocument {
   });
 
   // Discovery JSON key order is not stable across fetches; sort so regenerated docs
-  // do not churn. Byte comparison rather than localeCompare keeps it locale-independent.
-  methods.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // do not churn.
+  methods.sort((a, b) => compareMethodIds(a.id, b.id));
 
   return {
     title: doc.title ?? 'Unknown API',
@@ -82,6 +82,38 @@ export function partitionDiscoveryMethods(methods: readonly DiscoveryMethod[]): 
   }
 
   return { comparable, iamDeferred };
+}
+
+/**
+ * Order by resource path first, then method name, so a resource's own methods stay
+ * together instead of being split apart by an alphabetically earlier child resource.
+ * A parent resource sorts before its children. Comparison is byte-wise rather than
+ * localeCompare so ordering does not depend on the runner's ICU locale.
+ */
+function compareMethodIds(a: string, b: string): number {
+  const aSegments = a.split('.');
+  const bSegments = b.split('.');
+  const aResource = aSegments.slice(0, -1);
+  const bResource = bSegments.slice(0, -1);
+  const shared = Math.min(aResource.length, bResource.length);
+
+  for (let i = 0; i < shared; i++) {
+    const aPart = aResource[i] ?? '';
+    const bPart = bResource[i] ?? '';
+
+    if (aPart !== bPart) {
+      return aPart < bPart ? -1 : 1;
+    }
+  }
+
+  if (aResource.length !== bResource.length) {
+    return aResource.length - bResource.length;
+  }
+
+  const aMethod = aSegments[aSegments.length - 1] ?? '';
+  const bMethod = bSegments[bSegments.length - 1] ?? '';
+
+  return aMethod < bMethod ? -1 : aMethod > bMethod ? 1 : 0;
 }
 
 function walkResources(

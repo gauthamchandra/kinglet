@@ -12,6 +12,7 @@ Job CRUD, pause/resume, and cron execution.
 ## Implemented endpoints
 
 - `GET` `v1/{+name}` — `projects.locations.get`
+- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `POST` `v1/{+parent}/jobs` — `projects.locations.jobs.create`
 - `DELETE` `v1/{+name}` — `projects.locations.jobs.delete`
 - `GET` `v1/{+name}` — `projects.locations.jobs.get`
@@ -20,16 +21,15 @@ Job CRUD, pause/resume, and cron execution.
 - `POST` `v1/{+name}:pause` — `projects.locations.jobs.pause`
 - `POST` `v1/{+name}:resume` — `projects.locations.jobs.resume`
 - `POST` `v1/{+name}:run` — `projects.locations.jobs.run`
-- `GET` `v1/{+name}/locations` — `projects.locations.list`
 
 ## Missing endpoints
 
 - `GET` `v1/{+name}` — `projects.locations.getCmekConfig`
+- `PATCH` `v1/{+name}` — `projects.locations.updateCmekConfig`
 - `POST` `v1/{+name}:cancel` — `projects.locations.operations.cancel`
 - `DELETE` `v1/{+name}` — `projects.locations.operations.delete`
 - `GET` `v1/{+name}` — `projects.locations.operations.get`
 - `GET` `v1/{+name}/operations` — `projects.locations.operations.list`
-- `PATCH` `v1/{+name}` — `projects.locations.updateCmekConfig`
 
 ## IAM endpoints (deferred)
 

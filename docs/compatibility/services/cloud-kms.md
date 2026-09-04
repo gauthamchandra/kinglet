@@ -13,8 +13,17 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 
 - `POST` `v1/{+location}:generateRandomBytes` — `projects.locations.generateRandomBytes`
 - `GET` `v1/{+name}` — `projects.locations.get`
+- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `POST` `v1/{+parent}/keyRings` — `projects.locations.keyRings.create`
+- `GET` `v1/{+name}` — `projects.locations.keyRings.get`
+- `GET` `v1/{+parent}/keyRings` — `projects.locations.keyRings.list`
 - `POST` `v1/{+parent}/cryptoKeys` — `projects.locations.keyRings.cryptoKeys.create`
+- `POST` `v1/{+name}:decrypt` — `projects.locations.keyRings.cryptoKeys.decrypt`
+- `POST` `v1/{+name}:encrypt` — `projects.locations.keyRings.cryptoKeys.encrypt`
+- `GET` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.get`
+- `GET` `v1/{+parent}/cryptoKeys` — `projects.locations.keyRings.cryptoKeys.list`
+- `PATCH` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.patch`
+- `POST` `v1/{+name}:updatePrimaryVersion` — `projects.locations.keyRings.cryptoKeys.updatePrimaryVersion`
 - `POST` `v1/{+name}:asymmetricDecrypt` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.asymmetricDecrypt`
 - `POST` `v1/{+name}:asymmetricSign` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.asymmetricSign`
 - `POST` `v1/{+parent}/cryptoKeyVersions` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.create`
@@ -26,15 +35,6 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 - `POST` `v1/{+name}:macVerify` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.macVerify`
 - `PATCH` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.patch`
 - `POST` `v1/{+name}:restore` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.restore`
-- `POST` `v1/{+name}:decrypt` — `projects.locations.keyRings.cryptoKeys.decrypt`
-- `POST` `v1/{+name}:encrypt` — `projects.locations.keyRings.cryptoKeys.encrypt`
-- `GET` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.get`
-- `GET` `v1/{+parent}/cryptoKeys` — `projects.locations.keyRings.cryptoKeys.list`
-- `PATCH` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.patch`
-- `POST` `v1/{+name}:updatePrimaryVersion` — `projects.locations.keyRings.cryptoKeys.updatePrimaryVersion`
-- `GET` `v1/{+name}` — `projects.locations.keyRings.get`
-- `GET` `v1/{+parent}/keyRings` — `projects.locations.keyRings.list`
-- `GET` `v1/{+name}/locations` — `projects.locations.list`
 
 ## Missing endpoints
 
@@ -47,15 +47,23 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 - `PATCH` `v1/{+name}` — `organizations.updateKajPolicyConfig`
 - `GET` `v1/{+name}` — `projects.getAutokeyConfig`
 - `GET` `v1/{+name}` — `projects.getKajPolicyConfig`
+- `GET` `v1/{+parent}:showEffectiveAutokeyConfig` — `projects.showEffectiveAutokeyConfig`
+- `GET` `v1/{+project}:showEffectiveKeyAccessJustificationsEnrollmentConfig` — `projects.showEffectiveKeyAccessJustificationsEnrollmentConfig`
+- `GET` `v1/{+project}:showEffectiveKeyAccessJustificationsPolicyConfig` — `projects.showEffectiveKeyAccessJustificationsPolicyConfig`
+- `PATCH` `v1/{+name}` — `projects.updateAutokeyConfig`
+- `PATCH` `v1/{+name}` — `projects.updateKajPolicyConfig`
+- `GET` `v1/{+name}` — `projects.locations.getEkmConfig`
+- `PATCH` `v1/{+name}` — `projects.locations.updateEkmConfig`
 - `POST` `v1/{+parent}/ekmConnections` — `projects.locations.ekmConnections.create`
 - `GET` `v1/{+name}` — `projects.locations.ekmConnections.get`
 - `GET` `v1/{+parent}/ekmConnections` — `projects.locations.ekmConnections.list`
 - `PATCH` `v1/{+name}` — `projects.locations.ekmConnections.patch`
 - `GET` `v1/{+name}:verifyConnectivity` — `projects.locations.ekmConnections.verifyConnectivity`
-- `GET` `v1/{+name}` — `projects.locations.getEkmConfig`
 - `POST` `v1/{+parent}/keyHandles` — `projects.locations.keyHandles.create`
 - `GET` `v1/{+name}` — `projects.locations.keyHandles.get`
 - `GET` `v1/{+parent}/keyHandles` — `projects.locations.keyHandles.list`
+- `DELETE` `v1/{+name}` — `projects.locations.keyRings.delete`
+- `DELETE` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.delete`
 - `POST` `v1/{+name}:decapsulate` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.decapsulate`
 - `DELETE` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.delete`
 - `GET` `v1/{+name}:exportTrustedKeyWrappedCryptoKeyVersion` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.exportTrustedKeyWrappedCryptoKeyVersion`
@@ -63,8 +71,6 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 - `POST` `v1/{+parent}/cryptoKeyVersions:importTrustedKeyWrappedCryptoKeyVersion` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.importTrustedKeyWrappedCryptoKeyVersion`
 - `POST` `v1/{+name}:rawDecrypt` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.rawDecrypt`
 - `POST` `v1/{+name}:rawEncrypt` — `projects.locations.keyRings.cryptoKeys.cryptoKeyVersions.rawEncrypt`
-- `DELETE` `v1/{+name}` — `projects.locations.keyRings.cryptoKeys.delete`
-- `DELETE` `v1/{+name}` — `projects.locations.keyRings.delete`
 - `POST` `v1/{+parent}/importJobs` — `projects.locations.keyRings.importJobs.create`
 - `GET` `v1/{+name}` — `projects.locations.keyRings.importJobs.get`
 - `GET` `v1/{+parent}/importJobs` — `projects.locations.keyRings.importJobs.list`
@@ -80,12 +86,6 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 - `POST` `v1/{+name}:execute` — `projects.locations.singleTenantHsmInstances.proposals.execute`
 - `GET` `v1/{+name}` — `projects.locations.singleTenantHsmInstances.proposals.get`
 - `GET` `v1/{+parent}/proposals` — `projects.locations.singleTenantHsmInstances.proposals.list`
-- `PATCH` `v1/{+name}` — `projects.locations.updateEkmConfig`
-- `GET` `v1/{+parent}:showEffectiveAutokeyConfig` — `projects.showEffectiveAutokeyConfig`
-- `GET` `v1/{+project}:showEffectiveKeyAccessJustificationsEnrollmentConfig` — `projects.showEffectiveKeyAccessJustificationsEnrollmentConfig`
-- `GET` `v1/{+project}:showEffectiveKeyAccessJustificationsPolicyConfig` — `projects.showEffectiveKeyAccessJustificationsPolicyConfig`
-- `PATCH` `v1/{+name}` — `projects.updateAutokeyConfig`
-- `PATCH` `v1/{+name}` — `projects.updateKajPolicyConfig`
 
 ## IAM endpoints (deferred)
 
@@ -95,15 +95,15 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 - `GET` `v1/{+resource}:getIamPolicy` — `projects.locations.ekmConnections.getIamPolicy`
 - `POST` `v1/{+resource}:setIamPolicy` — `projects.locations.ekmConnections.setIamPolicy`
 - `POST` `v1/{+resource}:testIamPermissions` — `projects.locations.ekmConnections.testIamPermissions`
+- `GET` `v1/{+resource}:getIamPolicy` — `projects.locations.keyRings.getIamPolicy`
+- `POST` `v1/{+resource}:setIamPolicy` — `projects.locations.keyRings.setIamPolicy`
+- `POST` `v1/{+resource}:testIamPermissions` — `projects.locations.keyRings.testIamPermissions`
 - `GET` `v1/{+resource}:getIamPolicy` — `projects.locations.keyRings.cryptoKeys.getIamPolicy`
 - `POST` `v1/{+resource}:setIamPolicy` — `projects.locations.keyRings.cryptoKeys.setIamPolicy`
 - `POST` `v1/{+resource}:testIamPermissions` — `projects.locations.keyRings.cryptoKeys.testIamPermissions`
-- `GET` `v1/{+resource}:getIamPolicy` — `projects.locations.keyRings.getIamPolicy`
 - `GET` `v1/{+resource}:getIamPolicy` — `projects.locations.keyRings.importJobs.getIamPolicy`
 - `POST` `v1/{+resource}:setIamPolicy` — `projects.locations.keyRings.importJobs.setIamPolicy`
 - `POST` `v1/{+resource}:testIamPermissions` — `projects.locations.keyRings.importJobs.testIamPermissions`
-- `POST` `v1/{+resource}:setIamPolicy` — `projects.locations.keyRings.setIamPolicy`
-- `POST` `v1/{+resource}:testIamPermissions` — `projects.locations.keyRings.testIamPermissions`
 
 ## API reference
 

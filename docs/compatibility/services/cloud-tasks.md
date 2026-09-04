@@ -14,6 +14,7 @@ Queue lifecycle, task CRUD, and HTTP dispatch.
 - `GET` `v2/{+name}` — `projects.locations.get`
 - `GET` `v2/{+name}` — `projects.locations.getCmekConfig`
 - `GET` `v2/{+name}/locations` — `projects.locations.list`
+- `PATCH` `v2/{+name}` — `projects.locations.updateCmekConfig`
 - `POST` `v2/{+parent}/queues` — `projects.locations.queues.create`
 - `DELETE` `v2/{+name}` — `projects.locations.queues.delete`
 - `GET` `v2/{+name}` — `projects.locations.queues.get`
@@ -28,7 +29,6 @@ Queue lifecycle, task CRUD, and HTTP dispatch.
 - `GET` `v2/{+name}` — `projects.locations.queues.tasks.get`
 - `GET` `v2/{+parent}/tasks` — `projects.locations.queues.tasks.list`
 - `POST` `v2/{+name}:run` — `projects.locations.queues.tasks.run`
-- `PATCH` `v2/{+name}` — `projects.locations.updateCmekConfig`
 
 ## Missing endpoints
 

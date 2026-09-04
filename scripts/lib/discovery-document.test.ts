@@ -43,8 +43,44 @@ describe('parseDiscoveryDocument', () => {
     expect(doc.version).toBe('v1');
     expect(doc.methods).toHaveLength(2);
     expect(doc.methods.map(method => method.id)).toEqual([
-      'projects.locations.jobs.run',
       'projects.locations.list',
+      'projects.locations.jobs.run',
+    ]);
+  });
+
+  test('groups a resource own methods before its child resources', () => {
+    const doc = parseDiscoveryDocument(
+      JSON.stringify({
+        resources: {
+          projects: {
+            resources: {
+              locations: {
+                methods: {
+                  updateCmekConfig: { httpMethod: 'PATCH', path: 'v2/{+name}' },
+                  get: { httpMethod: 'GET', path: 'v2/{+name}' },
+                },
+                resources: {
+                  queues: {
+                    methods: { create: { httpMethod: 'POST', path: 'v2/{+parent}/queues' } },
+                    resources: {
+                      tasks: {
+                        methods: { run: { httpMethod: 'POST', path: 'v2/{+name}:run' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      })
+    );
+
+    expect(doc.methods.map(method => method.id)).toEqual([
+      'projects.locations.get',
+      'projects.locations.updateCmekConfig',
+      'projects.locations.queues.create',
+      'projects.locations.queues.tasks.run',
     ]);
   });
 
