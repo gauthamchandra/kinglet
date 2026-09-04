@@ -204,12 +204,7 @@ async function main(): Promise<void> {
         router.addRoute(route);
       }
 
-      const computeStart = computeService.start();
-
-      logger.info('Compute (Cloud Armor) service enabled', {
-        listenerStarted: computeStart.listenerStarted,
-        listenerPort: computeStart.listenerPort,
-      });
+      logger.info('Compute (Cloud Armor) control plane enabled');
     }
 
     // Workflows, Memorystore and AlloyDB all expose `/operations` routes of the same
@@ -277,6 +272,18 @@ async function main(): Promise<void> {
     });
 
     logger.info(`kinglet started on port ${server.port}`);
+
+    // Bind the Armor listener after the control-plane HTTP server so a
+    // COMPUTE_LISTENER_PORT that matches HTTP_PORT cannot steal the port and
+    // take the whole emulator down. start() also skips that reserved port.
+    if (computeService != null) {
+      const computeStart = computeService.start(server.port);
+
+      logger.info('Compute (Cloud Armor) listener', {
+        listenerStarted: computeStart.listenerStarted,
+        listenerPort: computeStart.listenerPort,
+      });
+    }
   } catch (error) {
     logger.error('Failed to start kinglet:', error);
 
@@ -287,6 +294,7 @@ async function main(): Promise<void> {
     // retry and make its ports look occupied.
     await memorystoreService?.stop();
     await cloudSqlService?.stop();
+    await computeService?.stop();
     process.exit(1);
   }
 }

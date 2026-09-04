@@ -51,6 +51,19 @@ describe('ComputeService', () => {
     expect(service.getRoutes().length).toBeGreaterThan(0);
   });
 
+  test('start leaves the control plane up when the listener port matches HTTP', async () => {
+    const occupied = new ComputeService(storage, logger, { listenerPort: 8765 });
+
+    await occupied.initialize();
+
+    const started = occupied.start(8765);
+
+    expect(started.listenerStarted).toBe(false);
+    expect(occupied.getRoutes().length).toBeGreaterThan(0);
+
+    await occupied.stop();
+  });
+
   test('start leaves the control plane up when the listener port is taken', async () => {
     const blocker = Bun.serve({
       hostname: '127.0.0.1',

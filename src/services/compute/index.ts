@@ -53,7 +53,7 @@ export class ComputeService {
     return this.handlers.getRoutes();
   }
 
-  start(): ComputeStartResult {
+  start(reservedHttpPort?: number): ComputeStartResult {
     if (this.policyService == null) {
       throw new Error('ComputeService not initialized. Call initialize() first.');
     }
@@ -61,6 +61,14 @@ export class ComputeService {
     const listenerPort = this.options.listenerPort ?? 8787;
     const defaultPolicyName = this.options.defaultPolicyName;
     const policyService = this.policyService;
+
+    if (reservedHttpPort != null && listenerPort === reservedHttpPort) {
+      this.logger.warn(
+        `Cloud Armor listener port ${listenerPort} is already used by the HTTP server; Compute control plane is still available`
+      );
+
+      return { listenerStarted: false };
+    }
 
     try {
       this.listenerServer = startArmorListener({
