@@ -261,8 +261,11 @@ export interface CacheStats {
 /**
  * Storage provider configuration
  */
+/** The storage backends kinglet can run on. */
+export type StorageType = 'sqlite' | 'memory' | 'hybrid';
+
 export interface StorageConfig {
-  readonly type: 'sqlite' | 'memory' | 'hybrid';
+  readonly type: StorageType;
   readonly database?: {
     readonly path?: string;
     readonly memory?: boolean;

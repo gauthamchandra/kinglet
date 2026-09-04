@@ -4,12 +4,59 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { CloudSqlDataPlane } from './data-plane/data-plane-manager.ts';
 import { CloudSqlRepository } from './repository.ts';
 import { SqlAdminError, SqlAdminService } from './service.ts';
+
+/**
+ * Records what the admin service asks of the data plane, so the calls can be
+ * asserted without booting wasm Postgres or binding ports.
+ */
+class RecordingDataPlane implements CloudSqlDataPlane {
+  readonly calls: string[] = [];
+  startFailure: Error | null = null;
+
+  async startInstance(project: string, instance: string, databases: string[]): Promise<number> {
+    this.calls.push(`start:${project}/${instance}:${databases.join(',')}`);
+
+    if (this.startFailure) throw this.startFailure;
+
+    return 5432;
+  }
+
+  async stopInstance(project: string, instance: string): Promise<void> {
+    this.calls.push(`stop:${project}/${instance}`);
+  }
+
+  async dropInstance(project: string, instance: string): Promise<void> {
+    this.calls.push(`drop:${project}/${instance}`);
+  }
+
+  async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {
+    this.calls.push(`restart:${project}/${instance}:${databases.join(',')}`);
+  }
+
+  async openDatabase(project: string, instance: string, database: string): Promise<void> {
+    this.calls.push(`openDatabase:${project}/${instance}/${database}`);
+  }
+
+  async dropDatabase(project: string, instance: string, database: string): Promise<void> {
+    this.calls.push(`dropDatabase:${project}/${instance}/${database}`);
+  }
+
+  async stopAll(): Promise<void> {
+    this.calls.push('stopAll');
+  }
+
+  getPort(): number | null {
+    return 5432;
+  }
+}
 
 describe('SqlAdminService', () => {
   let repo: CloudSqlRepository;
   let service: SqlAdminService;
+  let dataPlane: RecordingDataPlane;
 
   beforeEach(async () => {
     const storage = new StorageManager();
@@ -18,7 +65,64 @@ describe('SqlAdminService', () => {
     repo = new CloudSqlRepository(storage);
     await repo.initialize();
 
-    service = new SqlAdminService(repo);
+    dataPlane = new RecordingDataPlane();
+    service = new SqlAdminService(repo, dataPlane);
+  });
+
+  describe('data plane', () => {
+    test('starts an instance endpoint with its default database on create', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+
+      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres']);
+    });
+
+    test('deletes the instance data when the instance is deleted', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.deleteInstance('p1', 'db-a');
+
+      expect(dataPlane.calls).toContain('drop:p1/db-a');
+    });
+
+    test('restarts the endpoint with every database the instance has', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.createDatabase('p1', 'db-a', { name: 'app' });
+      await service.restartInstance('p1', 'db-a');
+
+      expect(dataPlane.calls).toContain('restart:p1/db-a:app,postgres');
+    });
+
+    test('opens and drops a database alongside its control-plane record', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.createDatabase('p1', 'db-a', { name: 'app' });
+      await service.deleteDatabase('p1', 'db-a', 'app');
+
+      expect(dataPlane.calls).toContain('openDatabase:p1/db-a/app');
+      expect(dataPlane.calls).toContain('dropDatabase:p1/db-a/app');
+    });
+
+    test('leaves no instance behind when the data plane fails to start', async () => {
+      dataPlane.startFailure = new Error('no free ports');
+
+      const create = service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+
+      await expect(create).rejects.toBeInstanceOf(SqlAdminError);
+      await expect(create).rejects.toHaveProperty('code', 'INTERNAL');
+      await expect(create).rejects.toThrow('no free ports');
+
+      expect(await repo.getInstance('p1', 'db-a')).toBeNull();
+      expect(await repo.listDatabases('p1', 'db-a')).toEqual([]);
+      expect(await repo.listUsers('p1', 'db-a')).toEqual([]);
+    });
+
+    test('runs without a data plane when none is injected', async () => {
+      const controlPlaneOnly = new SqlAdminService(repo);
+      const operation = await controlPlaneOnly.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+      });
+
+      expect(operation.status).toBe('DONE');
+    });
   });
 
   describe('createInstance', () => {

@@ -92,6 +92,24 @@ describe('CloudSqlRepository', () => {
       }
     });
 
+    test('listAllInstances spans every project', async () => {
+      await repo.createInstance(makeInstanceData({ name: 'b-inst' }));
+      await repo.createInstance(makeInstanceData({ name: 'a-inst' }));
+      await repo.createInstance(makeInstanceData({ project: 'other-project', name: 'c-inst' }));
+
+      const all = await repo.listAllInstances();
+
+      expect(all.map(instance => `${instance.project}/${instance.name}`)).toEqual([
+        'other-project/c-inst',
+        'test-project/a-inst',
+        'test-project/b-inst',
+      ]);
+    });
+
+    test('listAllInstances is empty before anything is created', async () => {
+      expect(await repo.listAllInstances()).toEqual([]);
+    });
+
     test('deleteInstance cascades database and user records', async () => {
       await repo.createInstance(makeInstanceData());
       await repo.createDatabase({

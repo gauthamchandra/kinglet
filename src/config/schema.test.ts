@@ -255,6 +255,113 @@ describe('Configuration Schema', () => {
     });
   });
 
+  describe('Cloud SQL configuration', () => {
+    test('ConfigSchema applies cloudsql data-plane defaults when the block is omitted', () => {
+      const config = ConfigSchema.parse({
+        server: {},
+        storage: {},
+        auth: {},
+        services: {
+          pubsub: {},
+          scheduler: {},
+          tasks: {},
+          secrets: {},
+          storage: {},
+          workflows: {},
+          kms: {},
+        },
+        logging: {},
+      });
+
+      expect(config.services.cloudsql.enabled).toBe(true);
+      expect(config.services.cloudsql.dataPlane.enabled).toBe(true);
+      expect(config.services.cloudsql.dataPlane.portRangeStart).toBe(5432);
+      expect(config.services.cloudsql.dataPlane.portRangeEnd).toBe(5531);
+    });
+
+    test('ConfigSchema accepts an explicit cloudsql data plane configuration', () => {
+      const config = ConfigSchema.parse({
+        server: {},
+        storage: {},
+        auth: {},
+        services: {
+          pubsub: {},
+          scheduler: {},
+          tasks: {},
+          secrets: {},
+          storage: {},
+          workflows: {},
+          kms: {},
+          cloudsql: {
+            enabled: true,
+            dataPlane: { enabled: false, portRangeStart: 15432, portRangeEnd: 15532 },
+          },
+        },
+        logging: {},
+      });
+
+      expect(config.services.cloudsql.dataPlane.enabled).toBe(false);
+      expect(config.services.cloudsql.dataPlane.portRangeStart).toBe(15432);
+      expect(config.services.cloudsql.dataPlane.portRangeEnd).toBe(15532);
+    });
+
+    test('ConfigSchema rejects a cloudsql port range where portRangeStart exceeds portRangeEnd', () => {
+      expect(() => {
+        ConfigSchema.parse({
+          server: {},
+          storage: {},
+          auth: {},
+          services: {
+            pubsub: {},
+            scheduler: {},
+            tasks: {},
+            secrets: {},
+            storage: {},
+            workflows: {},
+            kms: {},
+            cloudsql: {
+              enabled: true,
+              dataPlane: { enabled: true, portRangeStart: 5532, portRangeEnd: 5432 },
+            },
+          },
+          logging: {},
+        });
+      }).toThrow();
+    });
+
+    test('EnvConfigSchema parses the cloudsql env vars', () => {
+      const env = EnvConfigSchema.parse({
+        ENABLE_CLOUDSQL: 'true',
+        CLOUDSQL_DATA_PLANE: 'false',
+        CLOUDSQL_PORT_RANGE_START: '15432',
+        CLOUDSQL_PORT_RANGE_END: '15532',
+      });
+
+      expect(env.ENABLE_CLOUDSQL).toBe(true);
+      expect(env.CLOUDSQL_DATA_PLANE).toBe(false);
+      expect(env.CLOUDSQL_PORT_RANGE_START).toBe(15432);
+      expect(env.CLOUDSQL_PORT_RANGE_END).toBe(15532);
+    });
+
+    test('mapEnvToConfig maps the cloudsql data-plane env vars into a nested dataPlane object', () => {
+      const config = mapEnvToConfig({
+        CLOUDSQL_DATA_PLANE: false,
+        CLOUDSQL_PORT_RANGE_START: 15432,
+        CLOUDSQL_PORT_RANGE_END: 15532,
+      });
+
+      expect(config.services?.cloudsql?.dataPlane?.enabled).toBe(false);
+      expect(config.services?.cloudsql?.dataPlane?.portRangeStart).toBe(15432);
+      expect(config.services?.cloudsql?.dataPlane?.portRangeEnd).toBe(15532);
+    });
+
+    test('mapEnvToConfig maps ENABLE_CLOUDSQL as an individual service flag', () => {
+      const config = mapEnvToConfig({ ENABLE_CLOUDSQL: true });
+
+      expect(config.services?.cloudsql?.enabled).toBe(true);
+    });
+  });
+
   describe('EnvConfigSchema', () => {
     test('should parse environment variables correctly', () => {
       const env = EnvConfigSchema.parse({

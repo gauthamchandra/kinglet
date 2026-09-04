@@ -1,0 +1,690 @@
+/**
+ * A Postgres frontend/backend protocol listener in front of PGlite.
+ *
+ * <p>One server listens on one TCP port for one emulated instance and routes
+ * each connection to a database on that instance, so an instance's endpoint
+ * behaves like a real Postgres endpoint: a connection string picks the
+ * database, and the emulator's user records decide whether the connection is
+ * allowed.
+ *
+ * <p>This is deliberately hand-rolled rather than delegated to
+ * `@electric-sql/pglite-socket` or `pg-gateway`. The former serves exactly one
+ * PGlite on a port with no hook for authentication or for routing by database
+ * name, and keeps its multiplexer private; the latter is pre-1.0 and has no
+ * multiplexer at all. Both would leave the two things this server exists to do
+ * unimplemented, in exchange for a dependency.
+ *
+ * <p>Only the startup exchange is interpreted. Once a connection is
+ * authenticated every byte is passed through to PGlite untouched, so the
+ * emulator inherits the real Postgres protocol — extended query, COPY,
+ * NOTIFY — rather than reimplementing it.
+ *
+ * <p>Nothing here is Cloud-SQL-specific, so AlloyDB can reuse it.
+ */
+
+import type { Socket, TCPSocketListener } from 'bun';
+import {
+  buildConnectionNamespace,
+  isExtendedQueryFrame,
+  namespaceFrameNames,
+} from './extended-protocol.ts';
+import type { PGliteSessionQueue } from './pglite-session-queue.ts';
+
+const PROTOCOL_VERSION_3_0 = 196608;
+const SSL_REQUEST_CODE = 80877103;
+const CANCEL_REQUEST_CODE = 80877102;
+const GSSENC_REQUEST_CODE = 80877104;
+
+// Postgres caps a startup packet at 10000 bytes. Enforcing it stops a client
+// that sends a bogus length from making this server buffer without limit.
+const MAX_STARTUP_MESSAGE_LENGTH = 10000;
+
+// Post-authentication frames have no equivalent cap in the protocol: the
+// length is a signed 32-bit integer, so a client could declare a 2 GiB frame,
+// dribble the first few bytes, and leave this server holding a buffer that
+// only grows. 64 MiB is far above any statement, bind, or COPY chunk a client
+// realistically sends to a wasm Postgres, and turns that into a clean protocol
+// error instead of unbounded memory growth.
+const MAX_MESSAGE_LENGTH = 64 * 1024 * 1024;
+
+const AUTHENTICATION_CLEARTEXT_PASSWORD = 3;
+
+const PASSWORD_MESSAGE_TAG = 0x70; // 'p'
+const TERMINATE_MESSAGE_TAG = 0x58; // 'X'
+
+// Bounds a client that opens an extended-query sequence and never closes it,
+// so the pending batch cannot grow without limit any more than a single frame
+// can.
+const MAX_PENDING_BATCH_LENGTH = MAX_MESSAGE_LENGTH;
+
+// Reading stops once this much *consumable* input is queued and resumes when
+// it drains. Frames arrive faster than a single shared backend can run them —
+// a client can pipeline while an earlier statement is still executing — so
+// without backpressure the unparsed buffer grows for as long as the client
+// keeps writing, however small each individual frame is.
+//
+// Deliberately below MAX_MESSAGE_LENGTH, which is why "consumable" matters: a
+// single legitimate frame may be larger than this threshold, and pausing while
+// it is still arriving would stall the connection forever — the bytes that
+// would let it be consumed are exactly the ones that would no longer be read.
+const READ_PAUSE_THRESHOLD = 8 * 1024 * 1024;
+
+// SQLSTATEs the startup exchange can end in, all of them classes a Postgres
+// client already knows how to report.
+export const SQLSTATE_INVALID_CATALOG_NAME = '3D000';
+export const SQLSTATE_INVALID_AUTHORIZATION_SPECIFICATION = '28000';
+export const SQLSTATE_INVALID_PASSWORD = '28P01';
+export const SQLSTATE_PROTOCOL_VIOLATION = '08P01';
+const SQLSTATE_INTERNAL_ERROR = 'XX000';
+
+export interface StartupMessage {
+  kind: 'startup';
+  protocolVersion: number;
+  parameters: Record<string, string>;
+}
+
+export type ParsedStartupPacket =
+  | StartupMessage
+  | { kind: 'ssl-request' }
+  | { kind: 'gssenc-request' }
+  | { kind: 'cancel-request' };
+
+export interface ResolvedConnection {
+  queue: PGliteSessionQueue;
+  /** The user's stored password; empty means the instance accepts them without one. */
+  password: string;
+}
+
+export interface ConnectionRejection {
+  sqlState: string;
+  message: string;
+}
+
+export type ConnectionResolution =
+  | { allowed: true; connection: ResolvedConnection }
+  | { allowed: false; rejection: ConnectionRejection };
+
+export type ResolveConnection = (
+  instanceKey: string,
+  database: string,
+  user: string
+) => Promise<ConnectionResolution>;
+
+export interface PostgresWireServerOptions {
+  /** Identifies the emulated instance this server fronts, passed to `resolveConnection`. */
+  instanceKey: string;
+  port: number;
+  resolveConnection: ResolveConnection;
+}
+
+/** Frame a backend message: a one-byte tag, a length covering itself, a body. */
+function buildBackendMessage(tag: string, body: Uint8Array): Uint8Array {
+  const message = new Uint8Array(5 + body.length);
+
+  message[0] = tag.charCodeAt(0);
+  new DataView(message.buffer).setInt32(1, 4 + body.length);
+  message.set(body, 5);
+
+  return message;
+}
+
+export function buildErrorResponse(sqlState: string, message: string): Uint8Array {
+  const encoder = new TextEncoder();
+  const fields = [`SFATAL`, `VFATAL`, `C${sqlState}`, `M${message}`];
+  const encoded = fields.map(field => encoder.encode(field));
+  const bodyLength = encoded.reduce((total, field) => total + field.length + 1, 0) + 1;
+  const body = new Uint8Array(bodyLength);
+
+  let offset = 0;
+
+  for (const field of encoded) {
+    body.set(field, offset);
+    offset += field.length + 1; // the trailing NUL is already zero
+  }
+
+  return buildBackendMessage('E', body);
+}
+
+function buildAuthenticationRequest(kind: number): Uint8Array {
+  const body = new Uint8Array(4);
+
+  new DataView(body.buffer).setInt32(0, kind);
+
+  return buildBackendMessage('R', body);
+}
+
+/**
+ * Parse a startup packet: the only frame in the protocol with no type byte,
+ * distinguished instead by a magic version code.
+ */
+export function parseStartupPacket(packet: Uint8Array): ParsedStartupPacket {
+  const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
+
+  if (packet.length < 8) {
+    throw new Error('Startup packet is shorter than its fixed header');
+  }
+
+  const code = view.getInt32(4);
+
+  if (code === SSL_REQUEST_CODE) return { kind: 'ssl-request' };
+  if (code === GSSENC_REQUEST_CODE) return { kind: 'gssenc-request' };
+  if (code === CANCEL_REQUEST_CODE) return { kind: 'cancel-request' };
+
+  const parameters: Record<string, string> = {};
+  const decoder = new TextDecoder();
+
+  let offset = 8;
+
+  // Key/value C-strings until the empty key that terminates the list.
+  while (offset < packet.length && packet[offset] !== 0) {
+    const keyEnd = packet.indexOf(0, offset);
+
+    if (keyEnd < 0) throw new Error('Unterminated parameter name in startup packet');
+
+    const key = decoder.decode(packet.subarray(offset, keyEnd));
+    const valueEnd = packet.indexOf(0, keyEnd + 1);
+
+    if (valueEnd < 0) throw new Error('Unterminated parameter value in startup packet');
+
+    parameters[key] = decoder.decode(packet.subarray(keyEnd + 1, valueEnd));
+    offset = valueEnd + 1;
+  }
+
+  return { kind: 'startup', protocolVersion: code, parameters };
+}
+
+type ConnectionPhase = 'startup' | 'password' | 'streaming' | 'closed';
+
+interface ConnectionState {
+  id: string;
+  /** Prefix that keeps this connection's prepared statements and portals its own. */
+  namespace: string;
+  phase: ConnectionPhase;
+  buffer: Uint8Array;
+  /**
+   * Extended-query frames received but not yet sent to the backend. They are
+   * held so the whole sequence reaches the single shared backend as one unit:
+   * the unnamed statement and portal are session state, so another
+   * connection's Parse landing mid-sequence would silently replace them.
+   */
+  pendingBatch: Uint8Array[];
+  /** Set once the client is processing a batch of frames, so reads never interleave. */
+  isProcessing: boolean;
+  /** Set while reads are paused for backpressure, so resume happens exactly once. */
+  isReadPaused: boolean;
+  user: string;
+  database: string;
+  startupPacket: Uint8Array | null;
+  connection: ResolvedConnection | null;
+}
+
+let nextConnectionId = 1;
+
+export class PostgresWireServer {
+  private options: PostgresWireServerOptions;
+  private listener: TCPSocketListener<ConnectionState> | null = null;
+
+  constructor(options: PostgresWireServerOptions) {
+    this.options = options;
+  }
+
+  listen(): void {
+    if (this.listener) return;
+
+    this.listener = Bun.listen<ConnectionState>({
+      // Bind every interface, not the loopback address clients are told to
+      // use: binding loopback would make the listener unreachable through
+      // Docker's published port mapping, which is one of the two topologies
+      // this data plane exists to serve.
+      hostname: '0.0.0.0',
+      port: this.options.port,
+      socket: {
+        open: socket => {
+          const id = `conn-${nextConnectionId++}`;
+
+          socket.data = {
+            id,
+            namespace: buildConnectionNamespace(id),
+            phase: 'startup',
+            buffer: new Uint8Array(0),
+            pendingBatch: [],
+            isProcessing: false,
+            isReadPaused: false,
+            user: '',
+            database: '',
+            startupPacket: null,
+            connection: null,
+          };
+        },
+        data: (socket, chunk) => {
+          socket.data.buffer = concat(socket.data.buffer, chunk);
+
+          // Applied before processing, because processing is asynchronous and
+          // returns immediately while the backend is busy.
+          this.applyReadBackpressure(socket);
+
+          void this.processBuffered(socket);
+        },
+        close: socket => {
+          void this.releaseConnection(socket.data);
+        },
+        error: socket => {
+          void this.releaseConnection(socket.data);
+        },
+      },
+    });
+  }
+
+  get port(): number {
+    return this.options.port;
+  }
+
+  stop(): void {
+    this.listener?.stop(true);
+    this.listener = null;
+  }
+
+  /**
+   * Consume as many complete frames as the buffer holds.
+   *
+   * <p>Guarded by `isProcessing` because handling a frame is asynchronous
+   * (resolving a database, running a query) while Bun keeps delivering `data`
+   * callbacks meanwhile. Without the guard two overlapping runs would each
+   * pull frames off the same buffer and hand PGlite a client's messages out of
+   * order.
+   */
+  private async processBuffered(socket: Socket<ConnectionState>): Promise<void> {
+    const state = socket.data;
+
+    if (state.isProcessing) return;
+
+    state.isProcessing = true;
+
+    try {
+      while (state.phase !== 'closed') {
+        const frame = this.takeNextFrame(socket);
+
+        if (!frame) return;
+
+        await this.handleFrame(socket, frame);
+      }
+    } catch (error) {
+      this.fail(
+        socket,
+        SQLSTATE_INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Unexpected data-plane error'
+      );
+    } finally {
+      state.isProcessing = false;
+
+      this.applyReadBackpressure(socket);
+    }
+  }
+
+  /**
+   * Pause or resume reading to match what the backend can keep up with.
+   *
+   * <p>Backpressure applies only while there is work already sitting in the
+   * buffer that this server could run but has not yet. A buffer full of a
+   * frame that is still arriving is the opposite situation — it needs MORE
+   * bytes to make progress — so reading has to continue there no matter how
+   * large it has grown.
+   */
+  private applyReadBackpressure(socket: Socket<ConnectionState>): void {
+    const state = socket.data;
+
+    if (state.phase === 'closed') return;
+
+    const shouldPause =
+      state.buffer.length >= READ_PAUSE_THRESHOLD && this.holdsCompleteFrame(state);
+
+    if (shouldPause && !state.isReadPaused) {
+      state.isReadPaused = true;
+      socket.pause();
+
+      return;
+    }
+
+    if (!shouldPause && state.isReadPaused) {
+      state.isReadPaused = false;
+      socket.resume();
+    }
+  }
+
+  /** Whether the buffer already holds a whole frame waiting to be run. */
+  private holdsCompleteFrame(state: ConnectionState): boolean {
+    const frameLength = this.frameLengthAtHead(state);
+
+    return frameLength != null && state.buffer.length >= frameLength;
+  }
+
+  /**
+   * Total size of the frame at the head of the buffer, or null while too few
+   * bytes have arrived to know. Does not validate the length — that belongs to
+   * `takeNextFrame`, which can report a violation to the client.
+   */
+  private frameLengthAtHead(state: ConnectionState): number | null {
+    const isStartup = state.phase === 'startup';
+    const headerSize = isStartup ? 4 : 5;
+
+    if (state.buffer.length < headerSize) return null;
+
+    const view = new DataView(
+      state.buffer.buffer,
+      state.buffer.byteOffset,
+      state.buffer.byteLength
+    );
+    const declaredLength = view.getInt32(isStartup ? 0 : 1);
+
+    return isStartup ? declaredLength : declaredLength + 1;
+  }
+
+  /**
+   * Split one complete frame off the front of the buffer, or return null while
+   * the frame is still arriving. Startup packets are length-prefixed with no
+   * tag; every later frame carries a leading tag byte.
+   */
+  private takeNextFrame(socket: Socket<ConnectionState>): Uint8Array | null {
+    const state = socket.data;
+    const isStartup = state.phase === 'startup';
+    const frameLength = this.frameLengthAtHead(state);
+
+    if (frameLength == null) return null;
+
+    const declaredLength = isStartup ? frameLength : frameLength - 1;
+    const maxLength = isStartup ? MAX_STARTUP_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
+
+    if (declaredLength < 4 || declaredLength > maxLength) {
+      this.fail(socket, SQLSTATE_PROTOCOL_VIOLATION, `Invalid message length ${declaredLength}`);
+
+      return null;
+    }
+
+    if (state.buffer.length < frameLength) return null;
+
+    const frame = state.buffer.slice(0, frameLength);
+
+    state.buffer = state.buffer.slice(frameLength);
+
+    return frame;
+  }
+
+  private async handleFrame(socket: Socket<ConnectionState>, frame: Uint8Array): Promise<void> {
+    const state = socket.data;
+
+    if (state.phase === 'startup') return this.handleStartupFrame(socket, frame);
+    if (state.phase === 'password') return this.handlePasswordFrame(socket, frame);
+
+    if (frame[0] === TERMINATE_MESSAGE_TAG) {
+      // Anything still batched was never completed by a Sync, so the backend
+      // would have discarded it anyway.
+      state.pendingBatch = [];
+      await this.releaseConnection(state);
+      socket.end();
+
+      return;
+    }
+
+    const namespaced = namespaceFrameNames(frame, state.namespace);
+
+    if (isExtendedQueryFrame(namespaced[0] ?? 0)) {
+      state.pendingBatch.push(namespaced);
+
+      if (this.pendingBatchLength(state) > MAX_PENDING_BATCH_LENGTH) {
+        this.fail(
+          socket,
+          SQLSTATE_PROTOCOL_VIOLATION,
+          'extended-query sequence exceeded the maximum size before a Sync'
+        );
+      }
+
+      return;
+    }
+
+    // Any other frame — Sync, Flush, a simple Query, COPY data — ends the
+    // sequence, so the batch and this frame go to the backend together.
+    state.pendingBatch.push(namespaced);
+
+    // Rechecked here and not only when batching: the frame that ends a
+    // sequence may itself be a whole frame's worth of bytes, so a batch just
+    // under the limit plus a maximum-sized terminator would otherwise be
+    // assembled — and then copied again by concatAll.
+    if (this.pendingBatchLength(state) > MAX_PENDING_BATCH_LENGTH) {
+      this.fail(
+        socket,
+        SQLSTATE_PROTOCOL_VIOLATION,
+        'extended-query sequence exceeded the maximum size before a Sync'
+      );
+
+      return;
+    }
+
+    const batch = state.pendingBatch;
+
+    state.pendingBatch = [];
+
+    await this.forward(socket, concatAll(batch));
+  }
+
+  private pendingBatchLength(state: ConnectionState): number {
+    return state.pendingBatch.reduce((total, frame) => total + frame.length, 0);
+  }
+
+  private async handleStartupFrame(
+    socket: Socket<ConnectionState>,
+    frame: Uint8Array
+  ): Promise<void> {
+    const state = socket.data;
+
+    let packet: ParsedStartupPacket;
+
+    try {
+      packet = parseStartupPacket(frame);
+    } catch (error) {
+      this.fail(
+        socket,
+        SQLSTATE_PROTOCOL_VIOLATION,
+        error instanceof Error ? error.message : 'Malformed startup packet'
+      );
+
+      return;
+    }
+
+    // No TLS: refusing negotiation makes a client fall back to plaintext,
+    // which is what `sslmode=disable` / `tls: false` already expects locally.
+    if (packet.kind === 'ssl-request' || packet.kind === 'gssenc-request') {
+      socket.write(new Uint8Array([0x4e])); // 'N'
+
+      return;
+    }
+
+    // Query cancellation would have to reach into a running PGlite call, which
+    // the single-backend model gives no way to interrupt. Closing is honest:
+    // the client's cancel simply does not take effect.
+    if (packet.kind === 'cancel-request') {
+      state.phase = 'closed';
+      socket.end();
+
+      return;
+    }
+
+    if (packet.protocolVersion !== PROTOCOL_VERSION_3_0) {
+      this.fail(
+        socket,
+        SQLSTATE_PROTOCOL_VIOLATION,
+        `Unsupported frontend protocol ${packet.protocolVersion}; kinglet speaks 3.0`
+      );
+
+      return;
+    }
+
+    const user = packet.parameters.user ?? '';
+
+    if (user === '') {
+      this.fail(
+        socket,
+        SQLSTATE_INVALID_AUTHORIZATION_SPECIFICATION,
+        'no PostgreSQL user name specified in startup packet'
+      );
+
+      return;
+    }
+
+    state.user = user;
+    // Postgres defaults the database to the user name when the client omits it.
+    state.database = packet.parameters.database ?? user;
+    state.startupPacket = frame;
+
+    const resolution = await this.options.resolveConnection(
+      this.options.instanceKey,
+      state.database,
+      state.user
+    );
+
+    if (!resolution.allowed) {
+      this.fail(socket, resolution.rejection.sqlState, resolution.rejection.message);
+
+      return;
+    }
+
+    state.connection = resolution.connection;
+
+    if (resolution.connection.password !== '') {
+      // Cleartext is the only method offered: SCRAM and MD5 both need the
+      // stored verifier, and the admin API stores what the caller supplied.
+      // The exchange never leaves loopback in the topologies this serves.
+      state.phase = 'password';
+      socket.write(buildAuthenticationRequest(AUTHENTICATION_CLEARTEXT_PASSWORD));
+
+      return;
+    }
+
+    await this.beginStreaming(socket);
+  }
+
+  private async handlePasswordFrame(
+    socket: Socket<ConnectionState>,
+    frame: Uint8Array
+  ): Promise<void> {
+    const state = socket.data;
+
+    if (frame[0] !== PASSWORD_MESSAGE_TAG) {
+      this.fail(
+        socket,
+        SQLSTATE_PROTOCOL_VIOLATION,
+        'expected a password message in response to the authentication request'
+      );
+
+      return;
+    }
+
+    // Body is one NUL-terminated string after the tag and length.
+    const supplied = new TextDecoder().decode(frame.subarray(5, Math.max(5, frame.length - 1)));
+
+    if (supplied !== state.connection?.password) {
+      this.fail(
+        socket,
+        SQLSTATE_INVALID_PASSWORD,
+        `password authentication failed for user "${state.user}"`
+      );
+
+      return;
+    }
+
+    await this.beginStreaming(socket);
+  }
+
+  /**
+   * Hand the client's own startup packet to PGlite and let its reply — the
+   * authentication-ok, parameter statuses, backend key and ready-for-query the
+   * client is waiting for — flow straight back.
+   */
+  private async beginStreaming(socket: Socket<ConnectionState>): Promise<void> {
+    const state = socket.data;
+    const startupPacket = state.startupPacket;
+
+    if (!startupPacket) {
+      this.fail(socket, SQLSTATE_INTERNAL_ERROR, 'startup packet was lost before authentication');
+
+      return;
+    }
+
+    state.phase = 'streaming';
+
+    await this.forward(socket, startupPacket);
+  }
+
+  private async forward(socket: Socket<ConnectionState>, bytes: Uint8Array): Promise<void> {
+    const state = socket.data;
+    const connection = state.connection;
+
+    if (!connection) {
+      this.fail(socket, SQLSTATE_INTERNAL_ERROR, 'no database is attached to this connection');
+
+      return;
+    }
+
+    try {
+      await connection.queue.enqueue(state.id, bytes, data => {
+        // A client that hung up mid-response leaves the queue still streaming;
+        // dropping the remainder is the only thing left to do with it.
+        if (state.phase !== 'closed') socket.write(data);
+      });
+    } catch (error) {
+      this.fail(
+        socket,
+        SQLSTATE_INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Query execution failed'
+      );
+    }
+  }
+
+  private fail(socket: Socket<ConnectionState>, sqlState: string, message: string): void {
+    const state = socket.data;
+
+    if (state.phase === 'closed') return;
+
+    state.phase = 'closed';
+    state.pendingBatch = [];
+
+    socket.write(buildErrorResponse(sqlState, message));
+    socket.end();
+
+    void this.releaseConnection(state);
+  }
+
+  private async releaseConnection(state: ConnectionState): Promise<void> {
+    const connection = state.connection;
+
+    state.phase = 'closed';
+    state.connection = null;
+
+    // Rolls back a transaction this connection left open, which would
+    // otherwise block every other connection to the same database.
+    await connection?.queue.detach(state.id);
+  }
+}
+
+function concatAll(frames: Uint8Array[]): Uint8Array {
+  if (frames.length === 1) return frames[0] ?? new Uint8Array(0);
+
+  const combined = new Uint8Array(frames.reduce((total, frame) => total + frame.length, 0));
+
+  let offset = 0;
+
+  for (const frame of frames) {
+    combined.set(frame, offset);
+    offset += frame.length;
+  }
+
+  return combined;
+}
+
+function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
+  const combined = new Uint8Array(left.length + right.length);
+
+  combined.set(left);
+  combined.set(right, left.length);
+
+  return combined;
+}

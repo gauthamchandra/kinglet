@@ -13,6 +13,7 @@ import {
 import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
+import { toStorageConfig } from '@/core/storage/config.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
 
     storageManager = new StorageManager();
 
-    await storageManager.initialize(config.storage);
+    await storageManager.initialize(toStorageConfig(config.storage));
 
     logger.info('Storage initialized');
 
@@ -172,7 +173,14 @@ async function main(): Promise<void> {
     }
 
     if (config.services.cloudsql.enabled) {
-      cloudSqlService = new CloudSqlService(storageManager, new Logger('CloudSQL'));
+      cloudSqlService = new CloudSqlService(storageManager, new Logger('CloudSQL'), {
+        ...config.services.cloudsql.dataPlane,
+        // The data plane keeps its Postgres data beside kinglet's own store
+        // and matches its durability, so `STORAGE_TYPE=memory` really does
+        // mean nothing is written to disk.
+        storageType: config.storage.type,
+        sqlitePath: config.storage.sqlitePath,
+      });
       await cloudSqlService.initialize();
 
       for (const route of cloudSqlService.getRoutes()) {
@@ -253,8 +261,11 @@ async function main(): Promise<void> {
 
     // Bun does not kill Bun.spawn children (e.g. Memorystore's valkey-server
     // processes) when the parent exits, so a startup failure after those
-    // processes were spawned would otherwise leak them.
+    // processes were spawned would otherwise leak them. Cloud SQL's data plane
+    // is in-process, but its listening sockets would likewise survive into a
+    // retry and make its ports look occupied.
     await memorystoreService?.stop();
+    await cloudSqlService?.stop();
     process.exit(1);
   }
 }

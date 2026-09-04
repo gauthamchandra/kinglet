@@ -72,7 +72,31 @@ const ServicesConfigSchema = z.object({
         .prefault({}),
     })
     .prefault({}),
-  cloudsql: z.object({ enabled: z.boolean().default(true) }),
+  cloudsql: z
+    .object({
+      enabled: z.boolean().default(true),
+      dataPlane: z
+        .object({
+          // On by default, for the same reason Memorystore's is: a Cloud SQL
+          // instance no Postgres client can connect to is metadata, not
+          // emulation. Set CLOUDSQL_DATA_PLANE=false for the metadata-only
+          // control plane. Unlike Memorystore there is no external binary to
+          // be missing — PGlite ships as an npm dependency — so this default
+          // cannot fail on a host that simply lacks postgres.
+          enabled: z.boolean().default(true),
+          // Starts at the well-known Postgres port so a single emulated
+          // instance is reachable at the address every Postgres client and
+          // connection string already assumes: 127.0.0.1:5432.
+          portRangeStart: z.number().int().min(1).max(65535).default(5432),
+          portRangeEnd: z.number().int().min(1).max(65535).default(5531),
+        })
+        .refine(dataPlane => dataPlane.portRangeStart <= dataPlane.portRangeEnd, {
+          message: 'portRangeStart must be less than or equal to portRangeEnd',
+          path: ['portRangeStart'],
+        })
+        .prefault({}),
+    })
+    .prefault({}),
 });
 
 // Logging configuration schema
@@ -177,6 +201,20 @@ export const EnvConfigSchema = z.object({
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
+  CLOUDSQL_DATA_PLANE: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
+  CLOUDSQL_PORT_RANGE_START: z
+    .string()
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(65535))
+    .optional(),
+  CLOUDSQL_PORT_RANGE_END: z
+    .string()
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(65535))
+    .optional(),
 
   // Logging configuration
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
@@ -251,7 +289,10 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.MEMORYSTORE_VALKEY_BINARY !== undefined ||
     env.MEMORYSTORE_PORT_RANGE_START !== undefined ||
     env.MEMORYSTORE_PORT_RANGE_END !== undefined ||
-    env.ENABLE_CLOUDSQL !== undefined;
+    env.ENABLE_CLOUDSQL !== undefined ||
+    env.CLOUDSQL_DATA_PLANE !== undefined ||
+    env.CLOUDSQL_PORT_RANGE_START !== undefined ||
+    env.CLOUDSQL_PORT_RANGE_END !== undefined;
 
   if (hasServiceConfig) {
     config.services = {};
@@ -341,6 +382,28 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.ENABLE_CLOUDSQL !== undefined) {
       if (!config.services.cloudsql) config.services.cloudsql = {};
       config.services.cloudsql.enabled = env.ENABLE_CLOUDSQL;
+    }
+
+    if (
+      env.CLOUDSQL_DATA_PLANE !== undefined ||
+      env.CLOUDSQL_PORT_RANGE_START !== undefined ||
+      env.CLOUDSQL_PORT_RANGE_END !== undefined
+    ) {
+      if (!config.services.cloudsql) config.services.cloudsql = {};
+
+      const dataPlane: NonNullable<
+        NonNullable<DeepPartial<Config>['services']>['cloudsql']
+      >['dataPlane'] = {};
+
+      if (env.CLOUDSQL_DATA_PLANE !== undefined) dataPlane.enabled = env.CLOUDSQL_DATA_PLANE;
+      if (env.CLOUDSQL_PORT_RANGE_START !== undefined) {
+        dataPlane.portRangeStart = env.CLOUDSQL_PORT_RANGE_START;
+      }
+      if (env.CLOUDSQL_PORT_RANGE_END !== undefined) {
+        dataPlane.portRangeEnd = env.CLOUDSQL_PORT_RANGE_END;
+      }
+
+      config.services.cloudsql.dataPlane = dataPlane;
     }
   }
 

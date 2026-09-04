@@ -3,6 +3,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { BaseRecord, QueryFilter, QueryOperator, StorageConfig } from '../types';
 import { SQLiteStorageProvider } from './sqlite';
 
@@ -11,6 +14,14 @@ interface TestRecord extends BaseRecord {
   email: string;
   age: number;
   active: boolean;
+}
+
+/** A record shaped the way services shape theirs: domain columns only. */
+interface DomainRecord extends BaseRecord {
+  project: string;
+  name: string;
+  settings: string;
+  version: number;
 }
 
 describe('SQLiteStorageProvider', () => {
@@ -621,6 +632,158 @@ describe('SQLiteStorageProvider', () => {
 
       expect(found).not.toBeNull();
       expect(found?.name).toBe(created.name);
+    });
+  });
+
+  describe('service-style schemas', () => {
+    // Every service declares only its DOMAIN columns and leaves the BaseRecord
+    // fields to the storage layer, unlike the schemas the tests above build.
+    // That whole shape used to be unrepresented here, which is why a table
+    // with nowhere to put the `id` that `create` always writes went unnoticed.
+    const schema = {
+      name: 'domain_records',
+      columns: [
+        { name: 'project', type: 'string' as const },
+        { name: 'name', type: 'string' as const },
+        { name: 'settings', type: 'json' as const },
+        { name: 'version', type: 'number' as const },
+      ],
+      indexes: [{ name: 'project_name', columns: ['project', 'name'], unique: true }],
+      timestamps: true,
+    };
+
+    beforeEach(async () => {
+      await provider.createTable('domain_records', schema);
+    });
+
+    test('creates records for a schema that does not declare id', async () => {
+      const created = await provider.create('domain_records', {
+        project: 'p1',
+        name: 'a',
+        settings: { tier: 'small' },
+        version: 1,
+      });
+
+      expect(created.id).toBeTypeOf('string');
+      expect(created.createdAt).toBeInstanceOf(Date);
+      expect(await provider.findById('domain_records', created.id)).not.toBeNull();
+    });
+
+    test('finds a record by a multi-condition filter with a limit', async () => {
+      await provider.create('domain_records', {
+        project: 'p1',
+        name: 'a',
+        settings: {},
+        version: 1,
+      });
+      await provider.create('domain_records', {
+        project: 'p1',
+        name: 'b',
+        settings: {},
+        version: 1,
+      });
+
+      // A LIMIT with no OFFSET binds one pagination value, not two. The count
+      // query repeats only the WHERE clause, so trimming a fixed two used to
+      // eat a WHERE binding and make SQLite reject the statement outright.
+      const result = await provider.find<DomainRecord>('domain_records', {
+        filter: {
+          conditions: [
+            { field: 'project', operator: 'eq', value: 'p1' },
+            { field: 'name', operator: 'eq', value: 'b' },
+          ],
+          operator: 'and',
+        },
+        pagination: { limit: 1, offset: 0 },
+      });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]?.name).toBe('b');
+      expect(result.total).toBe(1);
+    });
+
+    test('reports the unpaginated total when a LIMIT and OFFSET are both bound', async () => {
+      for (const name of ['a', 'b', 'c']) {
+        await provider.create('domain_records', { project: 'p1', name, settings: {}, version: 1 });
+      }
+
+      const result = await provider.find('domain_records', {
+        filter: { conditions: [{ field: 'project', operator: 'eq', value: 'p1' }] },
+        pagination: { limit: 1, offset: 1 },
+      });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.total).toBe(3);
+      expect(result.hasMore).toBe(true);
+    });
+
+    test('enforces the schema unique index', async () => {
+      await provider.create('domain_records', {
+        project: 'p1',
+        name: 'a',
+        settings: {},
+        version: 1,
+      });
+
+      const duplicate = provider.create('domain_records', {
+        project: 'p1',
+        name: 'a',
+        settings: {},
+        version: 1,
+      });
+
+      await expect(duplicate).rejects.toThrow();
+    });
+  });
+
+  describe('file-backed durability', () => {
+    // The point of a non-memory storage type. Everything above runs against an
+    // anonymous in-memory database, so nothing exercised the property a user
+    // configuring SQLITE_PATH is actually asking for.
+    test('records survive closing and reopening the database file', async () => {
+      const root = join(tmpdir(), `kinglet-sqlite-durability-${crypto.randomUUID()}`);
+      // Deliberately a path whose directory does not exist yet, which is what
+      // the default ./data/emulator.db looks like on a fresh checkout.
+      const path = join(root, 'data', 'emulator.db');
+      const fileConfig: StorageConfig = { type: 'sqlite', database: { path } };
+
+      const writer = new SQLiteStorageProvider();
+
+      await writer.initialize(fileConfig);
+      await writer.createTable('durable_records', {
+        name: 'durable_records',
+        columns: [
+          { name: 'name', type: 'string' },
+          { name: 'settings', type: 'json' },
+          { name: 'version', type: 'number' },
+        ],
+        timestamps: true,
+      });
+
+      // Services serialize their own JSON columns and parse them back (see
+      // CloudSqlRepository), so a string is what actually round-trips here.
+      const created = await writer.create('durable_records', {
+        name: 'orders',
+        settings: JSON.stringify({ tier: 'small' }),
+        version: 3,
+      });
+
+      await writer.close();
+
+      const reader = new SQLiteStorageProvider();
+
+      await reader.initialize(fileConfig);
+
+      const reopened = await reader.findById<DomainRecord>('durable_records', created.id);
+
+      expect(reopened).not.toBeNull();
+      expect(reopened?.name).toBe('orders');
+      expect(reopened?.settings).toBe(JSON.stringify({ tier: 'small' }));
+      expect(reopened?.version).toBe(3);
+      expect(reopened?.createdAt).toBeInstanceOf(Date);
+
+      await reader.close();
+      await rm(root, { recursive: true, force: true });
     });
   });
 });

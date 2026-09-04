@@ -17,8 +17,8 @@
     },
     "cloud-sql": {
       "status": "implemented",
-      "dataPlane": "Control plane only",
-      "summary": "Instance, database, and user admin API — PostgreSQL only; instances are records, not connectable servers."
+      "dataPlane": "PGlite (Postgres 18) in-process",
+      "summary": "Instance, database, and user admin API — PostgreSQL only; instances expose a real Postgres endpoint backed by PGlite."
     },
     "cloud-storage": {
       "status": "experimental",
