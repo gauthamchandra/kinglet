@@ -17,38 +17,43 @@ import { REQUEST_BODY_INSPECTION_BYTES } from './types.ts';
 
 export function evaluate(policy: SecurityPolicy, attributes: RequestAttributes): EvaluationResult {
   const rules = [...(policy.rules ?? [])].sort((a, b) => a.priority - b.priority);
-  const headerRules = rules.filter(rule => !isBodyPhaseRule(rule));
-  const bodyRules = rules.filter(rule => isBodyPhaseRule(rule));
-
-  let preview: MatchedRule | undefined;
   const policyName = policy.name ?? '';
+  let preview: MatchedRule | undefined;
+  let current = attributes;
+  let bodyInspected = false;
 
-  const headerResult = walkRules(headerRules, attributes, policyName, 'header', preview);
+  for (const rule of rules) {
+    const bodyPhase = isBodyPhaseRule(rule);
 
-  preview = headerResult.preview ?? preview;
+    if (bodyPhase && !bodyInspected) {
+      current = withInspectedBody(
+        attributes,
+        inspectionLimitBytes(policy),
+        policy.advancedOptionsConfig?.jsonParsing
+      );
+      bodyInspected = true;
+    }
 
-  const headerPriority = headerResult.enforced?.priority;
-  const remainingBodyRules =
-    headerPriority != null ? bodyRules.filter(rule => rule.priority < headerPriority) : bodyRules;
+    if (!ruleMatches(rule, current)) {
+      continue;
+    }
 
-  if (remainingBodyRules.length === 0) {
-    return finish(headerResult.enforced, preview);
+    const phase = bodyPhase ? 'body' : 'header';
+    const action = resolveAction(rule, current, policyName, phase, rule.preview === true);
+    const record = toMatchedRule(rule, action, policyName);
+
+    if (rule.preview === true) {
+      if (preview == null) {
+        preview = record;
+      }
+
+      continue;
+    }
+
+    return finish(record, preview);
   }
 
-  const bodyAttributes = withInspectedBody(
-    attributes,
-    inspectionLimitBytes(policy),
-    policy.advancedOptionsConfig?.jsonParsing
-  );
-  const bodyResult = walkRules(remainingBodyRules, bodyAttributes, policyName, 'body', preview);
-
-  preview = bodyResult.preview ?? preview;
-
-  if (bodyResult.enforced != null) {
-    return finish(bodyResult.enforced, preview);
-  }
-
-  return finish(headerResult.enforced, preview);
+  return finish(undefined, preview);
 }
 
 function finish(
@@ -66,49 +71,6 @@ function finish(
   }
 
   return result;
-}
-
-function walkRules(
-  rules: SecurityPolicyRule[],
-  attributes: RequestAttributes,
-  policyName: string,
-  phase: 'header' | 'body',
-  existingPreview: MatchedRule | undefined
-): { enforced?: MatchedRule; preview?: MatchedRule } {
-  let preview = existingPreview;
-
-  for (const rule of rules) {
-    const matched = ruleMatches(rule, attributes);
-
-    if (!matched) {
-      continue;
-    }
-
-    const action = resolveAction(rule, attributes, policyName, phase, rule.preview === true);
-    const record = toMatchedRule(rule, action, policyName);
-
-    if (rule.preview === true) {
-      if (preview == null) {
-        preview = record;
-      }
-
-      continue;
-    }
-
-    const result: { enforced: MatchedRule; preview?: MatchedRule } = { enforced: record };
-
-    if (preview != null) {
-      result.preview = preview;
-    }
-
-    return result;
-  }
-
-  if (preview != null) {
-    return { preview };
-  }
-
-  return {};
 }
 
 function ruleMatches(rule: SecurityPolicyRule, attributes: RequestAttributes): boolean {

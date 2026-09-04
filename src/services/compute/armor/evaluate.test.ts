@@ -424,6 +424,36 @@ describe('evaluate', () => {
     expect(evaluate(policy, attrs()).enforced?.action).toBe('allow');
   });
 
+  test('a better-priority body deny does not consume a later header throttle', () => {
+    resetRateLimitStore();
+    setRateLimitClock(() => 5_000_000);
+
+    const policy: SecurityPolicy = {
+      name: 'rl-override',
+      rules: [
+        {
+          priority: 1000,
+          action: 'deny(403)',
+          match: { expr: { expression: "request.body.contains('evil')" } },
+        },
+        {
+          priority: 2000,
+          action: 'throttle',
+          rateLimitOptions: {
+            rateLimitThreshold: { count: 1, intervalSec: 60 },
+            exceedAction: 'deny(429)',
+          },
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+        },
+      ],
+    };
+
+    expect(evaluate(policy, attrs({ body: 'evil' })).enforced?.action).toBe('deny(403)');
+    expect(evaluate(policy, attrs({ body: 'evil' })).enforced?.action).toBe('deny(403)');
+    expect(evaluate(policy, attrs({ body: 'ok' })).enforced?.action).toBe('allow');
+    expect(evaluate(policy, attrs({ body: 'ok' })).enforced?.action).toBe('deny(429)');
+  });
+
   test('preview throttle reports exceedAction after the threshold', () => {
     resetRateLimitStore();
     setRateLimitClock(() => 5_000_000);
