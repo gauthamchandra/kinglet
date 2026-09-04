@@ -96,7 +96,47 @@ export interface ArmorDecision {
   headers: Record<string, string>;
 }
 
-export function handleArmorDecision(result: EvaluationResult, policyName: string): ArmorDecision {
+export function userIpRequestHeadersFromPolicy(policy: SecurityPolicyResponse): readonly string[] {
+  const config = policy.advancedOptionsConfig;
+
+  if (config == null || typeof config !== 'object') {
+    return [];
+  }
+
+  const headers = (config as { userIpRequestHeaders?: unknown }).userIpRequestHeaders;
+
+  if (!Array.isArray(headers)) {
+    return [];
+  }
+
+  return headers.filter((header): header is string => typeof header === 'string');
+}
+
+export function redirectTargetFromPolicy(
+  policy: SecurityPolicyResponse,
+  priority: number | undefined
+): string | undefined {
+  if (priority == null) {
+    return undefined;
+  }
+
+  const rule = policy.rules.find(candidate => candidate.priority === priority);
+  const options = rule?.redirectOptions;
+
+  if (options == null || typeof options !== 'object') {
+    return undefined;
+  }
+
+  const target = (options as { target?: unknown }).target;
+
+  return typeof target === 'string' && target !== '' ? target : undefined;
+}
+
+export function handleArmorDecision(
+  result: EvaluationResult,
+  policyName: string,
+  redirectTarget?: string
+): ArmorDecision {
   const enforced = result.enforced;
   const preview = result.preview;
 
@@ -112,6 +152,10 @@ export function handleArmorDecision(result: EvaluationResult, policyName: string
     [KINGLET_ENFORCED_ACTION_HEADER]: action,
     [KINGLET_ENFORCED_OUTCOME_HEADER]: outcome,
   };
+
+  if ((action === 'redirect' || action.startsWith('redirect(')) && redirectTarget != null) {
+    headers.location = redirectTarget;
+  }
 
   if (preview != null) {
     headers[KINGLET_PREVIEW_PRIORITY_HEADER] = String(preview.priority);
@@ -193,7 +237,7 @@ export interface ArmorListenerOptions {
 export function startArmorListener(options: ArmorListenerOptions): Server {
   const { port, defaultPolicyName, getPolicies, project } = options;
 
-  return Bun.serve({
+  const server = Bun.serve({
     hostname: '127.0.0.1',
     port,
     async fetch(request: Request): Promise<Response> {
@@ -208,21 +252,12 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
         headersMap[key.toLowerCase()] = value;
       });
 
-      const tcpPeer = request.headers.get('x-bun-remote-addr') ?? '127.0.0.1';
+      const peerInfo = server.requestIP(request);
+      const tcpPeer = peerInfo?.address ?? '127.0.0.1';
       const body = await request.text();
+      const rawOriginIp = headersMap[KINGLET_ORIGIN_IP_HEADER];
 
-      const adapterResult = buildRequestAttributesFromListenerRequest({
-        method,
-        path,
-        query,
-        headers: headersMap,
-        tcpPeer,
-        body,
-        scheme: 'http',
-        userIpRequestHeaders: [],
-      });
-
-      if ('error' in adapterResult) {
+      if (rawOriginIp != null && !isValidIp(rawOriginIp.trim())) {
         return new Response('', { status: 400 });
       }
 
@@ -233,9 +268,28 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
         return new Response('', { status: 503 });
       }
 
+      const adapterResult = buildRequestAttributesFromListenerRequest({
+        method,
+        path,
+        query,
+        headers: headersMap,
+        tcpPeer,
+        body,
+        scheme: 'http',
+        userIpRequestHeaders: userIpRequestHeadersFromPolicy(policyOrError),
+      });
+
+      if ('error' in adapterResult) {
+        return new Response('', { status: 400 });
+      }
+
       const policy = policyOrError as SecurityPolicy;
       const result = evaluate(policy, adapterResult.attributes);
-      const decision = handleArmorDecision(result, policyOrError.name);
+      const decision = handleArmorDecision(
+        result,
+        policyOrError.name,
+        redirectTargetFromPolicy(policyOrError, result.enforced?.priority)
+      );
 
       return new Response('', {
         status: decision.status,
@@ -243,4 +297,6 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
       });
     },
   });
+
+  return server;
 }

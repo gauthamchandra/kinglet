@@ -10,7 +10,9 @@ import type { EvaluationResult } from './armor/types.ts';
 import {
   buildRequestAttributesFromListenerRequest,
   handleArmorDecision,
+  redirectTargetFromPolicy,
   selectPolicy,
+  userIpRequestHeadersFromPolicy,
 } from './listener.ts';
 import type { SecurityPolicyResponse } from './types.ts';
 
@@ -113,6 +115,30 @@ describe('buildRequestAttributesFromListenerRequest: XFF rewriting', () => {
     expect(result.attributes.request.headers['x-forwarded-for']).toBe('203.0.113.1, 10.0.0.1');
   });
 
+  test('resolves origin.user_ip from userIpRequestHeaders after XFF rewrite', () => {
+    const result = buildRequestAttributesFromListenerRequest({
+      method: 'GET',
+      path: '/path',
+      query: '',
+      headers: {
+        'x-kinglet-origin-ip': '10.0.0.1',
+        'true-client-ip': '198.51.100.9',
+      },
+      tcpPeer: '127.0.0.1',
+      body: '',
+      scheme: 'http',
+      userIpRequestHeaders: ['True-Client-IP'],
+    });
+
+    expect(result).not.toHaveProperty('error');
+    expect((result as { attributes: { origin: { ip: string; userIp: string } } }).attributes.origin.userIp).toBe(
+      '198.51.100.9'
+    );
+    expect((result as { attributes: { origin: { ip: string } } }).attributes.origin.ip).toBe(
+      '10.0.0.1'
+    );
+  });
+
   test('sets X-Forwarded-For to peer when no existing header', () => {
     const result = buildRequestAttributesFromListenerRequest({
       method: 'GET',
@@ -187,6 +213,23 @@ describe('handleArmorDecision: status codes', () => {
     const { status } = handleArmorDecision(result, policyName);
 
     expect(status).toBe(429);
+  });
+
+  test('redirect returns 302 and Location from the rule target', () => {
+    const result: EvaluationResult = {
+      enforced: { name: policyName, priority: 50, action: 'redirect', outcome: 'REDIRECT' },
+    };
+
+    const { status, headers } = handleArmorDecision(
+      result,
+      policyName,
+      'https://example.com/login'
+    );
+
+    expect(status).toBe(302);
+    expect(headers.location).toBe('https://example.com/login');
+    expect(headers['x-kinglet-enforced-action']).toBe('redirect');
+    expect(headers['x-kinglet-enforced-outcome']).toBe('REDIRECT');
   });
 
   test('deny(502) returns 502', () => {
@@ -278,6 +321,47 @@ describe('selectPolicy', () => {
     const result = selectPolicy(policies, 'nonexistent');
 
     expect(result).toHaveProperty('error');
+  });
+});
+
+describe('policy adapter helpers', () => {
+  test('reads userIpRequestHeaders from advancedOptionsConfig', () => {
+    const policy: SecurityPolicyResponse = {
+      kind: 'compute#securityPolicy',
+      id: '1',
+      creationTimestamp: new Date().toISOString(),
+      name: 'pol',
+      selfLink: 'https://example.com/pol',
+      fingerprint: 'abc',
+      rules: [],
+      advancedOptionsConfig: { userIpRequestHeaders: ['True-Client-IP', 'X-Forwarded-For'] },
+    };
+
+    expect(userIpRequestHeadersFromPolicy(policy)).toEqual(['True-Client-IP', 'X-Forwarded-For']);
+    expect(userIpRequestHeadersFromPolicy({ ...policy, advancedOptionsConfig: undefined })).toEqual(
+      []
+    );
+  });
+
+  test('reads redirect target from the matched rule', () => {
+    const policy: SecurityPolicyResponse = {
+      kind: 'compute#securityPolicy',
+      id: '1',
+      creationTimestamp: new Date().toISOString(),
+      name: 'pol',
+      selfLink: 'https://example.com/pol',
+      fingerprint: 'abc',
+      rules: [
+        {
+          priority: 50,
+          action: 'redirect',
+          redirectOptions: { type: 'EXTERNAL_302', target: 'https://example.com/login' },
+        },
+      ],
+    };
+
+    expect(redirectTargetFromPolicy(policy, 50)).toBe('https://example.com/login');
+    expect(redirectTargetFromPolicy(policy, 100)).toBeUndefined();
   });
 });
 

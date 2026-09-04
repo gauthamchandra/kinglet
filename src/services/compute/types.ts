@@ -50,7 +50,7 @@ export interface GlobalOperationRecord extends BaseRecord {
 export const securityPoliciesTableSchema: TableSchema = {
   name: SECURITY_POLICIES_TABLE,
   columns: [
-    { name: 'name', type: 'string', unique: true },
+    { name: 'name', type: 'string' },
     { name: 'project', type: 'string' },
     { name: 'selfLink', type: 'string' },
     { name: 'fingerprint', type: 'string' },
@@ -61,7 +61,7 @@ export const securityPoliciesTableSchema: TableSchema = {
     { name: 'extraFields', type: 'json', nullable: true },
   ],
   indexes: [
-    { name: 'idx_compute_security_policies_name', columns: ['name'], unique: true },
+    { name: 'idx_compute_security_policies_project_name', columns: ['project', 'name'], unique: true },
     { name: 'idx_compute_security_policies_project', columns: ['project'] },
   ],
   timestamps: true,
