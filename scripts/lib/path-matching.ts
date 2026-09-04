@@ -62,6 +62,11 @@ export function kingletPathVariants(path: string): string[] {
     variants.add(path.replace('/storage/v1/', ''));
   }
 
+  if (path.startsWith('/compute/v1/')) {
+    variants.add(path.replace('/compute/v1/', '/'));
+    variants.add(path.replace('/compute/v1/', ''));
+  }
+
   return [...variants];
 }
 

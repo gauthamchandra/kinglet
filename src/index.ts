@@ -16,6 +16,7 @@ import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
+import { ComputeService } from '@/services/compute/index.ts';
 import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
@@ -38,6 +39,7 @@ let memorystoreService: MemorystoreService | null = null;
 let alloydbService: AlloyDbService | null = null;
 let kmsService: CloudKmsService | null = null;
 let cloudSqlService: CloudSqlService | null = null;
+let computeService: ComputeService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -183,6 +185,22 @@ async function main(): Promise<void> {
       logger.info('Cloud SQL service enabled and started');
     }
 
+    if (config.services.compute.enabled) {
+      computeService = new ComputeService(storageManager, new Logger('Compute'), {
+        listenerPort: config.services.compute.listenerPort,
+        defaultPolicyName: config.services.compute.defaultPolicy,
+        project: config.auth.mockCredentials?.projectId ?? 'kinglet-project',
+      });
+      await computeService.initialize();
+
+      for (const route of computeService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      computeService.start();
+      logger.info('Compute (Cloud Armor) service enabled and started');
+    }
+
     // Workflows, Memorystore and AlloyDB all expose `/operations` routes of the same
     // shape (see docs/adrs/007-memorystore-valkey-data-plane.md). A composed route set
     // queries every store, so an LRO is retrievable regardless of which service
@@ -325,6 +343,11 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     if (cloudSqlService) {
       await cloudSqlService.stop();
       logger.info('Cloud SQL service stopped');
+    }
+
+    if (computeService) {
+      await computeService.stop();
+      logger.info('Compute service stopped');
     }
 
     if (storageManager) {

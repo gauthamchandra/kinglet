@@ -73,6 +73,13 @@ const ServicesConfigSchema = z.object({
     })
     .prefault({}),
   cloudsql: z.object({ enabled: z.boolean().default(true) }),
+  compute: z
+    .object({
+      enabled: z.boolean().default(true),
+      listenerPort: z.number().int().min(1).max(65535).default(8787),
+      defaultPolicy: z.string().optional(),
+    })
+    .prefault({}),
 });
 
 // Logging configuration schema
@@ -177,6 +184,16 @@ export const EnvConfigSchema = z.object({
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
+  ENABLE_COMPUTE: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
+  COMPUTE_LISTENER_PORT: z
+    .string()
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(65535))
+    .optional(),
+  COMPUTE_ARMOR_DEFAULT_POLICY: z.string().optional(),
 
   // Logging configuration
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
@@ -251,7 +268,10 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.MEMORYSTORE_VALKEY_BINARY !== undefined ||
     env.MEMORYSTORE_PORT_RANGE_START !== undefined ||
     env.MEMORYSTORE_PORT_RANGE_END !== undefined ||
-    env.ENABLE_CLOUDSQL !== undefined;
+    env.ENABLE_CLOUDSQL !== undefined ||
+    env.ENABLE_COMPUTE !== undefined ||
+    env.COMPUTE_LISTENER_PORT !== undefined ||
+    env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined;
 
   if (hasServiceConfig) {
     config.services = {};
@@ -269,6 +289,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       config.services.memorystore = { enabled: enabledServices.includes('memorystore') };
       config.services.alloydb = { enabled: enabledServices.includes('alloydb') };
       config.services.cloudsql = { enabled: enabledServices.includes('cloudsql') };
+      config.services.compute = { enabled: enabledServices.includes('compute') };
     }
 
     if (env.ENABLE_PUBSUB !== undefined) {
@@ -341,6 +362,21 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.ENABLE_CLOUDSQL !== undefined) {
       if (!config.services.cloudsql) config.services.cloudsql = {};
       config.services.cloudsql.enabled = env.ENABLE_CLOUDSQL;
+    }
+
+    if (env.ENABLE_COMPUTE !== undefined) {
+      if (!config.services.compute) config.services.compute = {};
+      config.services.compute.enabled = env.ENABLE_COMPUTE;
+    }
+
+    if (env.COMPUTE_LISTENER_PORT !== undefined) {
+      if (!config.services.compute) config.services.compute = {};
+      config.services.compute.listenerPort = env.COMPUTE_LISTENER_PORT;
+    }
+
+    if (env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined) {
+      if (!config.services.compute) config.services.compute = {};
+      config.services.compute.defaultPolicy = env.COMPUTE_ARMOR_DEFAULT_POLICY;
     }
   }
 
