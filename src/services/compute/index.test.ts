@@ -91,4 +91,64 @@ describe('ComputeService', () => {
 
     await listening.stop();
   });
+
+  test('listener returns 503 when defaultPolicy name is used in more than one project', async () => {
+    const listening = new ComputeService(storage, logger, {
+      listenerPort: 0,
+      defaultPolicyName: 'shared',
+    });
+
+    await listening.initialize();
+
+    const policies = listening.getSecurityPolicyService();
+
+    await policies.insert('proj-a', 'shared', {});
+    await policies.insert('proj-b', 'shared', {});
+
+    const started = listening.start();
+
+    expect(started.listenerStarted).toBe(true);
+    expect(started.listenerPort).toBeTypeOf('number');
+
+    const res = await fetch(`http://127.0.0.1:${started.listenerPort}/public`);
+
+    expect(res.status).toBe(503);
+
+    await listening.stop();
+  });
+
+  test('listener uses a project-qualified defaultPolicy when names collide', async () => {
+    const listening = new ComputeService(storage, logger, {
+      listenerPort: 0,
+      defaultPolicyName: 'projects/proj-b/global/securityPolicies/shared',
+    });
+
+    await listening.initialize();
+
+    const policies = listening.getSecurityPolicyService();
+
+    await policies.insert('proj-a', 'shared', {
+      rules: [
+        {
+          priority: 1000,
+          action: 'deny(403)',
+          match: { expr: { expression: "request.path.startsWith('/public')" } },
+        },
+      ],
+    });
+    await policies.insert('proj-b', 'shared', {});
+
+    const started = listening.start();
+
+    expect(started.listenerStarted).toBe(true);
+    expect(started.listenerPort).toBeTypeOf('number');
+
+    const res = await fetch(`http://127.0.0.1:${started.listenerPort}/public`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+    expect(res.headers.get('x-kinglet-security-policy')).toBe('shared');
+
+    await listening.stop();
+  });
 });

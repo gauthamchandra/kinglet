@@ -229,7 +229,24 @@ export function selectPolicy(
   }
 
   if (defaultPolicyName != null) {
-    const found = policies.find(p => p.name === defaultPolicyName);
+    const matches = policies.filter(policy => policyMatchesDefault(policy, defaultPolicyName));
+
+    if (matches.length === 0) {
+      return {
+        error: `Configured defaultPolicy '${defaultPolicyName}' not found.`,
+      };
+    }
+
+    if (matches.length > 1) {
+      return {
+        error:
+          `Configured defaultPolicy '${defaultPolicyName}' matches more than one policy. ` +
+          `Set COMPUTE_ARMOR_DEFAULT_POLICY to a unique name or ` +
+          `projects/{project}/global/securityPolicies/{name}.`,
+      };
+    }
+
+    const found = matches[0];
 
     if (found == null) {
       return {
@@ -255,6 +272,27 @@ export function selectPolicy(
       `Multiple security policies exist but no defaultPolicy is configured. ` +
       `Set COMPUTE_ARMOR_DEFAULT_POLICY to specify which policy to use.`,
   };
+}
+
+function policyMatchesDefault(policy: SecurityPolicyResponse, configured: string): boolean {
+  if (policy.name === configured || policy.selfLink === configured) {
+    return true;
+  }
+
+  const resourcePath = computePolicyResourcePath(policy.selfLink);
+
+  return resourcePath != null && resourcePath === configured;
+}
+
+function computePolicyResourcePath(selfLink: string): string | null {
+  const marker = '/compute/v1/';
+  const index = selfLink.indexOf(marker);
+
+  if (index === -1) {
+    return null;
+  }
+
+  return selfLink.substring(index + marker.length);
 }
 
 // ── Listener server ──

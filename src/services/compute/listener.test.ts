@@ -15,7 +15,7 @@ import {
   selectPolicy,
   userIpRequestHeadersFromPolicy,
 } from './listener.ts';
-import type { SecurityPolicyResponse } from './types.ts';
+import { buildSecurityPolicySelfLink, type SecurityPolicyResponse } from './types.ts';
 
 // ── buildRequestAttributesFromListenerRequest tests ──
 
@@ -273,12 +273,12 @@ describe('handleArmorDecision: status codes', () => {
 // ── selectPolicy: policy resolution ──
 
 describe('selectPolicy', () => {
-  const makePolicy = (name: string): SecurityPolicyResponse => ({
+  const makePolicy = (name: string, project = 'proj'): SecurityPolicyResponse => ({
     kind: 'compute#securityPolicy',
-    id: '1',
+    id: `${project}-${name}`,
     creationTimestamp: new Date().toISOString(),
     name,
-    selfLink: `https://example.com/${name}`,
+    selfLink: buildSecurityPolicySelfLink(project, name),
     fingerprint: 'abc',
     rules: [],
   });
@@ -323,6 +323,39 @@ describe('selectPolicy', () => {
     const result = selectPolicy(policies, 'nonexistent');
 
     expect(result).toHaveProperty('error');
+  });
+
+  test('returns error when defaultPolicy name matches more than one project', () => {
+    const policies = [makePolicy('shared', 'proj-a'), makePolicy('shared', 'proj-b')];
+
+    const result = selectPolicy(policies, 'shared');
+
+    expect(result).toHaveProperty('error');
+  });
+
+  test('resolves a project-qualified defaultPolicy when names collide', () => {
+    const policies = [makePolicy('shared', 'proj-a'), makePolicy('shared', 'proj-b')];
+
+    const result = selectPolicy(policies, 'projects/proj-b/global/securityPolicies/shared');
+
+    if ('error' in result) {
+      throw new Error('expected policy');
+    }
+
+    expect(result.selfLink).toBe(buildSecurityPolicySelfLink('proj-b', 'shared'));
+  });
+
+  test('resolves defaultPolicy from a full selfLink', () => {
+    const policies = [makePolicy('shared', 'proj-a'), makePolicy('shared', 'proj-b')];
+    const selfLink = buildSecurityPolicySelfLink('proj-a', 'shared');
+
+    const result = selectPolicy(policies, selfLink);
+
+    if ('error' in result) {
+      throw new Error('expected policy');
+    }
+
+    expect(result.selfLink).toBe(selfLink);
   });
 });
 

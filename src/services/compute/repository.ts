@@ -84,7 +84,10 @@ export class ComputeRepository {
 
   async listAllPolicies(): Promise<SecurityPolicyRecord[]> {
     const result = await this.storage.find<SecurityPolicyRecord>(SECURITY_POLICIES_TABLE, {
-      sort: [{ field: 'name', direction: 'asc' }],
+      sort: [
+        { field: 'project', direction: 'asc' },
+        { field: 'name', direction: 'asc' },
+      ],
     });
 
     return result.data;
