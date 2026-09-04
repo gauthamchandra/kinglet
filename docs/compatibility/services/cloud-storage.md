@@ -29,32 +29,23 @@ Bucket CRUD, object upload/download, copy, compose, and rewrite.
 
 ## Missing endpoints
 
-- `POST` `b/{bucket}/anywhereCaches` — `anywhereCaches.insert`
-- `PATCH` `b/{bucket}/anywhereCaches/{anywhereCacheId}` — `anywhereCaches.update`
+- `POST` `b/{bucket}/anywhereCaches/{anywhereCacheId}/disable` — `anywhereCaches.disable`
 - `GET` `b/{bucket}/anywhereCaches/{anywhereCacheId}` — `anywhereCaches.get`
+- `POST` `b/{bucket}/anywhereCaches` — `anywhereCaches.insert`
 - `GET` `b/{bucket}/anywhereCaches` — `anywhereCaches.list`
 - `POST` `b/{bucket}/anywhereCaches/{anywhereCacheId}/pause` — `anywhereCaches.pause`
 - `POST` `b/{bucket}/anywhereCaches/{anywhereCacheId}/resume` — `anywhereCaches.resume`
-- `POST` `b/{bucket}/anywhereCaches/{anywhereCacheId}/disable` — `anywhereCaches.disable`
-- `POST` `b/{bucket}/rapidCaches` — `rapidCaches.insert`
-- `PATCH` `b/{bucket}/rapidCaches/{rapidCacheId}` — `rapidCaches.update`
-- `GET` `b/{bucket}/rapidCaches/{rapidCacheId}` — `rapidCaches.get`
-- `GET` `b/{bucket}/rapidCaches` — `rapidCaches.list`
-- `POST` `b/{bucket}/rapidCaches/{rapidCacheId}/disable` — `rapidCaches.disable`
+- `PATCH` `b/{bucket}/anywhereCaches/{anywhereCacheId}` — `anywhereCaches.update`
 - `DELETE` `b/{bucket}/acl/{entity}` — `bucketAccessControls.delete`
 - `GET` `b/{bucket}/acl/{entity}` — `bucketAccessControls.get`
 - `POST` `b/{bucket}/acl` — `bucketAccessControls.insert`
 - `GET` `b/{bucket}/acl` — `bucketAccessControls.list`
 - `PATCH` `b/{bucket}/acl/{entity}` — `bucketAccessControls.patch`
 - `PUT` `b/{bucket}/acl/{entity}` — `bucketAccessControls.update`
-- `POST` `b/{bucket}/restore` — `buckets.restore`
-- `POST` `b/{bucket}/relocate` — `buckets.relocate`
 - `GET` `b/{bucket}/storageLayout` — `buckets.getStorageLayout`
 - `POST` `b/{bucket}/lockRetentionPolicy` — `buckets.lockRetentionPolicy`
-- `POST` `b/{bucket}/operations/{operationId}/cancel` — `operations.cancel`
-- `GET` `b/{bucket}/operations/{operationId}` — `operations.get`
-- `POST` `b/{bucket}/operations/{operationId}/advanceRelocateBucket` — `operations.advanceRelocateBucket`
-- `GET` `b/{bucket}/operations` — `operations.list`
+- `POST` `b/{bucket}/relocate` — `buckets.relocate`
+- `POST` `b/{bucket}/restore` — `buckets.restore`
 - `POST` `channels/stop` — `channels.stop`
 - `DELETE` `b/{bucket}/defaultObjectAcl/{entity}` — `defaultObjectAccessControls.delete`
 - `GET` `b/{bucket}/defaultObjectAcl/{entity}` — `defaultObjectAccessControls.get`
@@ -70,9 +61,9 @@ Bucket CRUD, object upload/download, copy, compose, and rewrite.
 - `POST` `b/{bucket}/folders/{sourceFolder}/renameTo/folders/{destinationFolder}` — `folders.rename`
 - `DELETE` `b/{bucket}/managedFolders/{managedFolder}` — `managedFolders.delete`
 - `GET` `b/{bucket}/managedFolders/{managedFolder}` — `managedFolders.get`
-- `PATCH` `b/{bucket}/managedFolders/{managedFolder}` — `managedFolders.update`
 - `POST` `b/{bucket}/managedFolders` — `managedFolders.insert`
 - `GET` `b/{bucket}/managedFolders` — `managedFolders.list`
+- `PATCH` `b/{bucket}/managedFolders/{managedFolder}` — `managedFolders.update`
 - `DELETE` `b/{bucket}/notificationConfigs/{notification}` — `notifications.delete`
 - `GET` `b/{bucket}/notificationConfigs/{notification}` — `notifications.get`
 - `POST` `b/{bucket}/notificationConfigs` — `notifications.insert`
@@ -83,15 +74,24 @@ Bucket CRUD, object upload/download, copy, compose, and rewrite.
 - `GET` `b/{bucket}/o/{object}/acl` — `objectAccessControls.list`
 - `PATCH` `b/{bucket}/o/{object}/acl/{entity}` — `objectAccessControls.patch`
 - `PUT` `b/{bucket}/o/{object}/acl/{entity}` — `objectAccessControls.update`
+- `POST` `b/{bucket}/o/bulkRestore` — `objects.bulkRestore`
 - `POST` `b/{bucket}/o/{sourceObject}/moveTo/o/{destinationObject}` — `objects.move`
 - `POST` `b/{bucket}/o/{object}/restore` — `objects.restore`
-- `POST` `b/{bucket}/o/bulkRestore` — `objects.bulkRestore`
+- `POST` `b/{bucket}/operations/{operationId}/advanceRelocateBucket` — `operations.advanceRelocateBucket`
+- `POST` `b/{bucket}/operations/{operationId}/cancel` — `operations.cancel`
+- `GET` `b/{bucket}/operations/{operationId}` — `operations.get`
+- `GET` `b/{bucket}/operations` — `operations.list`
 - `POST` `projects/{projectId}/hmacKeys` — `projects.hmacKeys.create`
 - `DELETE` `projects/{projectId}/hmacKeys/{accessId}` — `projects.hmacKeys.delete`
 - `GET` `projects/{projectId}/hmacKeys/{accessId}` — `projects.hmacKeys.get`
 - `GET` `projects/{projectId}/hmacKeys` — `projects.hmacKeys.list`
 - `PUT` `projects/{projectId}/hmacKeys/{accessId}` — `projects.hmacKeys.update`
 - `GET` `projects/{projectId}/serviceAccount` — `projects.serviceAccount.get`
+- `POST` `b/{bucket}/rapidCaches/{rapidCacheId}/disable` — `rapidCaches.disable`
+- `GET` `b/{bucket}/rapidCaches/{rapidCacheId}` — `rapidCaches.get`
+- `POST` `b/{bucket}/rapidCaches` — `rapidCaches.insert`
+- `GET` `b/{bucket}/rapidCaches` — `rapidCaches.list`
+- `PATCH` `b/{bucket}/rapidCaches/{rapidCacheId}` — `rapidCaches.update`
 
 ## IAM endpoints (deferred)
 

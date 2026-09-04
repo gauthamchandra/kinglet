@@ -7,12 +7,12 @@
  *   2. Official @google-cloud/pubsub client library
  */
 
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import type { Server } from 'bun';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { v1 } from '@google-cloud/pubsub';
+import type { Server } from 'bun';
 import { StorageManager } from '@/core/storage/manager.ts';
-import { Logger } from '@/shared/utils/logger.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
+import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
 import { buildRouter, createFakeAuth } from './e2e-helpers.ts';
 
@@ -650,11 +650,13 @@ describe('Pub/Sub E2E: Client Library', () => {
       maxMessages: 10,
     });
 
-    expect(pullResponse.receivedMessages).toBeInstanceOf(Array);
-    expect(pullResponse.receivedMessages!.length).toBe(2);
+    const receivedMessages = pullResponse.receivedMessages;
+
+    expect(receivedMessages).toBeInstanceOf(Array);
+    expect(receivedMessages?.length).toBe(2);
 
     // Acknowledge
-    const ackIds = pullResponse.receivedMessages!.map(
+    const ackIds = (receivedMessages ?? []).map(
       (m: { ackId?: string | null }) => m.ackId as string
     );
 

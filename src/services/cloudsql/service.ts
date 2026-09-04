@@ -3,6 +3,8 @@
  */
 
 import type { BaseRecord } from '@/core/storage/types.ts';
+import type { CloudSqlDataPlane } from './data-plane/data-plane-manager.ts';
+import { DisabledDataPlane } from './data-plane/data-plane-manager.ts';
 import type { CloudSqlRepository } from './repository.ts';
 import type {
   DatabaseInstanceResponse,
@@ -59,9 +61,11 @@ export interface ListOperationsResponse {
 
 export class SqlAdminService {
   private repo: CloudSqlRepository;
+  private dataPlane: CloudSqlDataPlane;
 
-  constructor(repo: CloudSqlRepository) {
+  constructor(repo: CloudSqlRepository, dataPlane: CloudSqlDataPlane = new DisabledDataPlane()) {
     this.repo = repo;
+    this.dataPlane = dataPlane;
   }
 
   // ── Instances ──
@@ -127,6 +131,35 @@ export class SqlAdminService {
       password: request.rootPassword ?? '',
     });
 
+    // Started eagerly, before the DONE operation is returned, so a caller that
+    // has seen the create succeed can connect immediately — the same contract
+    // Memorystore's data plane gives (see ADR-007).
+    try {
+      await this.dataPlane.startInstance(project, request.name, ['postgres']);
+    } catch (error) {
+      // An instance whose rows exist but whose endpoint never came up would
+      // advertise an address nothing answers on, and no later call would ever
+      // retry the start. Undoing the rows keeps create atomic: it either
+      // yields a connectable instance or nothing at all.
+      //
+      // The data plane is dropped rather than merely stopped, because a failed
+      // start may already have written database files. Leaving those behind
+      // would hand the next create of the same name a half-built instance's
+      // data. Dropping is safe here in a way it would not be inside
+      // `startInstance` — which also runs on restart, where deleting a
+      // persisted instance's files because a port was busy would be
+      // catastrophic.
+      await this.dataPlane.dropInstance(project, request.name);
+      await this.repo.deleteInstance(project, request.name);
+
+      throw new SqlAdminError(
+        'INTERNAL',
+        `Failed to start the data plane for ${project}/${request.name}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+
     return this.recordOperation(project, OperationType.CREATE, record.name);
   }
 
@@ -152,6 +185,7 @@ export class SqlAdminService {
   async deleteInstance(project: string, name: string): Promise<OperationResponse> {
     await this.requireInstance(project, name);
 
+    await this.dataPlane.dropInstance(project, name);
     await this.repo.deleteInstance(project, name);
 
     return this.recordOperation(project, OperationType.DELETE, name);
@@ -167,6 +201,14 @@ export class SqlAdminService {
 
   async restartInstance(project: string, name: string): Promise<OperationResponse> {
     await this.requireInstance(project, name);
+
+    const databases = await this.repo.listDatabases(project, name);
+
+    await this.dataPlane.restartInstance(
+      project,
+      name,
+      databases.map(database => database.name)
+    );
 
     return this.recordOperation(project, OperationType.RESTART, name);
   }
@@ -232,6 +274,22 @@ export class SqlAdminService {
       charset: request.charset,
       collation: request.collation,
     });
+
+    try {
+      await this.dataPlane.openDatabase(project, instance, request.name);
+    } catch (error) {
+      // Same contract as createInstance: without this the row would survive a
+      // failed open, so nothing would serve the database and retrying would
+      // only ever return ALREADY_EXISTS.
+      await this.repo.deleteDatabase(project, instance, request.name);
+
+      throw new SqlAdminError(
+        'INTERNAL',
+        `Failed to open database ${request.name} on ${project}/${instance}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
 
     return this.recordOperation(project, OperationType.CREATE_DATABASE, instance);
   }
@@ -313,6 +371,8 @@ export class SqlAdminService {
         `Database ${name} does not exist on instance ${project}/${instance}`
       );
     }
+
+    await this.dataPlane.dropDatabase(project, instance, name);
 
     return this.recordOperation(project, OperationType.DELETE_DATABASE, instance);
   }

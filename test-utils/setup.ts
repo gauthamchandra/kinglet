@@ -2,7 +2,7 @@
  * Test setup and configuration
  */
 
-import { beforeAll, afterAll, beforeEach, afterEach } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach } from 'bun:test';
 
 // Global test setup
 beforeAll(async () => {

@@ -5,14 +5,14 @@
  * E2E tests verify complete workflows across all services and components.
  */
 
-import { beforeAll, afterAll } from 'bun:test';
-import type { Config } from '@/shared/types/index.ts';
+import { afterAll, beforeAll } from 'bun:test';
+import type { Config, ServerConfig } from '@/shared/types/index.ts';
 import { getAvailablePorts } from '../test-utils/helpers.ts';
 
 // Test configuration for E2E tests - will be populated with dynamic ports
 let E2E_TEST_CONFIG: Partial<Config>;
 
-let testServer: any = null;
+let testServer: { stop: () => Promise<void> } | null = null;
 
 /**
  * Global setup for E2E tests - starts the full kinglet server
@@ -53,9 +53,6 @@ beforeAll(async () => {
   // TODO: When the main server is implemented, start it here
   // testServer = await startServer(E2E_TEST_CONFIG);
 
-  // Wait for server to be ready
-  // await waitForServerReady(E2E_TEST_CONFIG.server!.httpPort!);
-
   console.log('✅ E2E test environment ready');
 });
 
@@ -74,25 +71,16 @@ afterAll(async () => {
 });
 
 /**
- * Helper function to wait for server to be ready
+ * Read the server config, failing loudly if `beforeAll` has not run yet
  */
-async function waitForServerReady(port: number, timeout: number = 10000): Promise<void> {
-  const start = Date.now();
+function requireServerConfig(): ServerConfig {
+  const server = E2E_TEST_CONFIG?.server;
 
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(`http://localhost:${port}/healthcheck`);
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      // Server not ready yet
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 100));
+  if (!server) {
+    throw new Error('E2E test configuration is not initialised');
   }
 
-  throw new Error(`Server failed to start within ${timeout}ms`);
+  return server;
 }
 
 /**
@@ -106,12 +94,12 @@ export function getE2EConfig(): Partial<Config> {
  * Get the base URL for HTTP requests in E2E tests
  */
 export function getBaseUrl(): string {
-  return `http://localhost:${E2E_TEST_CONFIG.server!.httpPort!}`;
+  return `http://localhost:${requireServerConfig().httpPort}`;
 }
 
 /**
  * Get the gRPC endpoint for E2E tests
  */
 export function getGrpcEndpoint(): string {
-  return `localhost:${E2E_TEST_CONFIG.server!.grpcPort!}`;
+  return `localhost:${requireServerConfig().grpcPort}`;
 }

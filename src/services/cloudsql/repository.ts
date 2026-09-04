@@ -93,6 +93,22 @@ export class CloudSqlRepository {
     };
   }
 
+  /**
+   * Every instance in every project, for restoring the data plane on startup:
+   * the persisted rows are the only record of what was running before the
+   * emulator went down, and they are not scoped to one project.
+   */
+  async listAllInstances(): Promise<SqlInstanceRecord[]> {
+    const result = await this.storage.find<SqlInstanceRecord>(CLOUDSQL_INSTANCES_TABLE, {
+      sort: [
+        { field: 'project', direction: 'asc' },
+        { field: 'name', direction: 'asc' },
+      ],
+    });
+
+    return result.data;
+  }
+
   async updateInstance(
     project: string,
     name: string,

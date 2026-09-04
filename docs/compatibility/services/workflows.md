@@ -11,16 +11,16 @@ Workflow CRUD, revisions, and LRO operations.
 
 ## Implemented endpoints
 
-- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `GET` `v1/{+name}` — `projects.locations.get`
-- `GET` `v1/{+name}/operations` — `projects.locations.operations.list`
-- `GET` `v1/{+name}` — `projects.locations.operations.get`
+- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `DELETE` `v1/{+name}` — `projects.locations.operations.delete`
-- `GET` `v1/{+parent}/workflows` — `projects.locations.workflows.list`
-- `GET` `v1/{+name}` — `projects.locations.workflows.get`
-- `DELETE` `v1/{+name}` — `projects.locations.workflows.delete`
-- `GET` `v1/{+name}:listRevisions` — `projects.locations.workflows.listRevisions`
+- `GET` `v1/{+name}` — `projects.locations.operations.get`
+- `GET` `v1/{+name}/operations` — `projects.locations.operations.list`
 - `POST` `v1/{+parent}/workflows` — `projects.locations.workflows.create`
+- `DELETE` `v1/{+name}` — `projects.locations.workflows.delete`
+- `GET` `v1/{+name}` — `projects.locations.workflows.get`
+- `GET` `v1/{+parent}/workflows` — `projects.locations.workflows.list`
+- `GET` `v1/{+name}:listRevisions` — `projects.locations.workflows.listRevisions`
 - `PATCH` `v1/{+name}` — `projects.locations.workflows.patch`
 
 ## Missing endpoints

@@ -25,8 +25,8 @@
     "test:e2e": "cd e2e && bun test",
     "test:terraform": "./scripts/terraform-e2e.sh",
     "test:terraform:case": "./scripts/terraform-e2e.sh",
-    "lint": "bunx tsc --noEmit && biome check src/ && knip",
-    "lint:fix": "bunx tsc --noEmit && biome check --write src/",
+    "lint": "bunx tsc --noEmit && biome check . && knip",
+    "lint:fix": "bunx tsc --noEmit && biome check --write .",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "healthcheck": "bun run src/healthcheck.ts",
@@ -64,6 +64,7 @@
     "@google-cloud/storage": "^7.19.0",
     "@google-cloud/tasks": "^6.2.1",
     "@google-cloud/workflows": "4.3.0",
+    "@googleapis/sqladmin": "^38.0.0",
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.5.2",
@@ -79,6 +80,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-pgvector": "0.0.9",
     "@grpc/grpc-js": "^1.14.0",
     "@grpc/proto-loader": "^0.8.0",
     "cron-parser": "4.9.0",

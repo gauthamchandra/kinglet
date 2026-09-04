@@ -5,7 +5,6 @@
 
 import { mock } from 'bun:test';
 import { Logger } from '@/shared/utils/logger.ts';
-import type { LogLevel } from '@/shared/utils/logger.ts';
 
 /**
  * Create a complete mock Logger that implements all Logger interface methods
@@ -21,10 +20,12 @@ export function createMockLogger(): Logger {
     constructor() {
       super('test-component', 'info');
       // Override methods with mocks
-      (this as any).debug = debugMock;
-      (this as any).info = infoMock;
-      (this as any).warn = warnMock;
-      (this as any).error = errorMock;
+      Object.assign(this, {
+        debug: debugMock,
+        info: infoMock,
+        warn: warnMock,
+        error: errorMock,
+      });
     }
   })();
 

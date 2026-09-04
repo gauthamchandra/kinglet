@@ -131,7 +131,7 @@ function describeManualInstall(plan: ValkeyInstallPlan | null): string {
  * tests keep skipping as though nothing had been installed at all.
  */
 export function isRedisLinkTarget(symlinkTarget: string | null): boolean {
-  return symlinkTarget != null && symlinkTarget.includes('/Cellar/redis/');
+  return symlinkTarget?.includes('/Cellar/redis/') ?? false;
 }
 
 function resolveHomebrewPrefix(): string | null {
