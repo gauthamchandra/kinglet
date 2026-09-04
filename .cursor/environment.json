@@ -1,0 +1,12 @@
+{
+  "name": "kinglet",
+  "install": "./.cursor/install.sh",
+  "terminals": [
+    {
+      "name": "kinglet",
+      "command": "bun run dev",
+      "description": "kinglet emulator with hot reload (HTTP :8765, gRPC :8766)."
+    }
+  ],
+  "ports": [{ "name": "http", "port": 8765 }, { "name": "grpc", "port": 8766 }]
+}
