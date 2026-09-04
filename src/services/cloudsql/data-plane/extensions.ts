@@ -8,11 +8,15 @@
  * without the emulator having to rebuild the database underneath a live
  * connection.
  *
- * <p>This is every contrib extension `@electric-sql/pglite` ships, plus
- * pgvector and PostGIS. Those two are separate packages because of their size
- * — PostGIS alone is ~19 MB and adds roughly half a second to a database's
- * boot — but Cloud SQL for PostgreSQL supports both, and an emulator that
- * cannot run a geospatial query is not much use to code that does.
+ * <p>This is every contrib extension `@electric-sql/pglite` ships plus
+ * pgvector, which is a separate package because of its size.
+ *
+ * <p>PostGIS is deliberately left out even though `@electric-sql/pglite-postgis`
+ * exists and works: it is ~19 MB of wasm and takes a database's boot from
+ * ~0.7 s to ~1.3 s locally and to ~4.3 s on a CI runner. Paid per database,
+ * that is enough to push tests past Bun's default timeout and to make an
+ * emulated instance slow to create on modest hardware. Adding it should be a
+ * deliberate opt-in rather than a cost every user pays.
  *
  * <p>Nothing in this module is Cloud-SQL-specific, so AlloyDB can reuse it.
  */
@@ -44,7 +48,6 @@ import { tsm_system_time } from '@electric-sql/pglite/contrib/tsm_system_time';
 import { unaccent } from '@electric-sql/pglite/contrib/unaccent';
 import { uuid_ossp } from '@electric-sql/pglite/contrib/uuid_ossp';
 import { vector } from '@electric-sql/pglite-pgvector';
-import { postgis } from '@electric-sql/pglite-postgis';
 
 export const DATA_PLANE_EXTENSIONS = {
   amcheck,
@@ -72,7 +75,6 @@ export const DATA_PLANE_EXTENSIONS = {
   tsm_system_rows,
   tsm_system_time,
   unaccent,
-  postgis,
   uuid_ossp,
   vector,
 } as const;

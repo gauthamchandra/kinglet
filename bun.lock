@@ -7,7 +7,6 @@
       "dependencies": {
         "@electric-sql/pglite": "0.5.8",
         "@electric-sql/pglite-pgvector": "0.0.9",
-        "@electric-sql/pglite-postgis": "0.2.8",
         "@grpc/grpc-js": "^1.14.0",
         "@grpc/proto-loader": "^0.8.0",
         "cron-parser": "4.9.0",
@@ -99,8 +98,6 @@
     "@electric-sql/pglite": ["@electric-sql/pglite@0.5.8", "", {}, "sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q=="],
 
     "@electric-sql/pglite-pgvector": ["@electric-sql/pglite-pgvector@0.0.9", "", { "peerDependencies": { "@electric-sql/pglite": "0.5.8" } }, "sha512-ue4iBW651gDQwBwn97Ekv1lYGPvXa1ymHbRbTCSL0Ib286PRDD1VDOwzwEoekZuO/wctMbTzKzlwdgDwYrqZ8A=="],
-
-    "@electric-sql/pglite-postgis": ["@electric-sql/pglite-postgis@0.2.8", "", { "peerDependencies": { "@electric-sql/pglite": "0.5.8" } }, "sha512-B7XVSVuj+9TEVfIgPSlbWbhKvROENHTp0Ex6A44kTeTqy4FAm31uGsi7fxx7gqN0Mdo5qH1xv5Fu42dHwKZpqg=="],
 
     "@emnapi/core": ["@emnapi/core@1.8.1", "", { "dependencies": { "@emnapi/wasi-threads": "1.1.0", "tslib": "^2.4.0" } }, "sha512-AvT9QFpxK0Zd8J0jopedNm+w/2fIzvtPKPjqyw9jwvBaReTTqPBk9Hixaz7KbjimP+QNz605/XnjFcDAL2pqBg=="],
 

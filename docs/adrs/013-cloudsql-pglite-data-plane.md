@@ -57,10 +57,10 @@ exactly as ADR-003 describes.
   change — every storage type had been running in-memory.
 - **Extensions are fixed at build time.** PGlite links each extension's wasm
   when the database is created, so every database is built with all 26 contrib
-  extensions PGlite ships plus pgvector and PostGIS. That is what lets
-  `CREATE EXTENSION pg_trgm` work later without rebuilding the database under a
-  live connection. pgvector and PostGIS are separate packages, peer-pinned to
-  the same PGlite version, so all three move together.
+  extensions PGlite ships plus pgvector. That is what lets `CREATE EXTENSION
+  pg_trgm` work later without rebuilding the database under a live connection.
+  pgvector is a separate package peer-pinned to the same PGlite version, so the
+  two move together.
 - The data plane is **on by default**, for ADR-007's reason: an instance a
   client cannot connect to is metadata, not emulation. `CLOUDSQL_DATA_PLANE=false`
   turns it off. Unlike Memorystore there is no external binary to be missing, so
@@ -171,10 +171,13 @@ answers "does my Terraform work?" but not "does my application code work?".
   one PGlite is one database, and PGlite has no `CREATE DATABASE`.
 - **The engine is Postgres 18 whatever `databaseVersion` says.** A
   `POSTGRES_14` instance still answers `SELECT version()` with 18.
-- **Extensions cost boot time.** All 26 contrib extensions PGlite ships are
-  available, plus pgvector and PostGIS. PostGIS is the expensive one: ~19 MB of
-  wasm, and it takes a database's boot from roughly 0.7 s to 1.3 s. That is
-  paid per database, since one PGlite is one database.
+- **No PostGIS.** All 26 contrib extensions PGlite ships are available, plus
+  pgvector. `@electric-sql/pglite-postgis` does exist and works — PostGIS 3.6
+  with GEOS and PROJ, verified against this PGlite version — but it costs ~19 MB
+  of wasm and takes a database's boot from ~0.7 s to ~1.3 s locally and to
+  ~4.3 s on a CI runner. Paid per database, that is enough to push tests past
+  Bun's default timeout and to make creating an instance slow on modest
+  hardware. It belongs behind an opt-in, not in the default set.
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
   nothing restricts who may connect beyond user and password.
 - `User.type` values other than `BUILT_IN` behave like `BUILT_IN`.
