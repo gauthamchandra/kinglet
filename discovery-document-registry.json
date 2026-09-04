@@ -69,6 +69,13 @@
       "discoveryUrl": "https://sqladmin.googleapis.com/$discovery/rest?version=v1",
       "version": "v1",
       "implementationPath": "src/services/cloudsql/"
+    },
+    {
+      "name": "compute",
+      "displayName": "Cloud Armor (Compute)",
+      "discoveryUrl": "https://compute.googleapis.com/$discovery/rest?version=v1",
+      "version": "v1",
+      "implementationPath": "src/services/compute/"
     }
   ]
 }

@@ -56,6 +56,12 @@ export const TERRAFORM_VALIDATION_CASES = [
     services: ['pubsub', 'scheduler'],
     targets: ['google_pubsub_topic.events', 'google_cloud_scheduler_job.pubsub_publish'],
   },
+  {
+    id: 'armor',
+    description: 'Cloud Armor security policy with path deny + default allow',
+    services: ['compute'],
+    targets: ['google_compute_security_policy.example'],
+  },
 ] as const satisfies readonly TerraformValidationCase[];
 
 export type TerraformValidationCaseId = (typeof TERRAFORM_VALIDATION_CASES)[number]['id'];

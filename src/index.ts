@@ -17,6 +17,7 @@ import { toStorageConfig } from '@/core/storage/config.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
+import { ComputeService } from '@/services/compute/index.ts';
 import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
@@ -39,6 +40,7 @@ let memorystoreService: MemorystoreService | null = null;
 let alloydbService: AlloyDbService | null = null;
 let kmsService: CloudKmsService | null = null;
 let cloudSqlService: CloudSqlService | null = null;
+let computeService: ComputeService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -191,6 +193,20 @@ async function main(): Promise<void> {
       logger.info('Cloud SQL service enabled and started');
     }
 
+    if (config.services.compute.enabled) {
+      computeService = new ComputeService(storageManager, new Logger('Compute'), {
+        listenerPort: config.services.compute.listenerPort,
+        defaultPolicyName: config.services.compute.defaultPolicy,
+      });
+      await computeService.initialize();
+
+      for (const route of computeService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      logger.info('Compute (Cloud Armor) control plane enabled');
+    }
+
     // Workflows, Memorystore and AlloyDB all expose `/operations` routes of the same
     // shape (see docs/adrs/007-memorystore-valkey-data-plane.md). A composed route set
     // queries every store, so an LRO is retrievable regardless of which service
@@ -256,6 +272,18 @@ async function main(): Promise<void> {
     });
 
     logger.info(`kinglet started on port ${server.port}`);
+
+    // Bind the Armor listener after the control-plane HTTP server so a
+    // COMPUTE_LISTENER_PORT that matches HTTP_PORT cannot steal the port and
+    // take the whole emulator down. start() also skips that reserved port.
+    if (computeService != null) {
+      const computeStart = computeService.start(server.port);
+
+      logger.info('Compute (Cloud Armor) listener', {
+        listenerStarted: computeStart.listenerStarted,
+        listenerPort: computeStart.listenerPort,
+      });
+    }
   } catch (error) {
     logger.error('Failed to start kinglet:', error);
 
@@ -266,6 +294,7 @@ async function main(): Promise<void> {
     // retry and make its ports look occupied.
     await memorystoreService?.stop();
     await cloudSqlService?.stop();
+    await computeService?.stop();
     process.exit(1);
   }
 }
@@ -336,6 +365,11 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     if (cloudSqlService) {
       await cloudSqlService.stop();
       logger.info('Cloud SQL service stopped');
+    }
+
+    if (computeService) {
+      await computeService.stop();
+      logger.info('Compute service stopped');
     }
 
     if (storageManager) {

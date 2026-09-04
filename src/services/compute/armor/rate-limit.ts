@@ -194,24 +194,22 @@ export function applyRateLimit(
     }
   }
 
-  if (mode === 'commit') {
-    bump(rateWindows, bucketKey, windowId);
+  bump(rateWindows, bucketKey, windowId);
 
-    if (action === 'rate_based_ban') {
-      const banThreshold = options.banThreshold;
+  if (action === 'rate_based_ban') {
+    const banThreshold = options.banThreshold;
 
-      if (banThreshold?.count != null && banThreshold.intervalSec != null) {
-        const banWindowId = Math.floor(now / (banThreshold.intervalSec * 1000));
+    if (banThreshold?.count != null && banThreshold.intervalSec != null) {
+      const banWindowId = Math.floor(now / (banThreshold.intervalSec * 1000));
 
-        bump(banWindows, `banThresh\0${bucketKey}`, banWindowId);
-      }
+      bump(banWindows, `banThresh\0${bucketKey}`, banWindowId);
     }
+  }
 
-    if (wouldBan) {
-      const durationSec = options.banDurationSec ?? 60;
+  if (mode === 'commit' && wouldBan) {
+    const durationSec = options.banDurationSec ?? 60;
 
-      bans.set(bucketKey, now + durationSec * 1000);
-    }
+    bans.set(bucketKey, now + durationSec * 1000);
   }
 
   if (wouldBan || nextRateCount > limit) {

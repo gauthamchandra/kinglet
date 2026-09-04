@@ -32,6 +32,7 @@ interface RegistryService {
   readonly discoveryUrl: string;
   readonly version: string;
   readonly implementationPath: string;
+  readonly resources?: readonly string[];
 }
 
 interface RegistryFile {
@@ -157,7 +158,12 @@ async function buildServiceCoverage(
   }
 
   const discovery = parseDiscoveryDocument(discoveryJson);
-  const { comparable, iamDeferred } = partitionDiscoveryMethods(discovery.methods);
+  const allMethods = registry.resources
+    ? discovery.methods.filter(m =>
+        (registry.resources as readonly string[]).some(r => m.id.startsWith(`${r}.`))
+      )
+    : discovery.methods;
+  const { comparable, iamDeferred } = partitionDiscoveryMethods(allMethods);
 
   const implemented: DiscoveryMethod[] = [];
   const missing: DiscoveryMethod[] = [];
