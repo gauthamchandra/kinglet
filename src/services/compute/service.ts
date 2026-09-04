@@ -359,7 +359,10 @@ export class SecurityPolicyService {
     const record = await this.repository.getPolicyByProjectAndName(project, name);
 
     if (record == null) {
-      return null;
+      throw new SecurityPolicyServiceError(
+        `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
+        'NOT_FOUND'
+      );
     }
 
     const rules = JSON.parse(record.rules) as SecurityPolicyRule[];

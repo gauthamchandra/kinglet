@@ -109,6 +109,17 @@ describe('ComputeRepository policies', () => {
     expect(second.nextPageToken).toBeUndefined();
   });
 
+  test('treats a zero or negative pageSize as the default page', async () => {
+    await repository.createPolicy(policyData('proj', 'a'));
+    await repository.createPolicy(policyData('proj', 'b'));
+
+    const zero = await repository.listPoliciesByProject('proj', 0);
+    const negative = await repository.listPoliciesByProject('proj', -1);
+
+    expect(zero.items).toHaveLength(2);
+    expect(negative.items).toHaveLength(2);
+  });
+
   test('updates and deletes a policy', async () => {
     const created = await repository.createPolicy(policyData('proj', 'pol'));
     const updated = await repository.updatePolicy(created.id, { fingerprint: 'next' });

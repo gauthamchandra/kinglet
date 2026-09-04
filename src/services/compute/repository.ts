@@ -63,7 +63,7 @@ export class ComputeRepository {
     pageToken?: string
   ): Promise<ListPoliciesResult> {
     const offset = parseOffsetToken(pageToken);
-    const limit = pageSize ?? DEFAULT_LIST_PAGE_SIZE;
+    const limit = pageSize != null && pageSize > 0 ? pageSize : DEFAULT_LIST_PAGE_SIZE;
 
     const result = await this.storage.find<SecurityPolicyRecord>(SECURITY_POLICIES_TABLE, {
       filter: {

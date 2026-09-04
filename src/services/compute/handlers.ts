@@ -12,6 +12,7 @@ import type {
   RouteResponse,
 } from '@/core/gateway/request-router.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { parsePageSize } from '@/shared/utils/pagination.ts';
 import { type SecurityPolicyService, SecurityPolicyServiceError } from './service.ts';
 
 export class ComputeHandlers {
@@ -149,10 +150,7 @@ export class ComputeHandlers {
   private async handleList(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const project = req.params.project ?? '';
-      const pageSize =
-        req.query.maxResults != null
-          ? Number.parseInt(req.query.maxResults as string, 10)
-          : undefined;
+      const pageSize = parsePageSize(req.query.maxResults);
       const pageToken = req.query.pageToken as string | undefined;
 
       const result = await this.service.list(project, pageSize, pageToken);

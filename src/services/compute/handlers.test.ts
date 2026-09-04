@@ -163,6 +163,27 @@ describe('securityPolicies.list', () => {
 
     expect(body.items).toBeUndefined();
   });
+
+  test('GET treats maxResults=0 and garbage as the default page size', async () => {
+    for (let i = 0; i < 3; i++) {
+      await request('POST', `${BASE}/securityPolicies`, { name: `pol-${i}` });
+    }
+
+    const zero = await request('GET', `${BASE}/securityPolicies`, undefined, { maxResults: '0' });
+    const garbage = await request('GET', `${BASE}/securityPolicies`, undefined, {
+      maxResults: 'nope',
+    });
+    const limited = await request('GET', `${BASE}/securityPolicies`, undefined, {
+      maxResults: '1',
+    });
+
+    expect(zero.status).toBe(200);
+    expect(garbage.status).toBe(200);
+    expect(limited.status).toBe(200);
+    expect(((await zero.json()) as { items?: unknown[] }).items).toHaveLength(3);
+    expect(((await garbage.json()) as { items?: unknown[] }).items).toHaveLength(3);
+    expect(((await limited.json()) as { items?: unknown[] }).items).toHaveLength(1);
+  });
 });
 
 describe('securityPolicies.patch', () => {
@@ -234,6 +255,18 @@ describe('securityPolicies rule RPCs', () => {
     const body = (await res.json()) as { priority: number };
 
     expect(body.priority).toBe(2147483647);
+  });
+
+  test('getRule GET missing policy returns policy-not-found', async () => {
+    const res = await request('GET', `${BASE}/securityPolicies/missing/getRule`, undefined, {
+      priority: '100',
+    });
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { message: string; status: string } };
+
+    expect(body.error.status).toBe('NOT_FOUND');
+    expect(body.error.message).toContain("securityPolicies/missing' was not found");
   });
 
   test('removeRule POST returns 200', async () => {

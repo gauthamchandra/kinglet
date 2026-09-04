@@ -433,6 +433,14 @@ describe('getRule', () => {
 
     expect(rule).toBeNull();
   });
+
+  test('throws NOT_FOUND when the policy is missing', async () => {
+    const promise = service.getRule('proj', 'missing', 100);
+
+    await expect(promise).rejects.toBeInstanceOf(SecurityPolicyServiceError);
+    await expect(promise).rejects.toHaveProperty('status', 'NOT_FOUND');
+    await expect(promise).rejects.toThrow("securityPolicies/missing' was not found");
+  });
 });
 
 describe('patchRule', () => {
