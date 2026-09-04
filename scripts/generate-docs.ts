@@ -10,12 +10,12 @@
 
 import { join } from 'node:path';
 import {
+  type DiscoveryMethod,
   parseDiscoveryDocument,
   partitionDiscoveryMethods,
-  type DiscoveryMethod,
 } from './lib/discovery-document.ts';
+import { type ExtractedRoute, extractRoutesForAllServices } from './lib/extract-service-routes.ts';
 import { fetchDiscoveryDocument } from './lib/fetch-discovery-document.ts';
-import { extractRoutesForAllServices, type ExtractedRoute } from './lib/extract-service-routes.ts';
 import { findMatchingRoute } from './lib/path-matching.ts';
 import { pruneGeneratedMarkdown } from './lib/prune-generated-docs.ts';
 

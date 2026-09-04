@@ -5,7 +5,7 @@
  * More comprehensive E2E tests will be added as services are implemented.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { getBaseUrl, getE2EConfig } from './setup.ts';
 
 describe('Basic E2E Workflow', () => {

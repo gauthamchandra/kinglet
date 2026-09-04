@@ -2,10 +2,9 @@
  * Shared database test utilities
  */
 
-import type { StorageProvider } from '@/shared/types/index.ts';
-import type { TableSchema, StorageConfig } from '@/core/storage/types.ts';
-import { SQLiteStorageProvider } from '@/core/storage/providers/sqlite.ts';
 import { MemoryStorageProvider } from '@/core/storage/providers/memory.ts';
+import { SQLiteStorageProvider } from '@/core/storage/providers/sqlite.ts';
+import type { StorageConfig, TableSchema } from '@/core/storage/types.ts';
 
 /**
  * Create a test SQLite storage provider with in-memory database

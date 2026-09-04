@@ -283,8 +283,12 @@ See [ADR-001](docs/adrs/001-bun-runtime-choice.md). Use `Bun.serve()` (not Expre
 
 ### Lint must be clean
 
-`bun run lint` runs three tools — `tsc --noEmit`, `biome check src/`, and `knip`. All three
-must pass with zero errors *and* zero warnings.
+`bun run lint` runs three tools — `tsc --noEmit`, `biome check .`, and `knip`. All three
+must pass with zero errors *and* zero warnings. Biome covers the whole repo, not just `src/`,
+so `e2e/`, `scripts/` and `test-utils/` are held to the same bar.
+
+Import order is enforced repo-wide by Biome's `organizeImports` assist, so it is deterministic
+rather than a matter of taste — `bun run lint:fix` rewrites it for you.
 
 **Do not add entries to `knip.json`'s `ignoreIssues` to make the build pass.** That list is a
 record of accepted debt, not a pressure valve. If your change requires a new suppression, say
