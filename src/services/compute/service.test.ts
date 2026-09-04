@@ -284,6 +284,18 @@ describe('list', () => {
     expect(result.items).toHaveLength(1);
     expect(result.items?.[0]?.name).toBe('pol');
   });
+
+  test('listAll returns policies from every project', async () => {
+    await service.insert('proj-a', 'alpha', {});
+    await service.insert('proj-b', 'beta', {});
+
+    const items = await service.listAll();
+    const names = items.map(p => p.name);
+
+    expect(items).toHaveLength(2);
+    expect(names).toContain('alpha');
+    expect(names).toContain('beta');
+  });
 });
 
 describe('delete', () => {
@@ -366,6 +378,64 @@ describe('addRule', () => {
 
     await expect(promise).rejects.toBeInstanceOf(SecurityPolicyServiceError);
     await expect(promise).rejects.toHaveProperty('status', 'INVALID_ARGUMENT');
+  });
+
+  test('serializes concurrent addRule calls so both priorities persist', async () => {
+    await service.insert('proj', 'pol', {});
+
+    const first = {
+      priority: 1000,
+      action: 'deny(403)',
+      match: { expr: { expression: "request.path.startsWith('/a')" } },
+    };
+    const second = {
+      priority: 2000,
+      action: 'deny(404)',
+      match: { expr: { expression: "request.path.startsWith('/b')" } },
+    };
+
+    await Promise.all([
+      service.addRule('proj', 'pol', first),
+      service.addRule('proj', 'pol', second),
+    ]);
+
+    const policy = await service.get('proj', 'pol');
+    const priorities = policy?.rules.map(r => r.priority) ?? [];
+
+    expect(priorities).toContain(1000);
+    expect(priorities).toContain(2000);
+    expect(priorities).toContain(2147483647);
+  });
+
+  test('concurrent addRule of the same priority keeps one winner', async () => {
+    await service.insert('proj', 'pol', {});
+
+    const rule = {
+      priority: 1000,
+      action: 'deny(403)',
+      match: { expr: { expression: "request.path.startsWith('/dup')" } },
+    };
+
+    const results = await Promise.allSettled([
+      service.addRule('proj', 'pol', rule),
+      service.addRule('proj', 'pol', rule),
+    ]);
+
+    const fulfilled = results.filter(result => result.status === 'fulfilled');
+    const rejected = results.filter(result => result.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+
+    const reason = (rejected[0] as PromiseRejectedResult).reason;
+
+    expect(reason).toBeInstanceOf(SecurityPolicyServiceError);
+    expect(reason).toHaveProperty('status', 'INVALID_ARGUMENT');
+
+    const policy = await service.get('proj', 'pol');
+    const matching = policy?.rules.filter(r => r.priority === 1000) ?? [];
+
+    expect(matching).toHaveLength(1);
   });
 });
 

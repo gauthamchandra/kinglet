@@ -189,7 +189,6 @@ async function main(): Promise<void> {
       computeService = new ComputeService(storageManager, new Logger('Compute'), {
         listenerPort: config.services.compute.listenerPort,
         defaultPolicyName: config.services.compute.defaultPolicy,
-        project: config.auth.mockCredentials?.projectId ?? 'kinglet-project',
       });
       await computeService.initialize();
 
@@ -197,8 +196,12 @@ async function main(): Promise<void> {
         router.addRoute(route);
       }
 
-      computeService.start();
-      logger.info('Compute (Cloud Armor) service enabled and started');
+      const computeStart = computeService.start();
+
+      logger.info('Compute (Cloud Armor) service enabled', {
+        listenerStarted: computeStart.listenerStarted,
+        listenerPort: computeStart.listenerPort,
+      });
     }
 
     // Workflows, Memorystore and AlloyDB all expose `/operations` routes of the same

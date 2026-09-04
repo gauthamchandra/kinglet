@@ -225,7 +225,7 @@ export function selectPolicy(
   defaultPolicyName: string | undefined
 ): PolicySelectionResult {
   if (policies.length === 0) {
-    return { error: 'No security policies found in project. Cannot evaluate requests.' };
+    return { error: 'No security policies found. Cannot evaluate requests.' };
   }
 
   if (defaultPolicyName != null) {
@@ -233,7 +233,7 @@ export function selectPolicy(
 
     if (found == null) {
       return {
-        error: `Configured defaultPolicy '${defaultPolicyName}' not found in project.`,
+        error: `Configured defaultPolicy '${defaultPolicyName}' not found.`,
       };
     }
 
@@ -262,12 +262,11 @@ export function selectPolicy(
 export interface ArmorListenerOptions {
   port: number;
   defaultPolicyName?: string | undefined;
-  getPolicies: (project: string) => Promise<SecurityPolicyResponse[]>;
-  project: string;
+  getPolicies: () => Promise<SecurityPolicyResponse[]>;
 }
 
 export function startArmorListener(options: ArmorListenerOptions): Server {
-  const { port, defaultPolicyName, getPolicies, project } = options;
+  const { port, defaultPolicyName, getPolicies } = options;
 
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -293,7 +292,7 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
         return new Response('', { status: 400 });
       }
 
-      const policies = await getPolicies(project);
+      const policies = await getPolicies();
       const policyOrError = selectPolicy(policies, defaultPolicyName);
 
       if ('error' in policyOrError) {

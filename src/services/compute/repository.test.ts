@@ -109,6 +109,18 @@ describe('ComputeRepository policies', () => {
     expect(second.nextPageToken).toBeUndefined();
   });
 
+  test('lists every policy across projects', async () => {
+    await repository.createPolicy(policyData('proj-a', 'alpha'));
+    await repository.createPolicy(policyData('proj-b', 'beta'));
+
+    const items = await repository.listAllPolicies();
+    const names = items.map(item => item.name);
+
+    expect(items).toHaveLength(2);
+    expect(names).toContain('alpha');
+    expect(names).toContain('beta');
+  });
+
   test('treats a zero or negative pageSize as the default page', async () => {
     await repository.createPolicy(policyData('proj', 'a'));
     await repository.createPolicy(policyData('proj', 'b'));

@@ -50,4 +50,45 @@ describe('ComputeService', () => {
     await expect(service.stop()).resolves.toBeUndefined();
     expect(service.getRoutes().length).toBeGreaterThan(0);
   });
+
+  test('start leaves the control plane up when the listener port is taken', async () => {
+    const blocker = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => new Response(''),
+    });
+
+    const occupied = new ComputeService(storage, logger, { listenerPort: blocker.port });
+
+    await occupied.initialize();
+
+    const started = occupied.start();
+
+    expect(started.listenerStarted).toBe(false);
+    expect(occupied.getRoutes().length).toBeGreaterThan(0);
+
+    await occupied.stop();
+    blocker.stop();
+  });
+
+  test('listener evaluates a policy created under any project', async () => {
+    const listening = new ComputeService(storage, logger, { listenerPort: 0 });
+
+    await listening.initialize();
+
+    const started = listening.start();
+
+    expect(started.listenerStarted).toBe(true);
+    expect(started.listenerPort).toBeTypeOf('number');
+
+    await listening.getSecurityPolicyService().insert('other-project', 'only-policy', {});
+
+    const res = await fetch(`http://127.0.0.1:${started.listenerPort}/public`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2147483647');
+
+    await listening.stop();
+  });
 });

@@ -6,6 +6,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { validateExpression, validateSrcIpRanges } from './armor/expression.ts';
 import { assertRateLimitActionTransition, validateRateLimitOptions } from './armor/rate-limit.ts';
 import { canonicalizeIp } from './armor/request.ts';
@@ -88,10 +89,15 @@ export interface ListResult {
 export class SecurityPolicyService {
   private repository: ComputeRepository;
   private logger: Logger;
+  private policyMutex = new ResourceMutex();
 
   constructor(storage: StorageManager, logger: Logger) {
     this.repository = new ComputeRepository(storage);
     this.logger = logger;
+  }
+
+  private policyLockKey(project: string, name: string): string {
+    return `projects/${project}/global/securityPolicies/${name}`;
   }
 
   async initialize(): Promise<void> {
@@ -116,41 +122,43 @@ export class SecurityPolicyService {
     const rawRules = (body.rules as unknown[] | undefined) ?? [];
     const validatedRules = validateAndNormalizeRules(rawRules);
 
-    const existing = await this.repository.getPolicyByProjectAndName(project, name);
+    return this.policyMutex.runExclusively(this.policyLockKey(project, name), async () => {
+      const existing = await this.repository.getPolicyByProjectAndName(project, name);
 
-    if (existing != null) {
-      throw new SecurityPolicyServiceError(
-        `The resource 'projects/${project}/global/securityPolicies/${name}' already exists`,
-        'ALREADY_EXISTS'
-      );
-    }
+      if (existing != null) {
+        throw new SecurityPolicyServiceError(
+          `The resource 'projects/${project}/global/securityPolicies/${name}' already exists`,
+          'ALREADY_EXISTS'
+        );
+      }
 
-    const now = new Date().toISOString();
-    const fingerprint = generateFingerprint();
-    const selfLink = buildSecurityPolicySelfLink(project, name);
+      const now = new Date().toISOString();
+      const fingerprint = generateFingerprint();
+      const selfLink = buildSecurityPolicySelfLink(project, name);
 
-    const advancedOptionsConfig = extractAdvancedOptionsConfig(body);
-    const extraFields = extractExtraFields(body);
+      const advancedOptionsConfig = extractAdvancedOptionsConfig(body);
+      const extraFields = extractExtraFields(body);
 
-    const record = await this.repository.createPolicy({
-      name,
-      project,
-      selfLink,
-      fingerprint,
-      kind: COMPUTE_KIND_SECURITY_POLICY,
-      creationTimestamp: now,
-      rules: JSON.stringify(validatedRules),
-      advancedOptionsConfig:
-        advancedOptionsConfig != null ? JSON.stringify(advancedOptionsConfig) : null,
-      extraFields: Object.keys(extraFields).length > 0 ? JSON.stringify(extraFields) : null,
+      const record = await this.repository.createPolicy({
+        name,
+        project,
+        selfLink,
+        fingerprint,
+        kind: COMPUTE_KIND_SECURITY_POLICY,
+        creationTimestamp: now,
+        rules: JSON.stringify(validatedRules),
+        advancedOptionsConfig:
+          advancedOptionsConfig != null ? JSON.stringify(advancedOptionsConfig) : null,
+        extraFields: Object.keys(extraFields).length > 0 ? JSON.stringify(extraFields) : null,
+      });
+
+      const description2 = body.description as string | undefined;
+      const operation = await this.createOperation(project, 'insert', selfLink, record.id);
+
+      const policy = recordToResponse(record, description2);
+
+      return { policy, operation };
     });
-
-    const description2 = body.description as string | undefined;
-    const operation = await this.createOperation(project, 'insert', selfLink, record.id);
-
-    const policy = recordToResponse(record, description2);
-
-    return { policy, operation };
   }
 
   async get(project: string, name: string): Promise<SecurityPolicyResponse | null> {
@@ -181,35 +189,34 @@ export class SecurityPolicyService {
     return listResult;
   }
 
+  async listAll(): Promise<SecurityPolicyResponse[]> {
+    const records = await this.repository.listAllPolicies();
+
+    return records.map(r => recordToResponse(r));
+  }
+
   async delete(project: string, name: string): Promise<PolicyResult> {
-    const record = await this.repository.getPolicyByProjectAndName(project, name);
+    return this.policyMutex.runExclusively(this.policyLockKey(project, name), async () => {
+      const record = await this.repository.getPolicyByProjectAndName(project, name);
 
-    if (record == null) {
-      throw new SecurityPolicyServiceError(
-        `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
-        'NOT_FOUND'
-      );
-    }
+      if (record == null) {
+        throw new SecurityPolicyServiceError(
+          `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
+          'NOT_FOUND'
+        );
+      }
 
-    await this.repository.deletePolicy(record.id);
+      await this.repository.deletePolicy(record.id);
 
-    const operation = await this.createOperation(project, 'delete', record.selfLink, record.id);
+      const operation = await this.createOperation(project, 'delete', record.selfLink, record.id);
 
-    const policy = recordToResponse(record);
+      const policy = recordToResponse(record);
 
-    return { policy, operation };
+      return { policy, operation };
+    });
   }
 
   async patch(project: string, name: string, body: Record<string, unknown>): Promise<PolicyResult> {
-    const record = await this.repository.getPolicyByProjectAndName(project, name);
-
-    if (record == null) {
-      throw new SecurityPolicyServiceError(
-        `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
-        'NOT_FOUND'
-      );
-    }
-
     const description = body.description as string | undefined;
 
     if (description != null && description.length > 2048) {
@@ -219,48 +226,64 @@ export class SecurityPolicyService {
       );
     }
 
-    const updateData: Partial<Omit<SecurityPolicyRecord, 'id' | 'createdAt' | 'updatedAt'>> = {
-      fingerprint: generateFingerprint(),
-    };
+    return this.policyMutex.runExclusively(this.policyLockKey(project, name), async () => {
+      const record = await this.repository.getPolicyByProjectAndName(project, name);
 
-    if (body.rules !== undefined) {
-      const rawRules = body.rules as unknown[];
-      const validatedRules = validateAndNormalizeRules(rawRules);
+      if (record == null) {
+        throw new SecurityPolicyServiceError(
+          `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
+          'NOT_FOUND'
+        );
+      }
 
-      updateData.rules = JSON.stringify(validatedRules);
-    }
+      const updateData: Partial<Omit<SecurityPolicyRecord, 'id' | 'createdAt' | 'updatedAt'>> = {
+        fingerprint: generateFingerprint(),
+      };
 
-    if (body.advancedOptionsConfig !== undefined) {
-      const advancedOptionsConfig = extractAdvancedOptionsConfig(body);
+      if (body.rules !== undefined) {
+        const rawRules = body.rules as unknown[];
+        const validatedRules = validateAndNormalizeRules(rawRules);
 
-      updateData.advancedOptionsConfig =
-        advancedOptionsConfig != null ? JSON.stringify(advancedOptionsConfig) : null;
-    }
+        updateData.rules = JSON.stringify(validatedRules);
+      }
 
-    const extraFields = extractExtraFields(body);
-    const existingExtra =
-      record.extraFields != null ? (JSON.parse(record.extraFields) as Record<string, unknown>) : {};
+      if (body.advancedOptionsConfig !== undefined) {
+        const advancedOptionsConfig = extractAdvancedOptionsConfig(body);
 
-    const mergedExtra = { ...existingExtra, ...extraFields };
+        updateData.advancedOptionsConfig =
+          advancedOptionsConfig != null ? JSON.stringify(advancedOptionsConfig) : null;
+      }
 
-    if (description !== undefined) {
-      mergedExtra.description = description;
-    }
+      const extraFields = extractExtraFields(body);
+      const existingExtra =
+        record.extraFields != null
+          ? (JSON.parse(record.extraFields) as Record<string, unknown>)
+          : {};
 
-    updateData.extraFields =
-      Object.keys(mergedExtra).length > 0 ? JSON.stringify(mergedExtra) : null;
+      const mergedExtra = { ...existingExtra, ...extraFields };
 
-    const updated = await this.repository.updatePolicy(record.id, updateData);
+      if (description !== undefined) {
+        mergedExtra.description = description;
+      }
 
-    if (updated == null) {
-      throw new SecurityPolicyServiceError(`Policy ${name} disappeared during patch`, 'NOT_FOUND');
-    }
+      updateData.extraFields =
+        Object.keys(mergedExtra).length > 0 ? JSON.stringify(mergedExtra) : null;
 
-    const operation = await this.createOperation(project, 'patch', record.selfLink, record.id);
+      const updated = await this.repository.updatePolicy(record.id, updateData);
 
-    const policy = recordToResponse(updated, description ?? getDescription(record));
+      if (updated == null) {
+        throw new SecurityPolicyServiceError(
+          `Policy ${name} disappeared during patch`,
+          'NOT_FOUND'
+        );
+      }
 
-    return { policy, operation };
+      const operation = await this.createOperation(project, 'patch', record.selfLink, record.id);
+
+      const policy = recordToResponse(updated, description ?? getDescription(record));
+
+      return { policy, operation };
+    });
   }
 
   async addRule(
@@ -268,56 +291,49 @@ export class SecurityPolicyService {
     name: string,
     ruleBody: Record<string, unknown>
   ): Promise<PolicyResult> {
-    const record = await this.repository.getPolicyByProjectAndName(project, name);
+    return this.policyMutex.runExclusively(this.policyLockKey(project, name), async () => {
+      const record = await this.repository.getPolicyByProjectAndName(project, name);
 
-    if (record == null) {
-      throw new SecurityPolicyServiceError(
-        `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
-        'NOT_FOUND'
-      );
-    }
+      if (record == null) {
+        throw new SecurityPolicyServiceError(
+          `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
+          'NOT_FOUND'
+        );
+      }
 
-    const existingRules = JSON.parse(record.rules) as SecurityPolicyRule[];
-    const newRule = validateSingleRule(ruleBody);
+      const existingRules = JSON.parse(record.rules) as SecurityPolicyRule[];
+      const newRule = validateSingleRule(ruleBody);
 
-    const conflict = existingRules.find(r => r.priority === newRule.priority);
+      const conflict = existingRules.find(r => r.priority === newRule.priority);
 
-    if (conflict != null) {
-      throw new SecurityPolicyServiceError(
-        `Rule with priority ${newRule.priority} already exists`,
-        'INVALID_ARGUMENT'
-      );
-    }
+      if (conflict != null) {
+        throw new SecurityPolicyServiceError(
+          `Rule with priority ${newRule.priority} already exists`,
+          'INVALID_ARGUMENT'
+        );
+      }
 
-    const updatedRules = [...existingRules, newRule];
+      const updatedRules = [...existingRules, newRule];
 
-    const updated = await this.repository.updatePolicy(record.id, {
-      rules: JSON.stringify(updatedRules),
-      fingerprint: generateFingerprint(),
+      const updated = await this.repository.updatePolicy(record.id, {
+        rules: JSON.stringify(updatedRules),
+        fingerprint: generateFingerprint(),
+      });
+
+      if (updated == null) {
+        throw new SecurityPolicyServiceError(
+          `Policy ${name} disappeared during addRule`,
+          'NOT_FOUND'
+        );
+      }
+
+      const operation = await this.createOperation(project, 'addRule', record.selfLink, record.id);
+
+      return { policy: recordToResponse(updated), operation };
     });
-
-    if (updated == null) {
-      throw new SecurityPolicyServiceError(
-        `Policy ${name} disappeared during addRule`,
-        'NOT_FOUND'
-      );
-    }
-
-    const operation = await this.createOperation(project, 'addRule', record.selfLink, record.id);
-
-    return { policy: recordToResponse(updated), operation };
   }
 
   async removeRule(project: string, name: string, priority: number): Promise<PolicyResult> {
-    const record = await this.repository.getPolicyByProjectAndName(project, name);
-
-    if (record == null) {
-      throw new SecurityPolicyServiceError(
-        `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
-        'NOT_FOUND'
-      );
-    }
-
     if (priority === DEFAULT_RULE_PRIORITY) {
       throw new SecurityPolicyServiceError(
         'Cannot delete the default rule (priority 2147483647)',
@@ -325,30 +341,49 @@ export class SecurityPolicyService {
       );
     }
 
-    const existingRules = JSON.parse(record.rules) as SecurityPolicyRule[];
-    const idx = existingRules.findIndex(r => r.priority === priority);
+    return this.policyMutex.runExclusively(this.policyLockKey(project, name), async () => {
+      const record = await this.repository.getPolicyByProjectAndName(project, name);
 
-    if (idx === -1) {
-      throw new SecurityPolicyServiceError(`No rule found with priority ${priority}`, 'NOT_FOUND');
-    }
+      if (record == null) {
+        throw new SecurityPolicyServiceError(
+          `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
+          'NOT_FOUND'
+        );
+      }
 
-    const updatedRules = existingRules.filter(r => r.priority !== priority);
+      const existingRules = JSON.parse(record.rules) as SecurityPolicyRule[];
+      const idx = existingRules.findIndex(r => r.priority === priority);
 
-    const updated = await this.repository.updatePolicy(record.id, {
-      rules: JSON.stringify(updatedRules),
-      fingerprint: generateFingerprint(),
-    });
+      if (idx === -1) {
+        throw new SecurityPolicyServiceError(
+          `No rule found with priority ${priority}`,
+          'NOT_FOUND'
+        );
+      }
 
-    if (updated == null) {
-      throw new SecurityPolicyServiceError(
-        `Policy ${name} disappeared during removeRule`,
-        'NOT_FOUND'
+      const updatedRules = existingRules.filter(r => r.priority !== priority);
+
+      const updated = await this.repository.updatePolicy(record.id, {
+        rules: JSON.stringify(updatedRules),
+        fingerprint: generateFingerprint(),
+      });
+
+      if (updated == null) {
+        throw new SecurityPolicyServiceError(
+          `Policy ${name} disappeared during removeRule`,
+          'NOT_FOUND'
+        );
+      }
+
+      const operation = await this.createOperation(
+        project,
+        'removeRule',
+        record.selfLink,
+        record.id
       );
-    }
 
-    const operation = await this.createOperation(project, 'removeRule', record.selfLink, record.id);
-
-    return { policy: recordToResponse(updated), operation };
+      return { policy: recordToResponse(updated), operation };
+    });
   }
 
   async getRule(
@@ -381,54 +416,64 @@ export class SecurityPolicyService {
     priority: number,
     ruleBody: Record<string, unknown>
   ): Promise<PolicyResult> {
-    const record = await this.repository.getPolicyByProjectAndName(project, name);
+    return this.policyMutex.runExclusively(this.policyLockKey(project, name), async () => {
+      const record = await this.repository.getPolicyByProjectAndName(project, name);
 
-    if (record == null) {
-      throw new SecurityPolicyServiceError(
-        `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
-        'NOT_FOUND'
-      );
-    }
-
-    const existingRules = JSON.parse(record.rules) as SecurityPolicyRule[];
-    const existing = existingRules.find(r => r.priority === priority);
-
-    if (existing == null) {
-      throw new SecurityPolicyServiceError(`No rule found with priority ${priority}`, 'NOT_FOUND');
-    }
-
-    const newAction = ruleBody.action as string | undefined;
-
-    if (newAction != null && existing.action !== newAction) {
-      try {
-        assertRateLimitActionTransition(existing.action, newAction);
-      } catch (err) {
-        if (err instanceof ArmorError) {
-          throw new SecurityPolicyServiceError(err.message, 'FAILED_PRECONDITION');
-        }
-
-        throw err;
+      if (record == null) {
+        throw new SecurityPolicyServiceError(
+          `The resource 'projects/${project}/global/securityPolicies/${name}' was not found`,
+          'NOT_FOUND'
+        );
       }
-    }
 
-    const patchedRule = validateSingleRule({ ...existing, ...ruleBody });
-    const updatedRules = existingRules.map(r => (r.priority === priority ? patchedRule : r));
+      const existingRules = JSON.parse(record.rules) as SecurityPolicyRule[];
+      const existing = existingRules.find(r => r.priority === priority);
 
-    const updated = await this.repository.updatePolicy(record.id, {
-      rules: JSON.stringify(updatedRules),
-      fingerprint: generateFingerprint(),
-    });
+      if (existing == null) {
+        throw new SecurityPolicyServiceError(
+          `No rule found with priority ${priority}`,
+          'NOT_FOUND'
+        );
+      }
 
-    if (updated == null) {
-      throw new SecurityPolicyServiceError(
-        `Policy ${name} disappeared during patchRule`,
-        'NOT_FOUND'
+      const newAction = ruleBody.action as string | undefined;
+
+      if (newAction != null && existing.action !== newAction) {
+        try {
+          assertRateLimitActionTransition(existing.action, newAction);
+        } catch (err) {
+          if (err instanceof ArmorError) {
+            throw new SecurityPolicyServiceError(err.message, 'FAILED_PRECONDITION');
+          }
+
+          throw err;
+        }
+      }
+
+      const patchedRule = validateSingleRule({ ...existing, ...ruleBody });
+      const updatedRules = existingRules.map(r => (r.priority === priority ? patchedRule : r));
+
+      const updated = await this.repository.updatePolicy(record.id, {
+        rules: JSON.stringify(updatedRules),
+        fingerprint: generateFingerprint(),
+      });
+
+      if (updated == null) {
+        throw new SecurityPolicyServiceError(
+          `Policy ${name} disappeared during patchRule`,
+          'NOT_FOUND'
+        );
+      }
+
+      const operation = await this.createOperation(
+        project,
+        'patchRule',
+        record.selfLink,
+        record.id
       );
-    }
 
-    const operation = await this.createOperation(project, 'patchRule', record.selfLink, record.id);
-
-    return { policy: recordToResponse(updated), operation };
+      return { policy: recordToResponse(updated), operation };
+    });
   }
 
   async setLabels(project: string, name: string): Promise<{ operation: GlobalOperationResponse }> {

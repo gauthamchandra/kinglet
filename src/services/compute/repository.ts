@@ -82,6 +82,14 @@ export class ComputeRepository {
     };
   }
 
+  async listAllPolicies(): Promise<SecurityPolicyRecord[]> {
+    const result = await this.storage.find<SecurityPolicyRecord>(SECURITY_POLICIES_TABLE, {
+      sort: [{ field: 'name', direction: 'asc' }],
+    });
+
+    return result.data;
+  }
+
   async updatePolicy(
     id: string,
     data: Partial<Omit<SecurityPolicyRecord, keyof BaseRecord>>

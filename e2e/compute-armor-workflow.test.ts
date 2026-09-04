@@ -59,7 +59,6 @@ beforeAll(async () => {
 
   computeService = new ComputeService(storage, logger, {
     listenerPort,
-    project,
     defaultPolicyName: 'e2e-policy',
   });
   await computeService.initialize();
@@ -175,9 +174,6 @@ describe('Cloud Armor E2E: Listener evaluation', () => {
   });
 
   test('6. Kinglet origin header is stripped from CEL (default allow applies)', async () => {
-    // The header x-kinglet-origin-ip must not be visible to CEL.
-    // We verify this by: sending a request to /public with the header,
-    // expecting default-allow at 2147483647 (not a rule matching the header).
     const res = await fetch(listenerUrl('/public'), {
       headers: {
         'X-Kinglet-Origin-IP': '10.0.0.1',

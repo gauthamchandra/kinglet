@@ -15,7 +15,11 @@ import { SecurityPolicyService } from './service.ts';
 export interface ComputeServiceOptions {
   listenerPort?: number | undefined;
   defaultPolicyName?: string | undefined;
-  project?: string | undefined;
+}
+
+export interface ComputeStartResult {
+  listenerStarted: boolean;
+  listenerPort?: number;
 }
 
 export class ComputeService {
@@ -49,28 +53,39 @@ export class ComputeService {
     return this.handlers.getRoutes();
   }
 
-  start(): void {
+  start(): ComputeStartResult {
     if (this.policyService == null) {
       throw new Error('ComputeService not initialized. Call initialize() first.');
     }
 
     const listenerPort = this.options.listenerPort ?? 8787;
-    const project = this.options.project ?? 'default';
     const defaultPolicyName = this.options.defaultPolicyName;
     const policyService = this.policyService;
 
-    this.listenerServer = startArmorListener({
-      port: listenerPort,
-      defaultPolicyName,
-      project,
-      getPolicies: async (proj: string) => {
-        const result = await policyService.list(proj);
+    try {
+      this.listenerServer = startArmorListener({
+        port: listenerPort,
+        defaultPolicyName,
+        getPolicies: () => policyService.listAll(),
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Cloud Armor listener failed to bind 127.0.0.1:${listenerPort}; Compute control plane is still available`,
+        { error: error instanceof Error ? error.message : String(error) }
+      );
 
-        return result.items ?? [];
-      },
-    });
+      return { listenerStarted: false };
+    }
 
-    this.logger.info(`Cloud Armor listener started on 127.0.0.1:${listenerPort}`);
+    const boundPort = this.listenerServer.port;
+
+    this.logger.info(`Cloud Armor listener started on 127.0.0.1:${boundPort}`);
+
+    if (boundPort != null) {
+      return { listenerStarted: true, listenerPort: boundPort };
+    }
+
+    return { listenerStarted: true };
   }
 
   async stop(): Promise<void> {
