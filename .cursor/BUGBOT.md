@@ -116,6 +116,11 @@ existing architecture anticipates.
 - `TODO` / `FIXME` / `HACK` without a tracking issue reference (`// TODO(#42): …`).
 - Secrets, credentials, tokens, or absolute paths containing a username.
 - Logging of request or response bodies that could carry user data.
+- A numbered alias (`description2`, `policy2`) of an existing binding, assigned the same
+  identifier or the same property/element access. That is leftover copy-paste; use the
+  original name. `bun run lint` runs `scripts/check-copy-paste-aliases.ts` for this.
+- A one-line wrapper whose body only returns a field already on the argument
+  (`extractPolicyId(record) { return record.id }`). Inline the field.
 
 ### YAGNI / over-building
 

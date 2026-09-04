@@ -34,7 +34,7 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun test terraform/terraform.test.ts -t "<id>"` - Same single-case filter without npm script
 
 ### Code Quality
-- `bun run lint` - Run Biome linter (+ tsc + knip)
+- `bun run lint` - Run Biome linter (+ tsc + knip + copy-paste alias check)
 - `bun run lint:fix` - Run Biome linter with auto-fix
 - `bun run format` - Format code with Biome
 - `bun run format:check` - Check formatting without writing

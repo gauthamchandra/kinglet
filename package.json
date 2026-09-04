@@ -25,7 +25,7 @@
     "test:e2e": "cd e2e && bun test",
     "test:terraform": "./scripts/terraform-e2e.sh",
     "test:terraform:case": "./scripts/terraform-e2e.sh",
-    "lint": "bunx tsc --noEmit && biome check . && knip",
+    "lint": "bunx tsc --noEmit && biome check . && knip && bun run scripts/check-copy-paste-aliases.ts",
     "lint:fix": "bunx tsc --noEmit && biome check --write .",
     "format": "biome format --write .",
     "format:check": "biome format .",
