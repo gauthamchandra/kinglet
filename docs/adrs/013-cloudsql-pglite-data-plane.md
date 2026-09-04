@@ -172,12 +172,7 @@ answers "does my Terraform work?" but not "does my application code work?".
 - **The engine is Postgres 18 whatever `databaseVersion` says.** A
   `POSTGRES_14` instance still answers `SELECT version()` with 18.
 - **No PostGIS.** All 26 contrib extensions PGlite ships are available, plus
-  pgvector. `@electric-sql/pglite-postgis` does exist and works — PostGIS 3.6
-  with GEOS and PROJ, verified against this PGlite version — but it costs ~19 MB
-  of wasm and takes a database's boot from ~0.7 s to ~1.3 s locally and to
-  ~4.3 s on a CI runner. Paid per database, that is enough to push tests past
-  Bun's default timeout and to make creating an instance slow on modest
-  hardware. It belongs behind an opt-in, not in the default set.
+  pgvector.
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
   nothing restricts who may connect beyond user and password.
 - `User.type` values other than `BUILT_IN` behave like `BUILT_IN`.

@@ -11,12 +11,8 @@
  * <p>This is every contrib extension `@electric-sql/pglite` ships plus
  * pgvector, which is a separate package because of its size.
  *
- * <p>PostGIS is deliberately left out even though `@electric-sql/pglite-postgis`
- * exists and works: it is ~19 MB of wasm and takes a database's boot from
- * ~0.7 s to ~1.3 s locally and to ~4.3 s on a CI runner. Paid per database,
- * that is enough to push tests past Bun's default timeout and to make an
- * emulated instance slow to create on modest hardware. Adding it should be a
- * deliberate opt-in rather than a cost every user pays.
+ * <p>Every extension here is linked into every database, so anything added
+ * to this set is a boot-time cost paid per database.
  *
  * <p>Nothing in this module is Cloud-SQL-specific, so AlloyDB can reuse it.
  */
