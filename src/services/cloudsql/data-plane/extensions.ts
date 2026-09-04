@@ -8,9 +8,11 @@
  * without the emulator having to rebuild the database underneath a live
  * connection.
  *
- * <p>This is every contrib extension `@electric-sql/pglite` ships plus
- * pgvector, which is a separate package because of its size. PostGIS is the
- * notable omission: it is a third-party build that is not wired up here yet.
+ * <p>This is every contrib extension `@electric-sql/pglite` ships, plus
+ * pgvector and PostGIS. Those two are separate packages because of their size
+ * — PostGIS alone is ~19 MB and adds roughly half a second to a database's
+ * boot — but Cloud SQL for PostgreSQL supports both, and an emulator that
+ * cannot run a geospatial query is not much use to code that does.
  *
  * <p>Nothing in this module is Cloud-SQL-specific, so AlloyDB can reuse it.
  */
@@ -42,6 +44,7 @@ import { tsm_system_time } from '@electric-sql/pglite/contrib/tsm_system_time';
 import { unaccent } from '@electric-sql/pglite/contrib/unaccent';
 import { uuid_ossp } from '@electric-sql/pglite/contrib/uuid_ossp';
 import { vector } from '@electric-sql/pglite-pgvector';
+import { postgis } from '@electric-sql/pglite-postgis';
 
 export const DATA_PLANE_EXTENSIONS = {
   amcheck,
@@ -69,6 +72,7 @@ export const DATA_PLANE_EXTENSIONS = {
   tsm_system_rows,
   tsm_system_time,
   unaccent,
+  postgis,
   uuid_ossp,
   vector,
 } as const;

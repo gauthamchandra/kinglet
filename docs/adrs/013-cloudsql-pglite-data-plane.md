@@ -57,8 +57,10 @@ exactly as ADR-003 describes.
   change — every storage type had been running in-memory.
 - **Extensions are fixed at build time.** PGlite links each extension's wasm
   when the database is created, so every database is built with all 26 contrib
-  extensions PGlite ships plus pgvector. That is what lets `CREATE EXTENSION
-  pg_trgm` work later without rebuilding the database under a live connection.
+  extensions PGlite ships plus pgvector and PostGIS. That is what lets
+  `CREATE EXTENSION pg_trgm` work later without rebuilding the database under a
+  live connection. pgvector and PostGIS are separate packages, peer-pinned to
+  the same PGlite version, so all three move together.
 - The data plane is **on by default**, for ADR-007's reason: an instance a
   client cannot connect to is metadata, not emulation. `CLOUDSQL_DATA_PLANE=false`
   turns it off. Unlike Memorystore there is no external binary to be missing, so
@@ -169,8 +171,10 @@ answers "does my Terraform work?" but not "does my application code work?".
   one PGlite is one database, and PGlite has no `CREATE DATABASE`.
 - **The engine is Postgres 18 whatever `databaseVersion` says.** A
   `POSTGRES_14` instance still answers `SELECT version()` with 18.
-- **No PostGIS.** All 26 contrib extensions PGlite ships are available, plus
-  pgvector; PostGIS is a separate third-party build and is not wired up.
+- **Extensions cost boot time.** All 26 contrib extensions PGlite ships are
+  available, plus pgvector and PostGIS. PostGIS is the expensive one: ~19 MB of
+  wasm, and it takes a database's boot from roughly 0.7 s to 1.3 s. That is
+  paid per database, since one PGlite is one database.
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
   nothing restricts who may connect beyond user and password.
 - `User.type` values other than `BUILT_IN` behave like `BUILT_IN`.

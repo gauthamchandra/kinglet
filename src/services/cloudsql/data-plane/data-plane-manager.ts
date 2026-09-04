@@ -13,10 +13,11 @@
 
 import type { StorageType } from '@/core/storage/types.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { PortAllocator } from '@/shared/utils/port-allocator.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { DatabaseKey } from './pglite-database-manager.ts';
 import { PGliteDatabaseManager } from './pglite-database-manager.ts';
-import { PortAllocator } from './port-allocator.ts';
+
 import type { ConnectionResolution } from './postgres-wire-server.ts';
 import {
   PostgresWireServer,
@@ -164,57 +165,42 @@ export class DataPlaneManager implements CloudSqlDataPlane {
   }
 
   /**
-   * Bind a listener, moving on to the next port when one that looked free
-   * turns out not to be.
-   *
-   * <p>The allocator probes a port by connecting to loopback, but the listener
-   * binds every interface — so a port held on another interface, or claimed by
-   * something else in the moment between the probe and the bind, still fails.
-   * Treating that as "this port is unusable" rather than as a failed start is
-   * what keeps a busy machine from turning a free port lower down the range
-   * into a failed instance create.
+   * Bind this instance's listener, keeping the port it was already on when
+   * there was one so a restart does not move an address clients hold.
    */
   private async bindListener(
     instanceKey: string
   ): Promise<{ port: number; wireServer: PostgresWireServer }> {
-    const previousPort = this.instances.get(instanceKey)?.port;
-    const rejectedPorts: number[] = [];
-
-    try {
-      while (true) {
-        const port = await this.portAllocator.allocate(previousPort);
-
-        if (port == null) {
-          throw new Error(
-            `Cannot start a Cloud SQL data plane for ${instanceKey}: every port in ` +
-              `${this.options.portRangeStart}-${this.options.portRangeEnd} is already in use`
-          );
-        }
-
+    const allocated = await this.portAllocator.allocateBound(
+      port => {
         const wireServer = new PostgresWireServer({
           instanceKey,
           port,
           resolveConnection: (key, database, user) => this.resolveConnection(key, database, user),
         });
 
-        try {
-          wireServer.listen();
+        wireServer.listen();
 
-          return { port, wireServer };
-        } catch (error) {
-          // Held until every attempt is done, so the next allocate() cannot
-          // hand back the port that just refused to bind.
-          rejectedPorts.push(port);
-
+        return wireServer;
+      },
+      {
+        preferredPort: this.instances.get(instanceKey)?.port,
+        onBindFailure: (port, error) =>
           this.logger.debug(
             `Port ${port} looked free but could not be bound for ${instanceKey}, trying the next`,
             error
-          );
-        }
+          ),
       }
-    } finally {
-      for (const port of rejectedPorts) this.portAllocator.release(port);
+    );
+
+    if (!allocated) {
+      throw new Error(
+        `Cannot start a Cloud SQL data plane for ${instanceKey}: every port in ` +
+          `${this.options.portRangeStart}-${this.options.portRangeEnd} is already in use`
+      );
     }
+
+    return { port: allocated.port, wireServer: allocated.bound };
   }
 
   async stopInstance(project: string, instance: string): Promise<void> {

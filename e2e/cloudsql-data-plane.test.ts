@@ -202,6 +202,27 @@ describe('Cloud SQL data plane e2e', () => {
     );
   });
 
+  test('PostGIS geospatial queries work', async () => {
+    const sql = connect(instancePort, 'postgres');
+
+    await sql.unsafe('CREATE EXTENSION IF NOT EXISTS postgis');
+    await sql.unsafe('CREATE TABLE places (id int, geom geometry(Point, 4326))');
+    await sql.unsafe('INSERT INTO places VALUES (1, ST_SetSRID(ST_MakePoint(-122.4, 37.8), 4326))');
+
+    expect(await rows(sql, 'SELECT id, ST_AsText(geom) AS wkt FROM places')).toEqual([
+      { id: 1, wkt: 'POINT(-122.4 37.8)' },
+    ]);
+    // The geography cast exercises PROJ, which is the part most likely to be
+    // absent from a wasm build that merely loads.
+    expect(
+      await rows(
+        sql,
+        'SELECT ST_Distance(ST_SetSRID(ST_MakePoint(0,0),4326)::geography, ' +
+          'ST_SetSRID(ST_MakePoint(1,1),4326)::geography)::int AS meters'
+      )
+    ).toEqual([{ meters: 156900 }]);
+  });
+
   test(
     'a database added through the admin API is reachable and isolated',
     async () => {
