@@ -75,6 +75,7 @@ export class ComputeService {
         port: listenerPort,
         defaultPolicyName,
         getPolicies: () => policyService.listAll(),
+        logger: this.logger,
       });
     } catch (error) {
       this.logger.warn(

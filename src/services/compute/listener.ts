@@ -6,6 +6,7 @@
  */
 
 import type { Server } from 'bun';
+import type { Logger } from '@/shared/utils/logger.ts';
 import { evaluate } from './armor/evaluate.ts';
 import { buildRequestAttributes, isValidIp } from './armor/request.ts';
 import type {
@@ -307,10 +308,11 @@ export interface ArmorListenerOptions {
   port: number;
   defaultPolicyName?: string | undefined;
   getPolicies: () => Promise<SecurityPolicyResponse[]>;
+  logger?: Logger;
 }
 
 export function startArmorListener(options: ArmorListenerOptions): Server {
-  const { port, defaultPolicyName, getPolicies } = options;
+  const { port, defaultPolicyName, getPolicies, logger } = options;
 
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -333,6 +335,8 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
       const rawOriginIp = headersMap[KINGLET_ORIGIN_IP_HEADER];
 
       if (rawOriginIp != null && !isValidIp(rawOriginIp.trim())) {
+        logger?.warn(`Invalid X-Kinglet-Origin-IP value: ${rawOriginIp.trim()}`);
+
         return new Response('', { status: 400 });
       }
 
@@ -340,6 +344,11 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
       const policyOrError = selectPolicy(policies, defaultPolicyName);
 
       if ('error' in policyOrError) {
+        const reason =
+          typeof policyOrError.error === 'string' ? policyOrError.error : 'policy selection failed';
+
+        logger?.warn(reason);
+
         return new Response('', { status: 503 });
       }
 
@@ -363,6 +372,8 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
       const adapterResult = buildRequestAttributesFromListenerRequest(adapterInput);
 
       if ('error' in adapterResult) {
+        logger?.warn(adapterResult.error);
+
         return new Response('', { status: 400 });
       }
 

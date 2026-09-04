@@ -896,7 +896,7 @@ function recordToResponse(
   const response: SecurityPolicyResponse = {
     ...extra,
     kind: record.kind,
-    id: extractPolicyId(record),
+    id: record.id,
     creationTimestamp: record.creationTimestamp,
     name: record.name,
     selfLink: record.selfLink,
@@ -913,10 +913,6 @@ function recordToResponse(
   }
 
   return response;
-}
-
-function extractPolicyId(record: SecurityPolicyRecord): string {
-  return record.id;
 }
 
 function operationRecordToResponse(record: GlobalOperationRecord): GlobalOperationResponse {

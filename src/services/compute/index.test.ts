@@ -2,7 +2,7 @@
  * ComputeService initialization and wiring tests (TDD slice 4).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { ComputeService } from './index.ts';
@@ -123,10 +123,38 @@ describe('ComputeService', () => {
     expect(started.listenerStarted).toBe(true);
     expect(started.listenerPort).toBeTypeOf('number');
 
+    const warn = spyOn(logger, 'warn');
     const res = await fetch(`http://127.0.0.1:${started.listenerPort}/public`);
 
     expect(res.status).toBe(503);
+    expect(warn).toHaveBeenCalled();
+    expect(String(warn.mock.calls[0]?.[0])).toContain('matches more than one policy');
 
+    warn.mockRestore();
+    await listening.stop();
+  });
+
+  test('listener logs and returns 400 for an invalid origin IP', async () => {
+    const listening = new ComputeService(storage, logger, { listenerPort: 0 });
+
+    await listening.initialize();
+    await listening.getSecurityPolicyService().insert('proj', 'only-policy', {});
+
+    const started = listening.start();
+
+    expect(started.listenerStarted).toBe(true);
+    expect(started.listenerPort).toBeTypeOf('number');
+
+    const warn = spyOn(logger, 'warn');
+    const res = await fetch(`http://127.0.0.1:${started.listenerPort}/public`, {
+      headers: { 'X-Kinglet-Origin-IP': 'not-an-ip' },
+    });
+
+    expect(res.status).toBe(400);
+    expect(warn).toHaveBeenCalled();
+    expect(String(warn.mock.calls[0]?.[0])).toContain('Invalid X-Kinglet-Origin-IP');
+
+    warn.mockRestore();
     await listening.stop();
   });
 
