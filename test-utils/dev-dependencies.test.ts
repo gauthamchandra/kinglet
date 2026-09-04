@@ -2,7 +2,7 @@
  * Tests for development dependencies to ensure they're properly installed
  */
 
-import { test, expect, describe } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
 describe('Development Dependencies', () => {
   test('should have @types/bun available', () => {
@@ -50,7 +50,7 @@ describe('Development Dependencies', () => {
 
   test('should support ES modules', async () => {
     // Test dynamic imports work
-    const crypto = await import('crypto');
+    const crypto = await import('node:crypto');
     expect(crypto).toBeDefined();
     expect(crypto.randomUUID).toBeDefined();
 

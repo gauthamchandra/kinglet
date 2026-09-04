@@ -7,12 +7,12 @@
  *   2. Official @google-cloud/storage client library
  */
 
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import type { Server } from 'bun';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Storage } from '@google-cloud/storage';
+import type { Server } from 'bun';
 import { StorageManager } from '@/core/storage/manager.ts';
-import { Logger } from '@/shared/utils/logger.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
+import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
 import { buildRouter } from './e2e-helpers.ts';
 
@@ -331,7 +331,7 @@ describe('Cloud Storage E2E: Raw HTTP API', () => {
     expect(location).toBeTruthy();
 
     // Step 2: Upload data to the resumable URL
-    const uploadResponse = await fetch(location!, {
+    const uploadResponse = await fetch(location ?? '', {
       method: 'PUT',
       headers: { 'Content-Type': 'text/plain' },
       body: 'Resumable upload content',

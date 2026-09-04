@@ -9,13 +9,13 @@
   "files": {
     "includes": [
       "**",
-      "!**/dist/**",
-      "!**/node_modules/**",
-      "!**/coverage/**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/coverage",
       "!**/*.config.js",
       "!**/commitlint.config.js",
-      "!**/.compatibility-reports/**",
-      "!**/.discovery-cache/**"
+      "!**/.compatibility-reports",
+      "!**/.discovery-cache"
     ]
   },
   "formatter": {

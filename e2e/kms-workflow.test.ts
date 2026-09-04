@@ -7,7 +7,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { constants, createPublicKey, verify as cryptoVerify } from 'node:crypto';
+import { createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { KeyManagementServiceClient } from '@google-cloud/kms';
 import type { Server } from 'bun';
 import { createLocationRoutes } from '@/core/gateway/location-routes.ts';

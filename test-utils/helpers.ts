@@ -2,7 +2,7 @@
  * Test helper utilities
  */
 
-import type { Config, StorageProvider } from '@/shared/types/index.ts';
+import type { Config, Operation, QueryConditions, StorageProvider } from '@/shared/types/index.ts';
 
 /**
  * Create a test configuration with defaults
@@ -13,8 +13,11 @@ export async function createTestConfig(overrides: Partial<Config> = {}): Promise
   if (ports.length < 2) {
     throw new Error('Failed to allocate required ports');
   }
-  const httpPort = ports[0]!;
-  const grpcPort = ports[1]!;
+  const [httpPort, grpcPort] = ports;
+
+  if (httpPort == null || grpcPort == null) {
+    throw new Error('Failed to allocate required ports');
+  }
 
   return {
     server: {
@@ -48,35 +51,38 @@ export async function createTestConfig(overrides: Partial<Config> = {}): Promise
  * Mock storage provider for testing
  */
 export class MockStorageProvider implements StorageProvider {
-  private storage: Map<string, any> = new Map();
+  private storage = new Map<string, unknown>();
 
   async get<T>(key: string): Promise<T | null> {
-    return this.storage.get(key) || null;
+    return (this.storage.get(key) as T | undefined) ?? null;
   }
 
-  async set<T>(key: string, value: T, ttl?: number): Promise<void> {
+  async set<T>(key: string, value: T): Promise<void> {
+    // TTL is ignored in the mock provider
     this.storage.set(key, value);
-    // For testing, we ignore TTL
   }
 
   async delete(key: string): Promise<boolean> {
     return this.storage.delete(key);
   }
 
-  async query<T>(table: string, conditions: any): Promise<T[]> {
+  async query<T>(table: string, _conditions: QueryConditions): Promise<T[]> {
     // Simple mock implementation
     const results: T[] = [];
+
     for (const [key, value] of this.storage.entries()) {
       if (key.startsWith(`${table}:`)) {
-        results.push(value);
+        results.push(value as T);
       }
     }
+
     return results;
   }
 
-  async transaction<T>(operations: any[]): Promise<T> {
+  async transaction<T>(operations: Operation[]): Promise<T> {
     // Simple mock transaction - execute operations sequentially
-    let result: any;
+    let result: unknown;
+
     for (const op of operations) {
       switch (op.type) {
         case 'get':
@@ -91,7 +97,8 @@ export class MockStorageProvider implements StorageProvider {
           break;
       }
     }
-    return result;
+
+    return result as T;
   }
 
   clear(): void {
@@ -105,7 +112,7 @@ export class MockStorageProvider implements StorageProvider {
 export function createTestRequest(
   method: string = 'GET',
   url: string = 'http://localhost:9000/',
-  body?: any,
+  body?: unknown,
   headers: Record<string, string> = {}
 ): Request {
   const requestInit: RequestInit = {
@@ -178,7 +185,7 @@ export async function getAvailablePorts(count: number): Promise<number[]> {
  * Assert that a promise rejects with specific error
  */
 export async function expectToThrow(
-  fn: () => Promise<any>,
+  fn: () => Promise<unknown>,
   expectedError?: string
 ): Promise<Error> {
   try {
