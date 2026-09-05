@@ -121,6 +121,11 @@ existing architecture anticipates.
   original name. `bun run lint` runs `scripts/check-copy-paste-aliases.ts` for this.
 - A one-line wrapper whose body only returns a field already on the argument
   (`extractPolicyId(record) { return record.id }`). Inline the field.
+- A new import that breaks `src/architecture/architecture.test.ts`: cycles, handlers
+  importing a repository or `StorageManager`, a service importing handlers, a repository
+  importing a service, or one `src/services/<a>/` folder importing `src/services/<b>/`.
+  The workflows execution handler's type-level `WorkflowRepository` import is known
+  debt (`except` in that file) — do not copy the pattern.
 
 ### YAGNI / over-building
 

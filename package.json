@@ -68,6 +68,7 @@
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.5.2",
+    "archunit": "^2.4.0",
     "husky": "^9.1.7",
     "knip": "^5.85.0",
     "typescript": "^5.4.0"

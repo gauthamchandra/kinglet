@@ -24,7 +24,7 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun run healthcheck` - Run health check script
 
 ### Testing
-- `bun test` - Run unit and integration tests (not e2e — see Testing Standards below)
+- `bun test` - Run unit and integration tests, including architecture rules (not e2e — see Testing Standards below)
 - `bun test --watch` - Run tests in watch mode
 - `bun test --coverage` - Run tests with coverage report
 - `bun run test:coverage:check` - Coverage report plus the 80% aggregate gate CI enforces

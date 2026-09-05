@@ -293,6 +293,13 @@ same identifier or the same property/element access. Unused-variable lint cannot
 leftover because the alias is used. A second `await repo.list(...)` stored as `page2` is
 allowed: calls are independent fetches even when the source text matches.
 
+`bun test` also runs ArchUnitTS rules in `src/architecture/architecture.test.ts` (via
+`.check()`, not the Jest/Vitest `toPassAsync` matcher). Those encode the service
+layering from [docs/adding-a-service.md](docs/adding-a-service.md): no import cycles,
+handlers → service → repository, no sibling-service imports, and `src/core` / `src/shared`
+/ `src/config` must not import `src/services`. ArchUnitTS does not detect copy-paste;
+that stays the alias script.
+
 Import order is enforced repo-wide by Biome's `organizeImports` assist, so it is deterministic
 rather than a matter of taste — `bun run lint:fix` rewrites it for you.
 
@@ -329,6 +336,7 @@ bun test --coverage           # with coverage report
 bun run test:coverage:check   # coverage report + the 80% gate CI enforces
 bun run test:e2e              # end-to-end suite (runs separately, see e2e/)
 bun run lint                  # tsc + biome + knip + copy-paste aliases — must be clean
+bun test src/architecture     # ArchUnitTS layering / cycle / isolation rules
 bun run lint:fix              # auto-fix what Biome can
 bun run format                # format everything
 bun run build                 # production build

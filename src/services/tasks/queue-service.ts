@@ -4,6 +4,7 @@
 
 import type { RouteResponse } from '@/core/gateway/request-router.ts';
 import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
+import { TasksError, type TasksErrorCode } from './errors.ts';
 import type { QueueRepository } from './queue-repository.ts';
 import type { QueueResponse } from './types.ts';
 import {
@@ -19,21 +20,8 @@ import {
   UpdateQueueRequestSchema,
 } from './types.ts';
 
-export type TasksErrorCode =
-  | 'NOT_FOUND'
-  | 'ALREADY_EXISTS'
-  | 'INVALID_ARGUMENT'
-  | 'FAILED_PRECONDITION';
-
-export class TasksError extends Error {
-  readonly code: TasksErrorCode;
-
-  constructor(code: TasksErrorCode, message: string) {
-    super(message);
-    this.name = 'TasksError';
-    this.code = code;
-  }
-}
+export type { TasksErrorCode };
+export { TasksError };
 
 export function handleTasksError(
   err: unknown,
