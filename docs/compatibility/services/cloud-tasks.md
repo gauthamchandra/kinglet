@@ -5,7 +5,7 @@
 **Status:** Implemented
 **API version:** v2
 **Data plane:** Emulated in-process
-**Endpoint coverage:** 18/18 (100%)
+**Endpoint coverage:** 18/19 (95%)
 
 Queue lifecycle, task CRUD, and HTTP dispatch.
 
@@ -32,7 +32,7 @@ Queue lifecycle, task CRUD, and HTTP dispatch.
 
 ## Missing endpoints
 
-_None._
+- `GET` `v2/{+name}` — `projects.locations.operations.get`
 
 ## IAM endpoints (deferred)
 
