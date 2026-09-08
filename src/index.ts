@@ -15,6 +15,7 @@ import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { toStorageConfig } from '@/core/storage/config.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { buildHealthBody, type KingletCloudArmorEvaluationServerStatus } from '@/health-status.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
 import { ComputeService } from '@/services/compute/index.ts';
@@ -62,13 +63,15 @@ async function main(): Promise<void> {
 
     const router = new RequestRouter(new Logger('Router'));
 
+    let evaluationServerHealth: KingletCloudArmorEvaluationServerStatus | undefined;
+
     const healthRoute: RouteDefinition = {
       id: 'health',
       method: 'GET',
       path: '/health',
       handler: () => ({
         status: 200,
-        body: { status: 'ok' },
+        body: buildHealthBody(evaluationServerHealth),
       }),
     };
 
@@ -196,6 +199,7 @@ async function main(): Promise<void> {
     if (config.services.compute.enabled) {
       computeService = new ComputeService(storageManager, new Logger('Compute'), {
         listenerPort: config.services.compute.listenerPort,
+        listenerBind: config.services.compute.listenerBind,
         defaultPolicyName: config.services.compute.defaultPolicy,
       });
       await computeService.initialize();
@@ -279,9 +283,19 @@ async function main(): Promise<void> {
     if (computeService != null) {
       const computeStart = computeService.start(server.port);
 
-      logger.info('Compute (Cloud Armor) listener', {
+      evaluationServerHealth = {
+        started: computeStart.listenerStarted,
+        bind: computeStart.listenerBind,
+      };
+
+      if (computeStart.listenerPort != null) {
+        evaluationServerHealth.port = computeStart.listenerPort;
+      }
+
+      logger.info('Compute (Cloud Armor) evaluation server', {
         listenerStarted: computeStart.listenerStarted,
         listenerPort: computeStart.listenerPort,
+        listenerBind: computeStart.listenerBind,
       });
     }
   } catch (error) {

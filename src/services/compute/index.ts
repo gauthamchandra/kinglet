@@ -14,12 +14,14 @@ import { SecurityPolicyService } from './service.ts';
 
 export interface ComputeServiceOptions {
   listenerPort?: number | undefined;
+  listenerBind?: '127.0.0.1' | '0.0.0.0' | undefined;
   defaultPolicyName?: string | undefined;
 }
 
 export interface ComputeStartResult {
   listenerStarted: boolean;
   listenerPort?: number;
+  listenerBind: '127.0.0.1' | '0.0.0.0';
 }
 
 export class ComputeService {
@@ -59,42 +61,44 @@ export class ComputeService {
     }
 
     const listenerPort = this.options.listenerPort ?? 8787;
+    const listenerBind = this.options.listenerBind ?? '127.0.0.1';
     const defaultPolicyName = this.options.defaultPolicyName;
     const policyService = this.policyService;
 
     if (reservedHttpPort != null && listenerPort === reservedHttpPort) {
       this.logger.warn(
-        `Cloud Armor listener port ${listenerPort} is already used by the HTTP server; Compute control plane is still available`
+        `Cloud Armor evaluation server port ${listenerPort} is already used by the HTTP server; Compute control plane is still available`
       );
 
-      return { listenerStarted: false };
+      return { listenerStarted: false, listenerBind };
     }
 
     try {
       this.listenerServer = startArmorListener({
         port: listenerPort,
+        hostname: listenerBind,
         defaultPolicyName,
         getPolicies: () => policyService.listAll(),
         logger: this.logger,
       });
     } catch (error) {
       this.logger.warn(
-        `Cloud Armor listener failed to bind 127.0.0.1:${listenerPort}; Compute control plane is still available`,
+        `Cloud Armor evaluation server failed to bind ${listenerBind}:${listenerPort}; Compute control plane is still available`,
         { error: error instanceof Error ? error.message : String(error) }
       );
 
-      return { listenerStarted: false };
+      return { listenerStarted: false, listenerBind };
     }
 
     const boundPort = this.listenerServer.port;
 
-    this.logger.info(`Cloud Armor listener started on 127.0.0.1:${boundPort}`);
+    this.logger.info(`Cloud Armor evaluation server started on ${listenerBind}:${boundPort}`);
 
     if (boundPort != null) {
-      return { listenerStarted: true, listenerPort: boundPort };
+      return { listenerStarted: true, listenerPort: boundPort, listenerBind };
     }
 
-    return { listenerStarted: true };
+    return { listenerStarted: true, listenerBind };
   }
 
   async stop(): Promise<void> {

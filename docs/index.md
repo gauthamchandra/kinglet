@@ -5,6 +5,7 @@ The project overview is in the [README](../README.md). Use the links below to br
 | I want to… | Read |
 | --- | --- |
 | Try it locally | [Quick start](getting-started/quickstart.md) |
+| Test Cloud Armor policies | [Cloud Armor](getting-started/cloud-armor.md) |
 | Connect client libraries | [Client libraries](getting-started/client-libraries.md) |
 | See what's supported | [Compatibility matrix](compatibility/index.md) |
 | Configure the server | [Configuration](reference/configuration.md) |

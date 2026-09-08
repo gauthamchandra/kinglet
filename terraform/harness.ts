@@ -7,6 +7,8 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { allocateDistinctPorts } from '../test-utils/helpers.ts';
+import { runArmorEvaluationCases } from './armor-evaluation.ts';
 import type { TerraformValidationCase } from './manifest.ts';
 
 const ROOT_DIR = resolve(import.meta.dir, '..');
@@ -25,6 +27,7 @@ export interface HarnessOptions {
 interface RunningKinglet {
   stop: () => Promise<void>;
   endpoint: string;
+  listenerEndpoint?: string;
 }
 
 type ResourceStopper = () => Promise<void>;
@@ -34,19 +37,25 @@ async function removeValidationContainer(): Promise<void> {
     .exited;
 }
 
-async function getFreePort(): Promise<number> {
-  const server = Bun.serve({
-    port: 0,
-    fetch: () => new Response('ok'),
-  });
-  const port = server.port;
+function parseOptionalPort(raw: string | undefined): number | undefined {
+  if (raw == null || raw === '') {
+    return undefined;
+  }
 
-  server.stop(true);
+  const parsed = Number(raw);
 
-  return port;
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error(`Invalid port ${JSON.stringify(raw)}`);
+  }
+
+  return parsed;
 }
 
-async function waitForHealth(endpoint: string, timeoutMs = 60_000): Promise<void> {
+async function waitForHealth(
+  endpoint: string,
+  options: { requireEvaluationServer?: boolean } = {},
+  timeoutMs = 60_000
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
@@ -54,7 +63,17 @@ async function waitForHealth(endpoint: string, timeoutMs = 60_000): Promise<void
       const response = await fetch(`${endpoint}/health`);
 
       if (response.ok) {
-        return;
+        if (!options.requireEvaluationServer) {
+          return;
+        }
+
+        const body = (await response.json()) as {
+          kingletCloudArmorEvaluationServer?: { started?: boolean };
+        };
+
+        if (body.kingletCloudArmorEvaluationServer?.started === true) {
+          return;
+        }
       }
     } catch {
       // kinglet still starting
@@ -63,15 +82,21 @@ async function waitForHealth(endpoint: string, timeoutMs = 60_000): Promise<void
     await Bun.sleep(500);
   }
 
-  throw new Error(`Timed out waiting for kinglet health at ${endpoint}/health`);
+  throw new Error(
+    options.requireEvaluationServer
+      ? `Timed out waiting for Cloud Armor evaluation server at ${endpoint}/health`
+      : `Timed out waiting for kinglet health at ${endpoint}/health`
+  );
 }
 
 async function startKingletBun(
   services: readonly string[],
   port: number,
+  listenerPort: number,
   onResourceStarted?: (stop: ResourceStopper) => void
 ): Promise<RunningKinglet> {
   const endpoint = `http://127.0.0.1:${port}`;
+  const listenerEndpoint = `http://127.0.0.1:${listenerPort}`;
   const proc = Bun.spawn({
     cmd: ['bun', 'run', 'src/index.ts'],
     cwd: ROOT_DIR,
@@ -83,6 +108,7 @@ async function startKingletBun(
       SERVICES: services.join(','),
       MEMORYSTORE_DATA_PLANE: 'false',
       HTTP_PORT: String(port),
+      COMPUTE_LISTENER_PORT: String(listenerPort),
     },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -96,7 +122,7 @@ async function startKingletBun(
   onResourceStarted?.(stopProc);
 
   try {
-    await waitForHealth(endpoint);
+    await waitForHealth(endpoint, { requireEvaluationServer: services.includes('compute') });
   } catch (err) {
     await stopProc();
     throw err;
@@ -104,6 +130,7 @@ async function startKingletBun(
 
   return {
     endpoint,
+    listenerEndpoint,
     stop: stopProc,
   };
 }
@@ -111,10 +138,12 @@ async function startKingletBun(
 async function startKingletDocker(
   services: readonly string[],
   port: number,
+  listenerPort: number,
   skipDockerBuild: boolean,
   onResourceStarted?: (stop: ResourceStopper) => void
 ): Promise<RunningKinglet> {
   const endpoint = `http://127.0.0.1:${port}`;
+  const listenerEndpoint = `http://127.0.0.1:${listenerPort}`;
 
   await removeValidationContainer();
 
@@ -146,6 +175,8 @@ async function startKingletDocker(
       CONTAINER_NAME,
       '-p',
       `${port}:8765`,
+      '-p',
+      `${listenerPort}:8787`,
       '-e',
       'STORAGE_TYPE=memory',
       '-e',
@@ -177,7 +208,7 @@ async function startKingletDocker(
   onResourceStarted?.(removeValidationContainer);
 
   try {
-    await waitForHealth(endpoint);
+    await waitForHealth(endpoint, { requireEvaluationServer: services.includes('compute') });
   } catch (err) {
     await removeValidationContainer();
     throw err;
@@ -185,6 +216,7 @@ async function startKingletDocker(
 
   return {
     endpoint,
+    listenerEndpoint,
     stop: removeValidationContainer,
   };
 }
@@ -196,21 +228,23 @@ async function startKinglet(
 ): Promise<RunningKinglet> {
   const mode =
     options.kingletMode ?? (process.env.KINGLET_MODE as KingletMode | undefined) ?? 'bun';
-  const port =
-    options.port ??
-    (process.env.KINGLET_PORT != null ? Number(process.env.KINGLET_PORT) : undefined) ??
-    (await getFreePort());
+
+  const { first: port, second: listenerPort } = await allocateDistinctPorts({
+    first: options.port ?? parseOptionalPort(process.env.KINGLET_PORT),
+    second: parseOptionalPort(process.env.KINGLET_LISTENER_PORT),
+  });
 
   if (mode === 'docker') {
     return startKingletDocker(
       services,
       port,
+      listenerPort,
       options.skipDockerBuild ?? process.env.SKIP_DOCKER_BUILD === '1',
       onResourceStarted
     );
   }
 
-  return startKingletBun(services, port, onResourceStarted);
+  return startKingletBun(services, port, listenerPort, onResourceStarted);
 }
 
 async function runTerraformCommand(
@@ -317,6 +351,14 @@ export async function runValidationCase(
 
     if (apply.exitCode !== 0) {
       throw new Error(`[${validationCase.id}] terraform apply failed:\n${apply.output}`);
+    }
+
+    if (validationCase.id === 'armor') {
+      if (kinglet.listenerEndpoint == null) {
+        throw new Error(`[${validationCase.id}] evaluation server endpoint was not published`);
+      }
+
+      await runArmorEvaluationCases(kinglet.listenerEndpoint);
     }
 
     const planArgs = [

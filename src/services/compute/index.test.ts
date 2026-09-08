@@ -59,6 +59,7 @@ describe('ComputeService', () => {
     const started = occupied.start(8765);
 
     expect(started.listenerStarted).toBe(false);
+    expect(started.listenerBind).toBe('127.0.0.1');
     expect(occupied.getRoutes().length).toBeGreaterThan(0);
 
     await occupied.stop();
@@ -189,6 +190,30 @@ describe('ComputeService', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
     expect(res.headers.get('x-kinglet-security-policy')).toBe('shared');
+
+    await listening.stop();
+  });
+
+  test('evaluation server binds 0.0.0.0 when listenerBind is set', async () => {
+    const listening = new ComputeService(storage, logger, {
+      listenerPort: 0,
+      listenerBind: '0.0.0.0',
+    });
+
+    await listening.initialize();
+
+    const started = listening.start();
+
+    expect(started.listenerStarted).toBe(true);
+    expect(started.listenerBind).toBe('0.0.0.0');
+    expect(started.listenerPort).toBeTypeOf('number');
+
+    await listening.getSecurityPolicyService().insert('proj', 'only-policy', {});
+
+    const res = await fetch(`http://127.0.0.1:${started.listenerPort}/public`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
 
     await listening.stop();
   });

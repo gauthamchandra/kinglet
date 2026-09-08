@@ -4,11 +4,13 @@
 
 import { describe, expect, test } from 'bun:test';
 import {
+  allocateDistinctPorts,
   createTestConfig,
   createTestRequest,
   delay,
   expectToThrow,
   generateTestId,
+  getAvailablePorts,
   MockStorageProvider,
 } from '../../../test-utils/helpers';
 
@@ -120,6 +122,75 @@ describe('Test Helpers', () => {
       expect(id1).toMatch(/^test-\d+-[a-z0-9]+$/);
       expect(id2).toMatch(/^test-\d+-[a-z0-9]+$/);
       expect(id1).not.toBe(id2);
+    });
+  });
+
+  describe('getAvailablePorts', () => {
+    test('returns unique ports by holding every reservation until the set is complete', async () => {
+      const ports = await getAvailablePorts(8);
+
+      expect(ports).toHaveLength(8);
+      expect(new Set(ports).size).toBe(8);
+    });
+
+    test('does not reuse a reserved port that is still free', async () => {
+      const reservedList = await getAvailablePorts(1);
+      const reserved = reservedList[0] ?? 0;
+
+      expect(reserved).toBeGreaterThan(0);
+
+      const otherList = await getAvailablePorts(1, [reserved]);
+
+      expect(otherList).toHaveLength(1);
+      expect(otherList[0]).not.toBe(reserved);
+    });
+
+    test('rejects a count below 1', async () => {
+      await expect(getAvailablePorts(0)).rejects.toThrow('count must be at least 1');
+    });
+  });
+
+  describe('allocateDistinctPorts', () => {
+    test('keeps two explicit ports that already differ', async () => {
+      const ports = await allocateDistinctPorts({ first: 8765, second: 8787 });
+
+      expect(ports).toEqual({ first: 8765, second: 8787 });
+    });
+
+    test('rejects two explicit ports that are the same', async () => {
+      await expect(allocateDistinctPorts({ first: 8765, second: 8765 })).rejects.toThrow(
+        'ports must differ (both are 8765)'
+      );
+    });
+
+    test('fills a missing second port without reusing the first', async () => {
+      const reservedList = await getAvailablePorts(1);
+      const reserved = reservedList[0] ?? 0;
+
+      expect(reserved).toBeGreaterThan(0);
+
+      const ports = await allocateDistinctPorts({ first: reserved });
+
+      expect(ports.first).toBe(reserved);
+      expect(ports.second).not.toBe(reserved);
+    });
+
+    test('fills a missing first port without reusing the second', async () => {
+      const reservedList = await getAvailablePorts(1);
+      const reserved = reservedList[0] ?? 0;
+
+      expect(reserved).toBeGreaterThan(0);
+
+      const ports = await allocateDistinctPorts({ second: reserved });
+
+      expect(ports.second).toBe(reserved);
+      expect(ports.first).not.toBe(reserved);
+    });
+
+    test('allocates two distinct ports when neither is explicit', async () => {
+      const ports = await allocateDistinctPorts({});
+
+      expect(ports.first).not.toBe(ports.second);
     });
   });
 

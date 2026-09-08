@@ -270,8 +270,9 @@ is a valid Armor action, and a 404 would mix “blocked as missing”
 with “allowed, no origin.” Use `X-Kinglet-Enforced-Action` if the
 status alone is not enough (preview, which allow won).
 
-Bind address is `127.0.0.1`. `docker run -p 8787:8787` will not reach
-it until a bind override is added.
+Default bind address is `127.0.0.1`. Set `COMPUTE_LISTENER_BIND=0.0.0.0`
+(the Docker image does this) so `docker run -p 8787:8787` reaches the
+evaluation server. The server is unauthenticated.
 
 **Request.** The only kinglet request header is
 `X-Kinglet-Origin-IP`. The adapter parses it as the peer, then
@@ -482,7 +483,14 @@ Preconfigured WAF sets, address groups, Adaptive Protection,
 reCAPTCHA. `aggregatedList`, `setLabels`,
 `listPreconfiguredExpressionSets`. TLS termination. Curl injection
 of ASN / region / JA3. JSON evaluate URL. Verbose match-field
-response headers. Binding the listener on `0.0.0.0`.
+response headers.
+
+## Amendment: evaluation-server bind
+
+`COMPUTE_LISTENER_BIND` selects `127.0.0.1` (default, `bun run`) or
+`0.0.0.0` (Docker image). Origin proxying remains rejected. `/health`
+reports `kingletCloudArmorEvaluationServer` when Compute is enabled.
+See [Testing Cloud Armor policies](../getting-started/cloud-armor.md).
 
 ## References
 

@@ -29,11 +29,17 @@ COPY --from=install /app/node_modules ./node_modules
 COPY package.json bun.lock tsconfig.json LICENSE ./
 COPY src/ ./src/
 
-# Default ports: 8765 (HTTP), 8766 (gRPC), 6380-6479 (Memorystore data plane),
+# Default ports: 8765 (HTTP), 8766 (gRPC), 8787 (Cloud Armor evaluation server),
+# 6380-6479 (Memorystore data plane),
 # 5432-5531 (Cloud SQL data plane — see docs/adrs/013-cloudsql-pglite-data-plane.md).
 # The Cloud SQL data plane needs no package here: PGlite ships as an npm
 # dependency, unlike valkey-server above.
-EXPOSE 8765 8766 6380-6479 5432-5531
+#
+# The evaluation server is unauthenticated. Default bind for `bun run` is
+# 127.0.0.1; the image listens on all interfaces so `docker run -p 8787:8787`
+# reaches it. Publish 8787 only on a trusted local/CI machine.
+ENV COMPUTE_LISTENER_BIND=0.0.0.0
+EXPOSE 8765 8766 8787 6380-6479 5432-5531
 
 # Create data directory for SQLite persistence
 RUN mkdir -p /app/data

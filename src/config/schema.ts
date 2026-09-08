@@ -101,6 +101,7 @@ const ServicesConfigSchema = z.object({
     .object({
       enabled: z.boolean().default(true),
       listenerPort: z.number().int().min(1).max(65535).default(8787),
+      listenerBind: z.enum(['127.0.0.1', '0.0.0.0']).default('127.0.0.1'),
       defaultPolicy: z.string().optional(),
     })
     .prefault({}),
@@ -232,6 +233,7 @@ export const EnvConfigSchema = z.object({
     .pipe(z.number().int().min(1).max(65535))
     .optional(),
   COMPUTE_ARMOR_DEFAULT_POLICY: z.string().optional(),
+  COMPUTE_LISTENER_BIND: z.enum(['127.0.0.1', '0.0.0.0']).optional(),
 
   // Logging configuration
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
@@ -312,7 +314,8 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.CLOUDSQL_PORT_RANGE_END !== undefined ||
     env.ENABLE_COMPUTE !== undefined ||
     env.COMPUTE_LISTENER_PORT !== undefined ||
-    env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined;
+    env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined ||
+    env.COMPUTE_LISTENER_BIND !== undefined;
 
   if (hasServiceConfig) {
     config.services = {};
@@ -440,6 +443,11 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined) {
       if (!config.services.compute) config.services.compute = {};
       config.services.compute.defaultPolicy = env.COMPUTE_ARMOR_DEFAULT_POLICY;
+    }
+
+    if (env.COMPUTE_LISTENER_BIND !== undefined) {
+      if (!config.services.compute) config.services.compute = {};
+      config.services.compute.listenerBind = env.COMPUTE_LISTENER_BIND;
     }
   }
 
