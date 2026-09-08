@@ -63,6 +63,7 @@ export interface DataPlaneManagerOptions {
   portRangeEnd: number;
   storageType: StorageType;
   sqlitePath: string;
+  postgis: boolean;
 }
 
 interface RunningInstance {
@@ -104,6 +105,7 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     this.databaseManager = new PGliteDatabaseManager({
       storageType: options.storageType,
       sqlitePath: options.sqlitePath,
+      postgis: options.postgis,
     });
     this.portAllocator = new PortAllocator({
       portRangeStart: options.portRangeStart,

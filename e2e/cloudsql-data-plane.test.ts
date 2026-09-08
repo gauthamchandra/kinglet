@@ -146,6 +146,7 @@ beforeAll(async () => {
     portRangeEnd: PORT_RANGE_END,
     storageType: 'memory',
     sqlitePath: './data/emulator.db',
+    postgis: false,
   });
 
   await cloudSqlService.initialize();
@@ -445,4 +446,90 @@ describe('Cloud SQL data plane persistence', () => {
     },
     INSTANCE_BOOT_TIMEOUT_MS
   );
+});
+
+describe('Cloud SQL data plane e2e with PostGIS', () => {
+  const POSTGIS_PORT_RANGE_START = 15721;
+  const POSTGIS_PORT_RANGE_END = 15740;
+  const POSTGIS_INSTANCE = 'postgis-test';
+
+  let postgisService: CloudSqlService;
+  let postgisEmulatorServer: Server;
+  let postgisEmulatorPort: number;
+  let postgisInstancePort: number;
+
+  function postgisEmulatorUrl(path: string): string {
+    return `http://localhost:${postgisEmulatorPort}${path}`;
+  }
+
+  beforeAll(async () => {
+    postgisEmulatorPort = await getAvailablePort();
+
+    const storage = new StorageManager();
+
+    await storage.initialize({ type: 'memory' });
+
+    postgisService = new CloudSqlService(storage, new Logger('e2e-postgis', 'error'), {
+      enabled: true,
+      portRangeStart: POSTGIS_PORT_RANGE_START,
+      portRangeEnd: POSTGIS_PORT_RANGE_END,
+      storageType: 'memory',
+      sqlitePath: './data/emulator.db',
+      postgis: true,
+    });
+
+    await postgisService.initialize();
+
+    postgisEmulatorServer = Bun.serve({
+      port: postgisEmulatorPort,
+      fetch: buildRouter(postgisService.getRoutes()),
+    });
+
+    const createResponse = await fetch(postgisEmulatorUrl(`/v1/projects/${PROJECT}/instances`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: POSTGIS_INSTANCE,
+        databaseVersion: 'POSTGRES_16',
+        rootPassword: ROOT_PASSWORD,
+      }),
+    });
+
+    await expectOk(createResponse, `Creating PostGIS instance ${POSTGIS_INSTANCE}`);
+
+    const port = postgisService.getDataPlanePort(PROJECT, POSTGIS_INSTANCE);
+
+    if (port == null) throw new Error('PostGIS instance has no data-plane port');
+
+    postgisInstancePort = port;
+  }, INSTANCE_BOOT_TIMEOUT_MS);
+
+  afterAll(async () => {
+    postgisEmulatorServer?.stop();
+    await postgisService?.stop();
+  });
+
+  test('PostGIS geospatial queries work', async () => {
+    const sql = new Bun.SQL(
+      `postgres://postgres:${ROOT_PASSWORD}@127.0.0.1:${postgisInstancePort}/postgres`
+    );
+
+    await sql.unsafe('CREATE EXTENSION IF NOT EXISTS postgis');
+    await sql.unsafe('CREATE TABLE places (id int, geom geometry(Point, 4326))');
+    await sql.unsafe('INSERT INTO places VALUES (1, ST_SetSRID(ST_MakePoint(-122.4, 37.8), 4326))');
+
+    expect(await rows(sql, 'SELECT id, ST_AsText(geom) AS wkt FROM places')).toEqual([
+      { id: 1, wkt: 'POINT(-122.4 37.8)' },
+    ]);
+
+    expect(
+      await rows(
+        sql,
+        'SELECT ST_Distance(ST_SetSRID(ST_MakePoint(0,0),4326)::geography, ' +
+          'ST_SetSRID(ST_MakePoint(1,1),4326)::geography)::int AS meters'
+      )
+    ).toEqual([{ meters: 156900 }]);
+
+    await sql.end();
+  });
 });

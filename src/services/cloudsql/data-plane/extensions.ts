@@ -1,5 +1,5 @@
 /**
- * The fixed extension set every emulated Cloud SQL database is built with.
+ * The extension set every emulated Cloud SQL database is built with.
  *
  * <p>Cloud SQL lets a user `CREATE EXTENSION` any name on its supported list
  * at any time, but PGlite has to be handed its extensions at build time — the
@@ -10,6 +10,9 @@
  *
  * <p>This is every contrib extension `@electric-sql/pglite` ships plus
  * pgvector, which is a separate package because of its size.
+ *
+ * <p>PostGIS is available behind the `CLOUDSQL_POSTGIS` opt-in flag. It is
+ * not in the default set because it significantly increases boot time.
  *
  * <p>Every extension here is linked into every database, so anything added
  * to this set is a boot-time cost paid per database.
@@ -44,6 +47,7 @@ import { tsm_system_time } from '@electric-sql/pglite/contrib/tsm_system_time';
 import { unaccent } from '@electric-sql/pglite/contrib/unaccent';
 import { uuid_ossp } from '@electric-sql/pglite/contrib/uuid_ossp';
 import { vector } from '@electric-sql/pglite-pgvector';
+import { postgis } from '@electric-sql/pglite-postgis';
 
 export const DATA_PLANE_EXTENSIONS = {
   amcheck,
@@ -74,3 +78,15 @@ export const DATA_PLANE_EXTENSIONS = {
   uuid_ossp,
   vector,
 } as const;
+
+export interface ResolveExtensionsOptions {
+  postgis: boolean;
+}
+
+export function resolveExtensions(options: ResolveExtensionsOptions) {
+  if (options.postgis) {
+    return { ...DATA_PLANE_EXTENSIONS, postgis };
+  }
+
+  return DATA_PLANE_EXTENSIONS;
+}

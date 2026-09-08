@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { PGlite } from '@electric-sql/pglite';
-import { DATA_PLANE_EXTENSIONS } from './extensions.ts';
+import { DATA_PLANE_EXTENSIONS, resolveExtensions } from './extensions.ts';
 
 // The SQL name does not always match the module export: PGlite exports
 // `uuid_ossp`, but the extension installs as `uuid-ossp`.
@@ -60,4 +60,26 @@ describe('DATA_PLANE_EXTENSIONS', () => {
 
     expect(loaded.rows).toHaveLength(1);
   });
+});
+
+describe('resolveExtensions', () => {
+  test('without postgis returns the base set', () => {
+    const extensions = resolveExtensions({ postgis: false });
+
+    expect(extensions).toBe(DATA_PLANE_EXTENSIONS);
+    expect('postgis' in extensions).toBe(false);
+  });
+
+  test('with postgis enabled, CREATE EXTENSION postgis works', async () => {
+    const extensions = resolveExtensions({ postgis: true });
+    const db = await PGlite.create('memory://', { extensions });
+
+    await db.exec('CREATE EXTENSION postgis');
+
+    const result = await db.query<{ wkt: string }>('SELECT ST_AsText(ST_MakePoint(1, 2)) AS wkt');
+
+    await db.close();
+
+    expect(result.rows[0]?.wkt).toBe('POINT(1 2)');
+  }, 30_000);
 });

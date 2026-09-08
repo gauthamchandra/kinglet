@@ -14,7 +14,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import type { StorageType } from '@/core/storage/types.ts';
-import { DATA_PLANE_EXTENSIONS } from './extensions.ts';
+import { resolveExtensions } from './extensions.ts';
 import type { ProtocolBackend } from './pglite-session-queue.ts';
 import { PGliteSessionQueue } from './pglite-session-queue.ts';
 
@@ -37,6 +37,8 @@ export interface PGliteDatabaseManagerOptions {
    * Postgres data there too, and deleting that directory really is a reset.
    */
   sqlitePath: string;
+  /** Link PostGIS into every database. Slower boot when enabled. */
+  postgis: boolean;
 }
 
 export interface OpenDatabase {
@@ -297,7 +299,7 @@ export class PGliteDatabaseManager {
     }
 
     const db = await PGlite.create(this.resolveDataSource(key), {
-      extensions: DATA_PLANE_EXTENSIONS,
+      extensions: resolveExtensions({ postgis: this.options.postgis }),
     });
 
     // Re-checked after the boot, not only before it: a drop that began while

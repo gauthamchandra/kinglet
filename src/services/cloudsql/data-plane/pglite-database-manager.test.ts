@@ -21,10 +21,11 @@ const KEY = { project: 'p1', instance: 'inst', database: 'postgres' };
 let managers: PGliteDatabaseManager[] = [];
 let temporaryDirectories: string[] = [];
 
-function memoryManager(): PGliteDatabaseManager {
+function memoryManager(overrides?: { postgis?: boolean }): PGliteDatabaseManager {
   const manager = new PGliteDatabaseManager({
     storageType: 'memory',
     sqlitePath: './data/emulator.db',
+    postgis: overrides?.postgis ?? false,
   });
 
   managers.push(manager);
@@ -40,6 +41,7 @@ async function fileManager(): Promise<{ manager: PGliteDatabaseManager; root: st
   const manager = new PGliteDatabaseManager({
     storageType: 'sqlite',
     sqlitePath: join(root, 'emulator.db'),
+    postgis: false,
   });
 
   managers.push(manager);
@@ -147,6 +149,7 @@ describe('PGliteDatabaseManager', () => {
     const restarted = new PGliteDatabaseManager({
       storageType: 'sqlite',
       sqlitePath: join(root, 'emulator.db'),
+      postgis: false,
     });
 
     managers.push(restarted);
@@ -289,6 +292,19 @@ describe('PGliteDatabaseManager', () => {
 
     expect(result.rows).toEqual([{ extname: 'pg_trgm' }, { extname: 'vector' }]);
   });
+
+  test('a manager with postgis enabled can CREATE EXTENSION postgis', async () => {
+    const manager = memoryManager({ postgis: true });
+    const open = await manager.open(KEY);
+
+    await open.db.exec('CREATE EXTENSION postgis');
+
+    const result = await open.db.query<{ wkt: string }>(
+      'SELECT ST_AsText(ST_MakePoint(1, 2)) AS wkt'
+    );
+
+    expect(result.rows[0]?.wkt).toBe('POINT(1 2)');
+  }, 30_000);
 
   test('close forgets the database and reopening starts a fresh one in memory', async () => {
     const manager = memoryManager();

@@ -42,6 +42,7 @@ See [Storage modes](storage.md) for details on each storage type.
 | `CLOUDSQL_DATA_PLANE` | `true` | Serve a real Postgres endpoint per instance (PGlite); `false` for a control plane only |
 | `CLOUDSQL_PORT_RANGE_START` | `5432` | First port available for Cloud SQL instance endpoints |
 | `CLOUDSQL_PORT_RANGE_END` | `5531` | Last port available for Cloud SQL instance endpoints |
+| `CLOUDSQL_POSTGIS` | `false` | Link PostGIS into every Cloud SQL database (slower instance creation) |
 | `ENABLE_COMPUTE` | `true` | Enable Compute Engine (Cloud Armor) service |
 | `COMPUTE_LISTENER_PORT` | `8787` | Cloud Armor evaluation server port |
 | `COMPUTE_LISTENER_BIND` | `127.0.0.1` | Evaluation server bind (`127.0.0.1` or `0.0.0.0`). The Docker image sets `0.0.0.0` |

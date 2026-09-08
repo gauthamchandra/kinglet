@@ -89,6 +89,9 @@ const ServicesConfigSchema = z.object({
           // connection string already assumes: 127.0.0.1:5432.
           portRangeStart: z.number().int().min(1).max(65535).default(5432),
           portRangeEnd: z.number().int().min(1).max(65535).default(5531),
+          // Off by default because it significantly increases boot time.
+          // Set CLOUDSQL_POSTGIS=true to opt in.
+          postgis: z.boolean().default(false),
         })
         .refine(dataPlane => dataPlane.portRangeStart <= dataPlane.portRangeEnd, {
           message: 'portRangeStart must be less than or equal to portRangeEnd',
@@ -223,6 +226,10 @@ export const EnvConfigSchema = z.object({
     .transform(Number)
     .pipe(z.number().int().min(1).max(65535))
     .optional(),
+  CLOUDSQL_POSTGIS: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
   ENABLE_COMPUTE: z
     .string()
     .transform(val => val.toLowerCase() === 'true')
@@ -312,6 +319,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.CLOUDSQL_DATA_PLANE !== undefined ||
     env.CLOUDSQL_PORT_RANGE_START !== undefined ||
     env.CLOUDSQL_PORT_RANGE_END !== undefined ||
+    env.CLOUDSQL_POSTGIS !== undefined ||
     env.ENABLE_COMPUTE !== undefined ||
     env.COMPUTE_LISTENER_PORT !== undefined ||
     env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined ||
@@ -411,7 +419,8 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (
       env.CLOUDSQL_DATA_PLANE !== undefined ||
       env.CLOUDSQL_PORT_RANGE_START !== undefined ||
-      env.CLOUDSQL_PORT_RANGE_END !== undefined
+      env.CLOUDSQL_PORT_RANGE_END !== undefined ||
+      env.CLOUDSQL_POSTGIS !== undefined
     ) {
       if (!config.services.cloudsql) config.services.cloudsql = {};
 
@@ -426,6 +435,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       if (env.CLOUDSQL_PORT_RANGE_END !== undefined) {
         dataPlane.portRangeEnd = env.CLOUDSQL_PORT_RANGE_END;
       }
+      if (env.CLOUDSQL_POSTGIS !== undefined) dataPlane.postgis = env.CLOUDSQL_POSTGIS;
 
       config.services.cloudsql.dataPlane = dataPlane;
     }
