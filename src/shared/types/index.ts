@@ -51,48 +51,6 @@ export interface AuthContext {
   serviceAccount?: string;
 }
 
-// Configuration interfaces
-export interface Config {
-  server: ServerConfig;
-  storage: StorageConfig;
-  auth: AuthConfig;
-  services: ServicesConfig;
-  logging: LoggingConfig;
-}
-
-export interface ServerConfig {
-  httpPort: number;
-  grpcPort: number;
-  maxConnections: number;
-}
-
-export interface StorageConfig {
-  type: 'memory' | 'sqlite' | 'hybrid';
-  sqlitePath?: string;
-  cacheSize: number;
-}
-
-export interface AuthConfig {
-  enabled: boolean;
-  mode: 'bypass' | 'mock' | 'validate';
-  mockCredentials?: {
-    projectId: string;
-    serviceAccount: string;
-  };
-}
-
-export interface ServicesConfig {
-  pubsub: { enabled: boolean };
-  scheduler: { enabled: boolean };
-  tasks: { enabled: boolean };
-  secrets: { enabled: boolean };
-}
-
-export interface LoggingConfig {
-  level: 'debug' | 'info' | 'warn' | 'error';
-  format: 'json' | 'pretty';
-}
-
 // Health check interfaces
 export interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
