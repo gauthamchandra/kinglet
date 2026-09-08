@@ -2,7 +2,8 @@
  * Test helper utilities
  */
 
-import type { Config, Operation, QueryConditions, StorageProvider } from '@/shared/types/index.ts';
+import { type Config, ConfigSchema } from '@/config/schema.ts';
+import type { Operation, QueryConditions, StorageProvider } from '@/shared/types/index.ts';
 
 /**
  * Create a test configuration with defaults
@@ -19,7 +20,7 @@ export async function createTestConfig(overrides: Partial<Config> = {}): Promise
     throw new Error('Failed to allocate required ports');
   }
 
-  return {
+  return ConfigSchema.parse({
     server: {
       httpPort,
       grpcPort,
@@ -27,24 +28,32 @@ export async function createTestConfig(overrides: Partial<Config> = {}): Promise
     },
     storage: {
       type: 'memory',
-      cacheSize: 1048576, // 1MB
     },
     auth: {
       enabled: false,
       mode: 'bypass',
     },
+    // Every service key is required by the schema and defaults to enabled, so
+    // the empty literals are enough to get a full, valid services block.
     services: {
-      pubsub: { enabled: true },
-      scheduler: { enabled: true },
-      tasks: { enabled: true },
-      secrets: { enabled: true },
+      alloydb: {},
+      cloudsql: {},
+      compute: {},
+      kms: {},
+      memorystore: {},
+      pubsub: {},
+      scheduler: {},
+      secrets: {},
+      storage: {},
+      tasks: {},
+      workflows: {},
     },
     logging: {
       level: 'error',
       format: 'json',
     },
     ...overrides,
-  };
+  });
 }
 
 /**

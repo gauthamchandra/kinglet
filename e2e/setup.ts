@@ -6,7 +6,7 @@
  */
 
 import { afterAll, beforeAll } from 'bun:test';
-import type { Config, ServerConfig } from '@/shared/types/index.ts';
+import type { Config } from '@/config/schema.ts';
 import { getAvailablePorts } from '../test-utils/helpers.ts';
 
 // Test configuration for E2E tests - will be populated with dynamic ports
@@ -46,7 +46,7 @@ beforeAll(async () => {
     },
     logging: {
       level: 'error', // Reduce noise in E2E tests
-      prettyPrint: false,
+      format: 'json',
     },
   };
 
@@ -73,7 +73,7 @@ afterAll(async () => {
 /**
  * Read the server config, failing loudly if `beforeAll` has not run yet
  */
-function requireServerConfig(): ServerConfig {
+function requireServerConfig(): Config['server'] {
   const server = E2E_TEST_CONFIG?.server;
 
   if (!server) {
