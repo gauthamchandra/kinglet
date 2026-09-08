@@ -34,6 +34,7 @@ function makeManager(
       portRangeEnd: portRangeStart + 4,
       storageType: 'memory',
       sqlitePath: './data/emulator.db',
+      postgis: false,
       ...overrides,
     },
     lookupUser

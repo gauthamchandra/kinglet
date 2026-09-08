@@ -171,8 +171,11 @@ answers "does my Terraform work?" but not "does my application code work?".
   one PGlite is one database, and PGlite has no `CREATE DATABASE`.
 - **The engine is Postgres 18 whatever `databaseVersion` says.** A
   `POSTGRES_14` instance still answers `SELECT version()` with 18.
-- **No PostGIS.** All 26 contrib extensions PGlite ships are available, plus
-  pgvector.
+- **PostGIS is opt-in.** Set `CLOUDSQL_POSTGIS=true` to link PostGIS into every
+  database. It adds ~19 MB of wasm and raises per-database boot time from
+  ~0.7 s to ~4.3 s, which is why it is off by default. Existing on-disk
+  databases gain PostGIS after a restart with the flag enabled — no recreation
+  needed. All 26 contrib extensions plus pgvector are always available.
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
   nothing restricts who may connect beyond user and password.
 - `User.type` values other than `BUILT_IN` behave like `BUILT_IN`.
@@ -204,8 +207,9 @@ answers "does my Terraform work?" but not "does my application code work?".
   `pglite-database-manager.ts` (PGlite lifecycle and data directories),
   `pglite-session-queue.ts` (per-database serialisation and transaction
   affinity), `port-allocator.ts`, and `extensions.ts`.
-- `@electric-sql/pglite` and `@electric-sql/pglite-pgvector` are pinned to
-  exact versions: pgvector 0.0.9 peer-pins PGlite to exactly 0.5.8, so the two
-  have to move together.
+- `@electric-sql/pglite`, `@electric-sql/pglite-pgvector`, and
+  `@electric-sql/pglite-postgis` are pinned to exact versions: pgvector 0.0.9
+  and pglite-postgis 0.2.8 both peer-pin PGlite to 0.5.8, so the three have
+  to move together.
 - `CloudSqlService.stop()` closes every PGlite and stops every listener as part
   of the emulator's normal shutdown.

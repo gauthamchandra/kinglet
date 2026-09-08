@@ -70,6 +70,7 @@ describe('CloudSqlService', () => {
       enabled: schemaDefaults.enabled,
       portRangeStart: schemaDefaults.portRangeStart,
       portRangeEnd: schemaDefaults.portRangeEnd,
+      postgis: schemaDefaults.postgis,
     });
   });
 

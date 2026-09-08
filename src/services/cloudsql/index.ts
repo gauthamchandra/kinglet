@@ -31,6 +31,7 @@ export const DEFAULT_DATA_PLANE_OPTIONS: Required<CloudSqlDataPlaneOptions> = {
   portRangeEnd: 5531,
   storageType: 'hybrid',
   sqlitePath: './data/emulator.db',
+  postgis: false,
 };
 
 export class CloudSqlService {
@@ -64,6 +65,7 @@ export class CloudSqlService {
             portRangeEnd: this.dataPlaneOptions.portRangeEnd,
             storageType: this.dataPlaneOptions.storageType,
             sqlitePath: this.dataPlaneOptions.sqlitePath,
+            postgis: this.dataPlaneOptions.postgis,
           },
           async (project, instance, user) => {
             const record = await repository.getUser(project, instance, user);

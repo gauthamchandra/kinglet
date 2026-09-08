@@ -277,6 +277,7 @@ describe('Configuration Schema', () => {
       expect(config.services.cloudsql.dataPlane.enabled).toBe(true);
       expect(config.services.cloudsql.dataPlane.portRangeStart).toBe(5432);
       expect(config.services.cloudsql.dataPlane.portRangeEnd).toBe(5531);
+      expect(config.services.cloudsql.dataPlane.postgis).toBe(false);
     });
 
     test('ConfigSchema accepts an explicit cloudsql data plane configuration', () => {
@@ -343,6 +344,12 @@ describe('Configuration Schema', () => {
       expect(env.CLOUDSQL_PORT_RANGE_END).toBe(15532);
     });
 
+    test('EnvConfigSchema parses CLOUDSQL_POSTGIS', () => {
+      const env = EnvConfigSchema.parse({ CLOUDSQL_POSTGIS: 'true' });
+
+      expect(env.CLOUDSQL_POSTGIS).toBe(true);
+    });
+
     test('mapEnvToConfig maps the cloudsql data-plane env vars into a nested dataPlane object', () => {
       const config = mapEnvToConfig({
         CLOUDSQL_DATA_PLANE: false,
@@ -353,6 +360,12 @@ describe('Configuration Schema', () => {
       expect(config.services?.cloudsql?.dataPlane?.enabled).toBe(false);
       expect(config.services?.cloudsql?.dataPlane?.portRangeStart).toBe(15432);
       expect(config.services?.cloudsql?.dataPlane?.portRangeEnd).toBe(15532);
+    });
+
+    test('mapEnvToConfig maps CLOUDSQL_POSTGIS into the dataPlane block', () => {
+      const config = mapEnvToConfig({ CLOUDSQL_POSTGIS: true });
+
+      expect(config.services?.cloudsql?.dataPlane?.postgis).toBe(true);
     });
 
     test('mapEnvToConfig maps ENABLE_CLOUDSQL as an individual service flag', () => {
