@@ -11,9 +11,8 @@
  * <p>This is every contrib extension `@electric-sql/pglite` ships plus
  * pgvector, which is a separate package because of its size.
  *
- * <p>PostGIS is available behind the `CLOUDSQL_POSTGIS` opt-in flag. It adds
- * ~19 MB of wasm and raises per-database boot time from ~0.7 s to ~4.3 s,
- * which is why it is not in the default set.
+ * <p>PostGIS is available behind the `CLOUDSQL_POSTGIS` opt-in flag. It is
+ * not in the default set because it significantly increases boot time.
  *
  * <p>Every extension here is linked into every database, so anything added
  * to this set is a boot-time cost paid per database.

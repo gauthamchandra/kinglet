@@ -37,7 +37,7 @@ export interface PGliteDatabaseManagerOptions {
    * Postgres data there too, and deleting that directory really is a reset.
    */
   sqlitePath: string;
-  /** Link PostGIS into every database (~19 MB wasm, slower boot). */
+  /** Link PostGIS into every database. Slower boot when enabled. */
   postgis: boolean;
 }
 

@@ -89,8 +89,8 @@ const ServicesConfigSchema = z.object({
           // connection string already assumes: 127.0.0.1:5432.
           portRangeStart: z.number().int().min(1).max(65535).default(5432),
           portRangeEnd: z.number().int().min(1).max(65535).default(5531),
-          // ~19 MB wasm, ~4.3 s per-database boot. Off by default so the
-          // common case stays fast; set CLOUDSQL_POSTGIS=true to opt in.
+          // Off by default because it significantly increases boot time.
+          // Set CLOUDSQL_POSTGIS=true to opt in.
           postgis: z.boolean().default(false),
         })
         .refine(dataPlane => dataPlane.portRangeStart <= dataPlane.portRangeEnd, {

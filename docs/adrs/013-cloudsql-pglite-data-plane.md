@@ -172,8 +172,8 @@ answers "does my Terraform work?" but not "does my application code work?".
 - **The engine is Postgres 18 whatever `databaseVersion` says.** A
   `POSTGRES_14` instance still answers `SELECT version()` with 18.
 - **PostGIS is opt-in.** Set `CLOUDSQL_POSTGIS=true` to link PostGIS into every
-  database. It adds ~19 MB of wasm and raises per-database boot time from
-  ~0.7 s to ~4.3 s, which is why it is off by default. Existing on-disk
+  database. It is off by default because it significantly increases
+  per-database boot time. Existing on-disk
   databases gain PostGIS after a restart with the flag enabled — no recreation
   needed. All 26 contrib extensions plus pgvector are always available.
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
