@@ -222,11 +222,6 @@ export class ClusterService {
       throw new AlloyDbError('NOT_FOUND', `Cluster ${name} not found`, name);
     }
 
-    // initialUser is create-only for the data-plane User row. A PATCH may still
-    // rewrite initialUserName on the cluster (existing control-plane behaviour);
-    // rotating the password goes through users.patch so a rename-only PATCH
-    // cannot blank the stored secret.
-
     return this.operations.createOperation(
       project,
       location,
@@ -311,8 +306,9 @@ export class ClusterService {
 
   /**
    * Persist the cluster's initial user (username + password) as a User row so
-   * the data plane can authenticate it. Only called from cluster create —
-   * {@link initialUser} is create-only for the User row.
+   * the data plane can authenticate it. Create-only: rotating the password
+   * afterwards goes through users.patch, so a rename-only cluster PATCH cannot
+   * blank the stored secret.
    */
   private async upsertInitialUser(
     project: string,

@@ -131,8 +131,8 @@ export abstract class ResourceRepository<T extends NamedRecord> {
   }
 
   /**
-   * Every resource beneath `prefix`, unsorted paging. Used for cascade deletes
-   * and restart rehydration where the caller needs the full set, not a page.
+   * Every resource beneath `prefix`, name-ordered and unpaged, for cascade
+   * deletes and restart rehydration that need the full set rather than a page.
    */
   protected async listAllByPrefix(prefix: string): Promise<T[]> {
     const result = await this.storage.find<T>(this.tableName, {

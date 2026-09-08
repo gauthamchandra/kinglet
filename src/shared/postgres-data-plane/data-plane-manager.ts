@@ -180,8 +180,8 @@ export class DataPlaneManager implements PostgresDataPlane {
     this.instances.set(key, running);
 
     // The port is the one thing a developer cannot discover from the API
-    // response, which stays byte-faithful to sqladmin and so has nowhere to
-    // put a kinglet-only field. Logging it at start is how they find it.
+    // response, which stays byte-faithful to the product's admin API and so has
+    // nowhere to put a kinglet-only field. Logging it at start is how they find it.
     this.logger.info(
       `${this.options.productLabel} instance ${key} listening on ${ADVERTISED_HOST}:${port}`
     );

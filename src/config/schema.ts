@@ -44,8 +44,7 @@ const ServicesConfigSchema = z.object({
           // On by default, for the same reason Cloud SQL's is: an AlloyDB
           // instance no Postgres client can connect to is metadata, not
           // emulation. Set ALLOYDB_DATA_PLANE=false for the metadata-only
-          // control plane. PGlite ships as an npm dependency, so this
-          // default cannot fail on a host that simply lacks postgres.
+          // control plane.
           enabled: z.boolean().default(true),
           // Starts after Cloud SQL's default range (5432-5531) so both
           // services can run together without fighting over the same ports.

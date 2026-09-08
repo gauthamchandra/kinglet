@@ -77,10 +77,11 @@ export function buildDatabaseKey(key: DatabaseKey): string {
  * <p>These names arrive from the API — the URL path for project and instance,
  * the request body for database — and the admin API deliberately does not
  * constrain a database name as tightly as a filesystem path segment does.
- * Percent-encoding keeps that fidelity while making traversal impossible: `..` becomes `%2E%2E`, `a/b` becomes `a%2Fb`,
- * and an ordinary name like `postgres` is left untouched and still readable
- * on disk. `encodeURIComponent` already escapes separators and handles UTF-8;
- * `.` is the one character it leaves through that matters here.
+ * Percent-encoding keeps that fidelity while making traversal impossible: `..`
+ * becomes `%2E%2E`, `a/b` becomes `a%2Fb`, and an ordinary name like `postgres`
+ * is left untouched and still readable on disk. `encodeURIComponent` already
+ * escapes separators and handles UTF-8; `.` is the one character it leaves
+ * through that matters here.
  */
 export function encodePathSegment(segment: string): string {
   return encodeURIComponent(segment).replace(/\./g, '%2E');

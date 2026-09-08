@@ -179,7 +179,7 @@ export function normalizeEnum(value: unknown, byNumber: EnumNumberMap): unknown 
  */
 const PLACEHOLDER_IP_ADDRESS = '127.0.0.1';
 
-/** Default database opened on every emulated AlloyDB instance. */
+/** The only database an emulated instance has — AlloyDB has no databases API. */
 export const DEFAULT_DATABASE_NAME = 'postgres';
 
 // ── Error Class ──
