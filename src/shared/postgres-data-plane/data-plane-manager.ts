@@ -2,13 +2,13 @@
  * The data plane's facade: one listening Postgres endpoint per emulated
  * instance, backed by one PGlite per database on it.
  *
- * <p>The admin service talks only to the {@link CloudSqlDataPlane} interface,
+ * <p>The admin service talks only to the {@link PostgresDataPlane} interface,
  * so the control plane can run without a data plane at all
  * ({@link DisabledDataPlane}) and so tests can substitute a double instead of
  * booting wasm Postgres.
  *
- * <p>Nothing here is Cloud-SQL-specific beyond the name, so AlloyDB can reuse
- * it.
+ * <p>Shared by Cloud SQL and AlloyDB. Product-specific labelling and on-disk
+ * namespacing come from {@link DataPlaneManagerOptions}.
  */
 
 import type { StorageType } from '@/core/storage/types.ts';
@@ -30,7 +30,7 @@ import {
  * kinglet in Docker with the data-plane range published. */
 const ADVERTISED_HOST = '127.0.0.1';
 
-export interface CloudSqlDataPlane {
+export interface PostgresDataPlane {
   /**
    * Bring up an instance's endpoint with the given databases open, returning
    * the port it listens on, or null when no data plane is running.
@@ -64,6 +64,17 @@ export interface DataPlaneManagerOptions {
   storageType: StorageType;
   sqlitePath: string;
   postgis: boolean;
+  /**
+   * Human-readable product name used in log lines
+   * (e.g. `"Cloud SQL"`, `"AlloyDB"`).
+   */
+  productLabel: string;
+  /**
+   * Directory name beside kinglet's SQLite file that holds this product's
+   * Postgres data (e.g. `"cloudsql"`, `"alloydb"`). Keeps the two products
+   * from sharing or colliding on disk.
+   */
+  dataDirectoryName: string;
 }
 
 interface RunningInstance {
@@ -76,13 +87,22 @@ function buildInstanceKey(project: string, instance: string): string {
   return `${project}/${instance}`;
 }
 
+/**
+ * Split a key produced by {@link buildInstanceKey}.
+ *
+ * <p>The instance segment may itself contain `/` (AlloyDB encodes
+ * location/cluster/instance that way), so only the first slash separates
+ * project from instance.
+ */
 function splitInstanceKey(key: string): { project: string; instance: string } {
-  const [project = '', instance = ''] = key.split('/');
+  const separator = key.indexOf('/');
 
-  return { project, instance };
+  if (separator < 0) return { project: key, instance: '' };
+
+  return { project: key.slice(0, separator), instance: key.slice(separator + 1) };
 }
 
-export class DataPlaneManager implements CloudSqlDataPlane {
+export class DataPlaneManager implements PostgresDataPlane {
   private logger: Logger;
   private options: DataPlaneManagerOptions;
   private lookupUser: LookupUser;
@@ -106,6 +126,7 @@ export class DataPlaneManager implements CloudSqlDataPlane {
       storageType: options.storageType,
       sqlitePath: options.sqlitePath,
       postgis: options.postgis,
+      dataDirectoryName: options.dataDirectoryName,
     });
     this.portAllocator = new PortAllocator({
       portRangeStart: options.portRangeStart,
@@ -161,7 +182,9 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     // The port is the one thing a developer cannot discover from the API
     // response, which stays byte-faithful to sqladmin and so has nowhere to
     // put a kinglet-only field. Logging it at start is how they find it.
-    this.logger.info(`Cloud SQL instance ${key} listening on ${ADVERTISED_HOST}:${port}`);
+    this.logger.info(
+      `${this.options.productLabel} instance ${key} listening on ${ADVERTISED_HOST}:${port}`
+    );
 
     return port;
   }
@@ -197,7 +220,7 @@ export class DataPlaneManager implements CloudSqlDataPlane {
 
     if (!allocated) {
       throw new Error(
-        `Cannot start a Cloud SQL data plane for ${instanceKey}: every port in ` +
+        `Cannot start a ${this.options.productLabel} data plane for ${instanceKey}: every port in ` +
           `${this.options.portRangeStart}-${this.options.portRangeEnd} is already in use`
       );
     }
@@ -315,7 +338,7 @@ export class DataPlaneManager implements CloudSqlDataPlane {
       // developer who mistyped a database name has nothing on the emulator
       // side tying the refusal to the instance it was aimed at.
       this.logger.debug(
-        `Rejected a Cloud SQL connection to ${instanceKey}: no database "${database}"`
+        `Rejected a ${this.options.productLabel} connection to ${instanceKey}: no database "${database}"`
       );
 
       return {
@@ -330,7 +353,9 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     const record = await this.lookupUser(project, instance, user);
 
     if (!record) {
-      this.logger.debug(`Rejected a Cloud SQL connection to ${instanceKey}: no user "${user}"`);
+      this.logger.debug(
+        `Rejected a ${this.options.productLabel} connection to ${instanceKey}: no user "${user}"`
+      );
 
       return {
         allowed: false,
@@ -346,10 +371,10 @@ export class DataPlaneManager implements CloudSqlDataPlane {
 }
 
 /**
- * The no-op data plane used when `CLOUDSQL_DATA_PLANE=false`, so the control
- * plane keeps working on its own and no wasm Postgres is ever built.
+ * The no-op data plane used when a service's `*_DATA_PLANE=false`, so the
+ * control plane keeps working on its own and no wasm Postgres is ever built.
  */
-export class DisabledDataPlane implements CloudSqlDataPlane {
+export class DisabledDataPlane implements PostgresDataPlane {
   async startInstance(): Promise<number | null> {
     return null;
   }

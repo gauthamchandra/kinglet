@@ -8,17 +8,19 @@
 
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type { ProductDataPlaneOptions } from '@/shared/postgres-data-plane/host.ts';
+import {
+  CLOUDSQL_DATA_PLANE_PRODUCT,
+  createPostgresDataPlane,
+} from '@/shared/postgres-data-plane/host.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
-import type {
-  CloudSqlDataPlane,
-  DataPlaneManagerOptions,
-} from './data-plane/data-plane-manager.ts';
-import { DataPlaneManager, DisabledDataPlane } from './data-plane/data-plane-manager.ts';
 import { CloudSqlHandlers } from './handlers.ts';
 import { CloudSqlRepository } from './repository.ts';
 import { SqlAdminService } from './service.ts';
 
-export interface CloudSqlDataPlaneOptions extends Partial<DataPlaneManagerOptions> {
+export interface CloudSqlDataPlaneOptions extends Partial<ProductDataPlaneOptions> {
   enabled?: boolean;
 }
 
@@ -38,7 +40,7 @@ export class CloudSqlService {
   private storage: StorageManager;
   private logger: Logger;
   private dataPlaneOptions: Required<CloudSqlDataPlaneOptions>;
-  private dataPlane: CloudSqlDataPlane = new DisabledDataPlane();
+  private dataPlane: PostgresDataPlane = new DisabledDataPlane();
   private adminService: SqlAdminService | null = null;
   private handlers: CloudSqlHandlers | null = null;
 
@@ -57,23 +59,16 @@ export class CloudSqlService {
 
     await repository.initialize();
 
-    this.dataPlane = this.dataPlaneOptions.enabled
-      ? new DataPlaneManager(
-          this.logger,
-          {
-            portRangeStart: this.dataPlaneOptions.portRangeStart,
-            portRangeEnd: this.dataPlaneOptions.portRangeEnd,
-            storageType: this.dataPlaneOptions.storageType,
-            sqlitePath: this.dataPlaneOptions.sqlitePath,
-            postgis: this.dataPlaneOptions.postgis,
-          },
-          async (project, instance, user) => {
-            const record = await repository.getUser(project, instance, user);
+    this.dataPlane = createPostgresDataPlane(
+      this.logger,
+      CLOUDSQL_DATA_PLANE_PRODUCT,
+      this.dataPlaneOptions,
+      async (project, instance, user) => {
+        const record = await repository.getUser(project, instance, user);
 
-            return record ? { password: record.password } : null;
-          }
-        )
-      : new DisabledDataPlane();
+        return record ? { password: record.password } : null;
+      }
+    );
 
     this.adminService = new SqlAdminService(repository, this.dataPlane);
     this.handlers = new CloudSqlHandlers(this.adminService, this.logger);

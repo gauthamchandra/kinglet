@@ -28,13 +28,15 @@ function makeManager(
   nextRangeStart += 10;
 
   const manager = new DataPlaneManager(
-    new Logger('CloudSqlDataPlaneTest', 'error'),
+    new Logger('PostgresDataPlaneTest', 'error'),
     {
       portRangeStart,
       portRangeEnd: portRangeStart + 4,
       storageType: 'memory',
       sqlitePath: './data/emulator.db',
       postgis: false,
+      productLabel: 'Cloud SQL',
+      dataDirectoryName: 'cloudsql',
       ...overrides,
     },
     lookupUser
@@ -101,6 +103,16 @@ describe('DataPlaneManager', () => {
 
     expect(second).toBe((first ?? 0) + 1);
     expect(manager.getPort('p1', 'a')).toBe(first);
+  });
+
+  test('keeps slash-bearing instance keys distinct from flat ones', async () => {
+    const manager = makeManager();
+    const flat = await manager.startInstance('p1', 'i1', ['postgres']);
+    const nested = await manager.startInstance('p1', 'us-central1/c1/i1', ['postgres']);
+
+    expect(nested).toBe((flat ?? 0) + 1);
+    expect(manager.getPort('p1', 'i1')).toBe(flat);
+    expect(manager.getPort('p1', 'us-central1/c1/i1')).toBe(nested);
   });
 
   test('reports no port for an instance that was never started', () => {

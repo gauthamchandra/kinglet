@@ -8,9 +8,9 @@
  * therefore takes no {@link OperationsStore} at all — wrapping these in an LRO
  * would break any real client.
  *
- * <p><b>NOTE:</b> users are metadata only in this release. Once the data plane
- * lands they become real Postgres roles (see the PR 2 plan); until then nothing
- * is granted anywhere, and `password` is discarded rather than stored.
+ * <p>Passwords are stored for data-plane authentication (ADR-013) but never
+ * returned: `User.password` is input-only in the discovery document. Emulated
+ * users gate connections; they are not Postgres roles.
  */
 
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
@@ -268,10 +268,10 @@ function buildUserUpdates(
   existing: UserRecord,
   body: Record<string, unknown>,
   updateMask?: string
-): Partial<Pick<UserRecord, 'userType' | 'spec'>> {
+): Partial<Pick<UserRecord, 'userType' | 'password' | 'spec'>> {
   const maskedFields = resolveMaskedFields(body, MUTABLE_USER_FIELDS, updateMask);
   const spec = parseSpecJson(existing.spec);
-  const updates: Partial<Pick<UserRecord, 'userType' | 'spec'>> = {};
+  const updates: Partial<Pick<UserRecord, 'userType' | 'password' | 'spec'>> = {};
 
   for (const field of maskedFields) {
     // userType is a required column, so a masked clear cannot null it: an absent
@@ -287,8 +287,16 @@ function buildUserUpdates(
       continue;
     }
 
-    // `password` and `keepExtraRoles` are input-only: accepted, never stored.
-    if (field === 'password' || field === 'keepExtraRoles') continue;
+    // Password is input-only in responses but must be stored for data-plane auth.
+    // A masked clear (field absent from the body) resets it to empty, matching
+    // Cloud SQL's "empty password means no password required" contract.
+    if (field === 'password') {
+      updates.password = typeof body.password === 'string' ? body.password : '';
+      continue;
+    }
+
+    // `keepExtraRoles` is input-only and unused without real Postgres roles.
+    if (field === 'keepExtraRoles') continue;
 
     if (field in body) {
       spec[field] = normalizeSpecFieldValue(field, body[field], USER_SPEC_ENUM_FIELDS);

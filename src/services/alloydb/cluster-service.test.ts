@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { OperationsStore } from '@/core/operations/operations-store.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import { ClusterService } from './cluster-service.ts';
@@ -10,6 +11,7 @@ import {
   ALLOYDB_OPERATIONS_TABLE,
   AlloyDbError,
   buildClusterName,
+  buildDataPlaneInstanceKey,
   buildInstanceName,
   buildUserName,
   ClusterState,
@@ -30,12 +32,47 @@ const VALID_BODY = {
   networkConfig: { network: 'projects/p/global/networks/default' },
 };
 
+class RecordingDataPlane implements PostgresDataPlane {
+  readonly calls: string[] = [];
+
+  async startInstance(project: string, instance: string, databases: string[]): Promise<number> {
+    this.calls.push(`start:${project}/${instance}:${databases.join(',')}`);
+
+    return 5540;
+  }
+
+  async stopInstance(project: string, instance: string): Promise<void> {
+    this.calls.push(`stop:${project}/${instance}`);
+  }
+
+  async dropInstance(project: string, instance: string): Promise<void> {
+    this.calls.push(`drop:${project}/${instance}`);
+  }
+
+  async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {
+    this.calls.push(`restart:${project}/${instance}:${databases.join(',')}`);
+  }
+
+  async openDatabase(): Promise<void> {}
+
+  async dropDatabase(): Promise<void> {}
+
+  async stopAll(): Promise<void> {
+    this.calls.push('stopAll');
+  }
+
+  getPort(): number | null {
+    return null;
+  }
+}
+
 let storage: StorageManager;
 let clusters: ClusterRepository;
 let instances: InstanceRepository;
 let users: UserRepository;
 let clusterMutex: ResourceMutex;
 let operations: OperationsStore;
+let dataPlane: RecordingDataPlane;
 let service: ClusterService;
 
 function clusterFromOperation(operation: { response?: Record<string, unknown> }) {
@@ -63,7 +100,8 @@ beforeEach(async () => {
   ]);
 
   clusterMutex = new ResourceMutex();
-  service = new ClusterService(clusters, instances, users, operations, clusterMutex);
+  dataPlane = new RecordingDataPlane();
+  service = new ClusterService(clusters, instances, users, operations, clusterMutex, dataPlane);
 });
 
 describe('createCluster', () => {
@@ -86,6 +124,17 @@ describe('createCluster', () => {
     await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, {});
 
     expect((await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).name).toBe(CLUSTER_NAME);
+  });
+
+  test('createCluster_createsTheInitialUserWithItsPasswordForDataPlaneAuth', async () => {
+    await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, {});
+
+    const user = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres'));
+
+    expect(user?.password).toBe('hunter2');
+    expect(JSON.stringify(await service.getCluster(PROJECT, LOCATION, CLUSTER_ID))).not.toContain(
+      'hunter2'
+    );
   });
 
   /**
@@ -484,6 +533,9 @@ describe('deleteCluster', () => {
 
     expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
     expect((await users.listUsers(PROJECT, LOCATION, CLUSTER_ID)).users).toEqual([]);
+    expect(dataPlane.calls).toContain(
+      `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, 'i1')}`
+    );
   });
 
   /**
@@ -555,6 +607,39 @@ describe('rotating the initial user', () => {
 
     expect(cluster).not.toHaveProperty('initialUser');
     expect(JSON.stringify(cluster)).not.toContain('brand-new-secret');
+  });
+
+  test('updateCluster_patchingInitialUser_doesNotBlankTheStoredUserPassword', async () => {
+    await service.updateCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { initialUser: { user: 'postgres' } },
+      { updateMask: 'initialUser' }
+    );
+
+    const user = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres'));
+
+    expect(user?.password).toBe('hunter2');
+  });
+
+  test('updateCluster_renamingInitialUser_leavesTheOriginalUserPasswordIntact', async () => {
+    await service.updateCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { initialUser: { user: 'rotated', password: 'brand-new-secret' } },
+      { updateMask: 'initialUser' }
+    );
+
+    const original = await users.getByName(
+      buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres')
+    );
+    const renamed = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'rotated'));
+
+    expect(original?.password).toBe('hunter2');
+    expect(renamed).toBeNull();
+    expect((await clusters.getByName(CLUSTER_NAME))?.initialUserName).toBe('rotated');
   });
 
   test('updateCluster_patchingInitialUserWithoutAUsername_clearsTheStoredUsername', async () => {

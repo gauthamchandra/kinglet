@@ -3,7 +3,6 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import {
-  ALLOYDB_USERS_TABLE,
   AlloyDbError,
   buildClusterName,
   buildUserName,
@@ -71,8 +70,9 @@ describe('createUser', () => {
     expect(user.userType).toBe(UserType.ALLOYDB_IAM_USER);
   });
 
-  // `User.password` is input-only in the discovery document.
-  test('createUser_neverEchoesThePasswordItWasGiven', async () => {
+  // `User.password` is input-only in the discovery document: stored for
+  // data-plane auth, never returned.
+  test('createUser_storesThePasswordWithoutEchoingIt', async () => {
     const user = await service.createUser(
       PROJECT,
       LOCATION,
@@ -84,7 +84,10 @@ describe('createUser', () => {
 
     expect(user).not.toHaveProperty('password');
     expect(JSON.stringify(user)).not.toContain('hunter2');
-    expect(JSON.stringify(await storage.find(ALLOYDB_USERS_TABLE, {}))).not.toContain('hunter2');
+
+    const stored = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, USER_ID));
+
+    expect(stored?.password).toBe('hunter2');
   });
 
   test('createUser_underAMissingCluster_reportsNotFoundForTheCluster', async () => {
@@ -308,7 +311,7 @@ describe('updateUser', () => {
     ]);
   });
 
-  test('updateUser_neverEchoesAPasswordSuppliedInThePatch', async () => {
+  test('updateUser_storesAPasswordSuppliedInThePatchWithoutEchoingIt', async () => {
     const user = await service.updateUser(
       PROJECT,
       LOCATION,
@@ -319,6 +322,9 @@ describe('updateUser', () => {
     );
 
     expect(JSON.stringify(user)).not.toContain('hunter2');
+    expect(
+      (await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, USER_ID)))?.password
+    ).toBe('hunter2');
   });
 });
 

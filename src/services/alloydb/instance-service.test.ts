@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { OperationsStore } from '@/core/operations/operations-store.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import { InstanceRepository } from './instance-repository.ts';
@@ -9,6 +10,7 @@ import {
   ALLOYDB_OPERATIONS_TABLE,
   AlloyDbError,
   buildClusterName,
+  buildDataPlaneInstanceKey,
   buildInstanceName,
   clusterRequestToRecord,
   InstanceState,
@@ -21,10 +23,48 @@ const CLUSTER_ID = 'c1';
 const INSTANCE_ID = 'i1';
 const INSTANCE_NAME = buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID);
 
+class RecordingDataPlane implements PostgresDataPlane {
+  readonly calls: string[] = [];
+  startFailure: Error | null = null;
+
+  async startInstance(project: string, instance: string, databases: string[]): Promise<number> {
+    this.calls.push(`start:${project}/${instance}:${databases.join(',')}`);
+
+    if (this.startFailure) throw this.startFailure;
+
+    return 5540;
+  }
+
+  async stopInstance(project: string, instance: string): Promise<void> {
+    this.calls.push(`stop:${project}/${instance}`);
+  }
+
+  async dropInstance(project: string, instance: string): Promise<void> {
+    this.calls.push(`drop:${project}/${instance}`);
+  }
+
+  async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {
+    this.calls.push(`restart:${project}/${instance}:${databases.join(',')}`);
+  }
+
+  async openDatabase(): Promise<void> {}
+
+  async dropDatabase(): Promise<void> {}
+
+  async stopAll(): Promise<void> {
+    this.calls.push('stopAll');
+  }
+
+  getPort(): number | null {
+    return 5540;
+  }
+}
+
 let storage: StorageManager;
 let clusters: ClusterRepository;
 let instances: InstanceRepository;
 let service: InstanceService;
+let dataPlane: RecordingDataPlane;
 
 function instanceFromOperation(operation: { response?: Record<string, unknown> }) {
   return operation.response as Record<string, unknown>;
@@ -44,7 +84,8 @@ beforeEach(async () => {
 
   await Promise.all([clusters.initialize(), instances.initialize(), operations.initialize()]);
 
-  service = new InstanceService(instances, clusters, operations, new ResourceMutex());
+  dataPlane = new RecordingDataPlane();
+  service = new InstanceService(instances, clusters, operations, new ResourceMutex(), dataPlane);
 
   await clusters.create(
     clusterRequestToRecord(buildClusterName(PROJECT, LOCATION, CLUSTER_ID), {
@@ -54,6 +95,43 @@ beforeEach(async () => {
 });
 
 describe('createInstance', () => {
+  test('createInstance_startsTheDataPlaneWithThePostgresDatabase', async () => {
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      {}
+    );
+
+    expect(dataPlane.calls).toEqual([
+      `start:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}:postgres`,
+    ]);
+  });
+
+  test('createInstance_rollsBackWhenTheDataPlaneFailsToStart', async () => {
+    dataPlane.startFailure = new Error('no free ports');
+
+    const create = service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      {}
+    );
+
+    await expect(create).rejects.toBeInstanceOf(AlloyDbError);
+    await expect(create).rejects.toHaveProperty('code', 'INTERNAL');
+    await expect(create).rejects.toThrow(/no free ports/);
+
+    expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
+    expect(dataPlane.calls).toContain(
+      `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}`
+    );
+  });
+
   test('createInstance_returnsACompletedOperationCarryingTheNewInstance', async () => {
     const operation = await service.createInstance(
       PROJECT,
@@ -665,6 +743,9 @@ describe('deleteInstance', () => {
     await expect(
       service.getInstance(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID)
     ).rejects.toHaveProperty('code', 'NOT_FOUND');
+    expect(dataPlane.calls).toContain(
+      `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}`
+    );
   });
 
   test('deleteInstance_givenAnUnknownInstance_reportsNotFound', async () => {

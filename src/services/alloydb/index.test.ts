@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { ConfigSchema } from '@/config/schema.ts';
 import type { HttpMethod, RouteDefinition, RouteRequest } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
-import { AlloyDbService } from './index.ts';
+import { AlloyDbService, DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS } from './index.ts';
 
 /**
  * The full route table, transcribed from the discovery document's `flatPath` for
@@ -178,19 +179,48 @@ beforeEach(async () => {
   storage = new StorageManager();
   await storage.initialize({ type: 'memory' });
 
-  service = new AlloyDbService(storage, new Logger('test', 'error'));
+  service = new AlloyDbService(storage, new Logger('test', 'error'), { enabled: false });
   await service.initialize();
 });
 
 describe('initialize', () => {
+  test('service data-plane defaults match the config schema defaults', () => {
+    const schemaDefaults = ConfigSchema.parse({
+      server: {},
+      storage: {},
+      auth: {},
+      services: {
+        pubsub: {},
+        scheduler: {},
+        tasks: {},
+        secrets: {},
+        storage: {},
+        workflows: {},
+        kms: {},
+      },
+      logging: {},
+    }).services.alloydb.dataPlane;
+
+    expect(DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS).toMatchObject({
+      enabled: schemaDefaults.enabled,
+      portRangeStart: schemaDefaults.portRangeStart,
+      portRangeEnd: schemaDefaults.portRangeEnd,
+      postgis: schemaDefaults.postgis,
+    });
+  });
+
   test('getRoutes_calledBeforeInitialize_throws', () => {
-    const uninitialized = new AlloyDbService(storage, new Logger('test', 'error'));
+    const uninitialized = new AlloyDbService(storage, new Logger('test', 'error'), {
+      enabled: false,
+    });
 
     expect(() => uninitialized.getRoutes()).toThrow(/initialize/);
   });
 
   test('getComposableOperationsStore_calledBeforeInitialize_throws', () => {
-    const uninitialized = new AlloyDbService(storage, new Logger('test', 'error'));
+    const uninitialized = new AlloyDbService(storage, new Logger('test', 'error'), {
+      enabled: false,
+    });
 
     expect(() => uninitialized.getComposableOperationsStore()).toThrow(/initialize/);
   });

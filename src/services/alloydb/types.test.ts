@@ -9,6 +9,7 @@ import {
   buildClusterName,
   buildConnectionInfo,
   buildConnectionInfoName,
+  buildDataPlaneInstanceKey,
   buildInstanceName,
   buildUserName,
   ClusterState,
@@ -29,6 +30,8 @@ import {
   MUTABLE_INSTANCE_FIELDS,
   MUTABLE_USER_FIELDS,
   normalizeEnum,
+  parseInstanceName,
+  readInitialUser,
   USER_TYPE_ENUM,
   UserType,
   userRecordToResponse,
@@ -280,17 +283,15 @@ describe('cluster conversion', () => {
   });
 
   /**
-   * `Cluster.initialUser` is input-only and carries a password. Real AlloyDB
-   * never returns it, and the emulator must never persist the secret either —
-   * only the username, which the data plane will need to create the role.
+   * `Cluster.initialUser` is input-only. The API response never echoes the
+   * password; persistence of credentials lives on the User row (create path).
    */
-  test('clusterRequestToRecord_persistsTheInitialUsernameButNeverThePassword', () => {
+  test('clusterRequestToRecord_persistsTheInitialUsername', () => {
     const record = clusterRequestToRecord(CLUSTER_NAME, {
       initialUser: { user: 'postgres', password: 'hunter2' },
     });
 
     expect(record.initialUserName).toBe('postgres');
-    expect(JSON.stringify(record)).not.toContain('hunter2');
   });
 
   test('clusterRecordToResponse_omitsInitialUserEntirely', () => {
@@ -346,6 +347,41 @@ describe('cluster conversion', () => {
   });
 });
 
+describe('parseInstanceName', () => {
+  test('parseInstanceName_splitsProjectLocationClusterAndInstance', () => {
+    expect(parseInstanceName(INSTANCE_NAME)).toEqual({
+      project: 'p',
+      location: 'us-central1',
+      clusterId: 'c1',
+      instanceId: 'i1',
+    });
+  });
+
+  test('parseInstanceName_returnsNullForMalformedNames', () => {
+    expect(parseInstanceName('projects/p/locations/us-central1/clusters/c1')).toBeNull();
+  });
+});
+
+describe('readInitialUser', () => {
+  test('readInitialUser_returnsUsernameAndPasswordFromRequestBody', () => {
+    expect(
+      readInitialUser({
+        initialUser: { user: 'alice', password: 'secret' },
+      })
+    ).toEqual({ username: 'alice', password: 'secret' });
+  });
+
+  test('readInitialUser_defaultsMissingFieldsToNull', () => {
+    expect(readInitialUser({})).toEqual({ username: null, password: null });
+  });
+});
+
+describe('buildDataPlaneInstanceKey', () => {
+  test('buildDataPlaneInstanceKey_joinsLocationClusterAndInstance', () => {
+    expect(buildDataPlaneInstanceKey('us-central1', 'c1', 'i1')).toBe('us-central1/c1/i1');
+  });
+});
+
 describe('instance conversion', () => {
   test('instanceRequestToRecord_defaultsToPrimaryAndReadyState', () => {
     const record = instanceRequestToRecord(INSTANCE_NAME, { instanceType: 'PRIMARY' });
@@ -363,10 +399,9 @@ describe('instance conversion', () => {
   });
 
   /**
-   * There is no data plane in this release, but the response shape must still be
-   * the real one so client code reads the same field it will read later. The
-   * address is loopback rather than a plausible 10.x private IP so nobody
-   * mistakes it for something they can connect to yet.
+   * The address is loopback rather than a plausible 10.x private IP. The
+   * kinglet-only listen port is not in the API response (ADR-013); callers
+   * that hold the service ask {@link AlloyDbService.getDataPlanePort}.
    */
   test('instanceRecordToResponse_reportsALoopbackIpAddressPlaceholder', () => {
     const response = instanceRecordToResponse(
@@ -419,12 +454,14 @@ describe('user conversion', () => {
     expect(userRecordToResponse(record).databaseRoles).toEqual(['pg_read_all_data']);
   });
 
-  // `User.password` is input-only in the discovery document.
+  // `User.password` is input-only in the discovery document: stored for
+  // data-plane auth, never returned.
   test('userRecordToResponse_neverExposesThePassword', () => {
     const record = userRequestToRecord(`${CLUSTER_NAME}/users/admin`, { password: 'hunter2' });
 
-    expect(JSON.stringify(record)).not.toContain('hunter2');
+    expect(record.password).toBe('hunter2');
     expect(userRecordToResponse(record)).not.toHaveProperty('password');
+    expect(JSON.stringify(userRecordToResponse(record))).not.toContain('hunter2');
   });
 });
 
@@ -445,6 +482,13 @@ describe('table schemas', () => {
   test('clusterTableSchema_storesUnmodeledWritableFieldsInASpecColumn', () => {
     expect(schemaColumnType(clusterTableSchema, 'spec')).toBe('json');
     expect(schemaColumnType(clusterTableSchema, 'initialUserName')).toBe('string');
+  });
+
+  test('userTableSchema_storesPasswordInItsOwnColumn', () => {
+    expect(schemaColumnType(userTableSchema, 'password')).toBe('string');
+    expect(userTableSchema.columns.find(column => column.name === 'password')?.defaultValue).toBe(
+      ''
+    );
   });
 
   function schemaColumnType(

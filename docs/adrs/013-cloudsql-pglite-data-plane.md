@@ -144,8 +144,10 @@ answers "does my Terraform work?" but not "does my application code work?".
   emulated instance and use it as a real Postgres.
 - No binary, no root, no `postinstall`, no supervised child processes; the data
   plane starts and stops with the emulator process.
-- Everything under `src/services/cloudsql/data-plane/` is deliberately
-  Cloud-SQL-agnostic so AlloyDB can reuse it unchanged.
+- Everything under `src/shared/postgres-data-plane/` is deliberately
+  product-agnostic so Cloud SQL and AlloyDB share one implementation. Each
+  service keeps a thin manager that stamps its product label and on-disk
+  namespace (`cloudsql` / `alloydb`).
 
 ### Negative
 
@@ -199,17 +201,35 @@ answers "does my Terraform work?" but not "does my application code work?".
   dropped, because there is no way to interrupt a running call into the single
   wasm backend.
 
+### AlloyDB-only (same shared stack)
+
+These do not apply to Cloud SQL; they follow from AlloyDB's resource model
+mapping onto a per-instance PGlite.
+
+- **Instances do not share storage.** Real AlloyDB PRIMARY / READ_POOL /
+  SECONDARY instances in one cluster see the same data. Here each instance
+  gets its own PGlite (and its own port), so a READ_POOL does not see tables
+  written on the PRIMARY, and deleting a PRIMARY drops that instance's files —
+  recreating it starts empty. Cluster force-delete drops every instance's
+  data plane.
+- **Only the `postgres` database exists.** AlloyDB has no databases admin API,
+  so the emulator never opens any other name. Clients must connect to
+  `postgres`.
+
 ## Implementation Notes
 
-- `src/services/cloudsql/data-plane/` holds the whole thing:
-  `data-plane-manager.ts` (the facade the admin service talks to, plus a
+- `src/shared/postgres-data-plane/` holds the shared implementation:
+  `data-plane-manager.ts` (the facade the admin services talk to, plus a
   `DisabledDataPlane`), `postgres-wire-server.ts` (one listener per instance),
   `pglite-database-manager.ts` (PGlite lifecycle and data directories),
   `pglite-session-queue.ts` (per-database serialisation and transaction
-  affinity), `port-allocator.ts`, and `extensions.ts`.
+  affinity), `extensions.ts`, and `host.ts` (`createPostgresDataPlane` stamps
+  each product's label and on-disk namespace).
 - `@electric-sql/pglite`, `@electric-sql/pglite-pgvector`, and
   `@electric-sql/pglite-postgis` are pinned to exact versions: pgvector 0.0.9
   and pglite-postgis 0.2.8 both peer-pin PGlite to 0.5.8, so the three have
   to move together.
-- `CloudSqlService.stop()` closes every PGlite and stops every listener as part
-  of the emulator's normal shutdown.
+- `CloudSqlService.stop()` / `AlloyDbService.stop()` close every PGlite and
+  stop every listener as part of the emulator's normal shutdown.
+- AlloyDB defaults to ports 5540-5639 so it does not fight Cloud SQL's
+  5432-5531 range when both services are enabled.

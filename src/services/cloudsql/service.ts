@@ -3,8 +3,8 @@
  */
 
 import type { BaseRecord } from '@/core/storage/types.ts';
-import type { CloudSqlDataPlane } from './data-plane/data-plane-manager.ts';
-import { DisabledDataPlane } from './data-plane/data-plane-manager.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import type { CloudSqlRepository } from './repository.ts';
 import type {
   DatabaseInstanceResponse,
@@ -61,9 +61,9 @@ export interface ListOperationsResponse {
 
 export class SqlAdminService {
   private repo: CloudSqlRepository;
-  private dataPlane: CloudSqlDataPlane;
+  private dataPlane: PostgresDataPlane;
 
-  constructor(repo: CloudSqlRepository, dataPlane: CloudSqlDataPlane = new DisabledDataPlane()) {
+  constructor(repo: CloudSqlRepository, dataPlane: PostgresDataPlane = new DisabledDataPlane()) {
     this.repo = repo;
     this.dataPlane = dataPlane;
   }

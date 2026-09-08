@@ -375,6 +375,86 @@ describe('Configuration Schema', () => {
     });
   });
 
+  describe('AlloyDB configuration', () => {
+    test('ConfigSchema applies alloydb data-plane defaults when the block is omitted', () => {
+      const config = ConfigSchema.parse({
+        server: {},
+        storage: {},
+        auth: {},
+        services: {
+          pubsub: {},
+          scheduler: {},
+          tasks: {},
+          secrets: {},
+          storage: {},
+          workflows: {},
+          kms: {},
+        },
+        logging: {},
+      });
+
+      expect(config.services.alloydb.enabled).toBe(true);
+      expect(config.services.alloydb.dataPlane.enabled).toBe(true);
+      expect(config.services.alloydb.dataPlane.portRangeStart).toBe(5540);
+      expect(config.services.alloydb.dataPlane.portRangeEnd).toBe(5639);
+      expect(config.services.alloydb.dataPlane.postgis).toBe(false);
+    });
+
+    test('ConfigSchema accepts an explicit alloydb data plane configuration', () => {
+      const config = ConfigSchema.parse({
+        server: {},
+        storage: {},
+        auth: {},
+        services: {
+          pubsub: {},
+          scheduler: {},
+          tasks: {},
+          secrets: {},
+          storage: {},
+          workflows: {},
+          kms: {},
+          alloydb: {
+            enabled: true,
+            dataPlane: { enabled: false, portRangeStart: 16540, portRangeEnd: 16640 },
+          },
+        },
+        logging: {},
+      });
+
+      expect(config.services.alloydb.dataPlane.enabled).toBe(false);
+      expect(config.services.alloydb.dataPlane.portRangeStart).toBe(16540);
+      expect(config.services.alloydb.dataPlane.portRangeEnd).toBe(16640);
+    });
+
+    test('EnvConfigSchema parses the alloydb env vars', () => {
+      const env = EnvConfigSchema.parse({
+        ALLOYDB_DATA_PLANE: 'false',
+        ALLOYDB_PORT_RANGE_START: '16540',
+        ALLOYDB_PORT_RANGE_END: '16640',
+        ALLOYDB_POSTGIS: 'true',
+      });
+
+      expect(env.ALLOYDB_DATA_PLANE).toBe(false);
+      expect(env.ALLOYDB_PORT_RANGE_START).toBe(16540);
+      expect(env.ALLOYDB_PORT_RANGE_END).toBe(16640);
+      expect(env.ALLOYDB_POSTGIS).toBe(true);
+    });
+
+    test('mapEnvToConfig maps the alloydb data-plane env vars into a nested dataPlane object', () => {
+      const config = mapEnvToConfig({
+        ALLOYDB_DATA_PLANE: false,
+        ALLOYDB_PORT_RANGE_START: 16540,
+        ALLOYDB_PORT_RANGE_END: 16640,
+        ALLOYDB_POSTGIS: true,
+      });
+
+      expect(config.services?.alloydb?.dataPlane?.enabled).toBe(false);
+      expect(config.services?.alloydb?.dataPlane?.portRangeStart).toBe(16540);
+      expect(config.services?.alloydb?.dataPlane?.portRangeEnd).toBe(16640);
+      expect(config.services?.alloydb?.dataPlane?.postgis).toBe(true);
+    });
+  });
+
   describe('EnvConfigSchema', () => {
     test('should parse environment variables correctly', () => {
       const env = EnvConfigSchema.parse({

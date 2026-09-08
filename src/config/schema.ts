@@ -36,7 +36,33 @@ const ServicesConfigSchema = z.object({
   // key, kept satisfiable only by the per-service `{}` literals hardcoded in
   // src/config/loader.ts. Defaulting the whole block means a partial
   // config/local.json cannot turn into a startup Zod failure.
-  alloydb: z.object({ enabled: z.boolean().default(true) }).prefault({}),
+  alloydb: z
+    .object({
+      enabled: z.boolean().default(true),
+      dataPlane: z
+        .object({
+          // On by default, for the same reason Cloud SQL's is: an AlloyDB
+          // instance no Postgres client can connect to is metadata, not
+          // emulation. Set ALLOYDB_DATA_PLANE=false for the metadata-only
+          // control plane. PGlite ships as an npm dependency, so this
+          // default cannot fail on a host that simply lacks postgres.
+          enabled: z.boolean().default(true),
+          // Starts after Cloud SQL's default range (5432-5531) so both
+          // services can run together without fighting over the same ports.
+          // The first AlloyDB instance lands on 5540.
+          portRangeStart: z.number().int().min(1).max(65535).default(5540),
+          portRangeEnd: z.number().int().min(1).max(65535).default(5639),
+          // Off by default because it significantly increases boot time.
+          // Set ALLOYDB_POSTGIS=true to opt in.
+          postgis: z.boolean().default(false),
+        })
+        .refine(dataPlane => dataPlane.portRangeStart <= dataPlane.portRangeEnd, {
+          message: 'portRangeStart must be less than or equal to portRangeEnd',
+          path: ['portRangeStart'],
+        })
+        .prefault({}),
+    })
+    .prefault({}),
   pubsub: z.object({ enabled: z.boolean().default(true) }),
   scheduler: z.object({ enabled: z.boolean().default(true) }),
   tasks: z.object({ enabled: z.boolean().default(true) }),
@@ -185,6 +211,24 @@ export const EnvConfigSchema = z.object({
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
+  ALLOYDB_DATA_PLANE: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
+  ALLOYDB_PORT_RANGE_START: z
+    .string()
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(65535))
+    .optional(),
+  ALLOYDB_PORT_RANGE_END: z
+    .string()
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(65535))
+    .optional(),
+  ALLOYDB_POSTGIS: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
   ENABLE_KMS: z
     .string()
     .transform(val => val.toLowerCase() === 'true')
@@ -309,6 +353,10 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.ENABLE_STORAGE !== undefined ||
     env.ENABLE_WORKFLOWS !== undefined ||
     env.ENABLE_ALLOYDB !== undefined ||
+    env.ALLOYDB_DATA_PLANE !== undefined ||
+    env.ALLOYDB_PORT_RANGE_START !== undefined ||
+    env.ALLOYDB_PORT_RANGE_END !== undefined ||
+    env.ALLOYDB_POSTGIS !== undefined ||
     env.ENABLE_KMS !== undefined ||
     env.ENABLE_MEMORYSTORE !== undefined ||
     env.MEMORYSTORE_DATA_PLANE !== undefined ||
@@ -373,6 +421,30 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.ENABLE_ALLOYDB !== undefined) {
       if (!config.services.alloydb) config.services.alloydb = {};
       config.services.alloydb.enabled = env.ENABLE_ALLOYDB;
+    }
+
+    if (
+      env.ALLOYDB_DATA_PLANE !== undefined ||
+      env.ALLOYDB_PORT_RANGE_START !== undefined ||
+      env.ALLOYDB_PORT_RANGE_END !== undefined ||
+      env.ALLOYDB_POSTGIS !== undefined
+    ) {
+      if (!config.services.alloydb) config.services.alloydb = {};
+
+      const dataPlane: NonNullable<
+        NonNullable<DeepPartial<Config>['services']>['alloydb']
+      >['dataPlane'] = {};
+
+      if (env.ALLOYDB_DATA_PLANE !== undefined) dataPlane.enabled = env.ALLOYDB_DATA_PLANE;
+      if (env.ALLOYDB_PORT_RANGE_START !== undefined) {
+        dataPlane.portRangeStart = env.ALLOYDB_PORT_RANGE_START;
+      }
+      if (env.ALLOYDB_PORT_RANGE_END !== undefined) {
+        dataPlane.portRangeEnd = env.ALLOYDB_PORT_RANGE_END;
+      }
+      if (env.ALLOYDB_POSTGIS !== undefined) dataPlane.postgis = env.ALLOYDB_POSTGIS;
+
+      config.services.alloydb.dataPlane = dataPlane;
     }
 
     if (env.ENABLE_KMS !== undefined) {

@@ -130,6 +130,21 @@ export abstract class ResourceRepository<T extends NamedRecord> {
     };
   }
 
+  /**
+   * Every resource beneath `prefix`, unsorted paging. Used for cascade deletes
+   * and restart rehydration where the caller needs the full set, not a page.
+   */
+  protected async listAllByPrefix(prefix: string): Promise<T[]> {
+    const result = await this.storage.find<T>(this.tableName, {
+      filter: {
+        conditions: [{ field: 'name', operator: 'like', value: `${prefix}%` }],
+      },
+      sort: [{ field: 'name', direction: 'asc' }],
+    });
+
+    return result.data;
+  }
+
   /** How many resources exist beneath `prefix`. Used to enforce cascade rules. */
   async countByPrefix(prefix: string): Promise<number> {
     return this.storage.count(this.tableName, {

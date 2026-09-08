@@ -4,7 +4,7 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
-import type { CloudSqlDataPlane } from './data-plane/data-plane-manager.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { CloudSqlRepository } from './repository.ts';
 import { SqlAdminError, SqlAdminService } from './service.ts';
 
@@ -12,7 +12,7 @@ import { SqlAdminError, SqlAdminService } from './service.ts';
  * Records what the admin service asks of the data plane, so the calls can be
  * asserted without booting wasm Postgres or binding ports.
  */
-class RecordingDataPlane implements CloudSqlDataPlane {
+class RecordingDataPlane implements PostgresDataPlane {
   readonly calls: string[] = [];
   startFailure: Error | null = null;
 
