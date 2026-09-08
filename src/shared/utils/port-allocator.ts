@@ -86,7 +86,7 @@ export class PortAllocator {
 
     this.allocatedPorts.add(port);
 
-    if (await this.isPortListening(port)) {
+    if (await isPortListening(port)) {
       this.allocatedPorts.delete(port);
 
       return false;
@@ -133,25 +133,25 @@ export class PortAllocator {
   release(port: number): void {
     this.allocatedPorts.delete(port);
   }
+}
 
-  private async isPortListening(port: number): Promise<boolean> {
-    try {
-      const socket = await Bun.connect({
-        hostname: PROBE_HOST,
-        port,
-        socket: {
-          data() {},
-          open() {},
-          close() {},
-          error() {},
-        },
-      });
+export async function isPortListening(port: number): Promise<boolean> {
+  try {
+    const socket = await Bun.connect({
+      hostname: PROBE_HOST,
+      port,
+      socket: {
+        data() {},
+        open() {},
+        close() {},
+        error() {},
+      },
+    });
 
-      socket.end();
+    socket.end();
 
-      return true;
-    } catch {
-      return false;
-    }
+    return true;
+  } catch {
+    return false;
   }
 }

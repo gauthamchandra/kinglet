@@ -6,6 +6,7 @@
 
 import type { Subprocess } from 'bun';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { isPortListening, PortAllocator } from '@/shared/utils/port-allocator.ts';
 import { MemoryStoreError } from './types.ts';
 
 export interface ValkeyEndpoint {
@@ -22,10 +23,6 @@ export interface ValkeyProcessManagerOptions {
 
 const READINESS_TIMEOUT_MS = 5000;
 const READINESS_POLL_INTERVAL_MS = 50;
-
-// Every spawned server binds 0.0.0.0 (see the spawn args), so loopback always
-// reaches it and is the only host worth probing.
-const PROBE_HOST = '127.0.0.1';
 
 // The address handed back to clients in `discoveryEndpoints`, which is a
 // separate concern from the bind address: it has to be right from the
@@ -47,8 +44,8 @@ interface RunningServer {
 export class ValkeyProcessManager {
   private logger: Logger;
   private options: ValkeyProcessManagerOptions;
+  private portAllocator: PortAllocator;
   private serversByInstanceName = new Map<string, RunningServer>();
-  private allocatedPorts = new Set<number>();
   // Degraded instances hold a port reservation without owning a process, so
   // they are invisible to serversByInstanceName. Tracking them here is what
   // lets deleting such an instance give the port back; without it a
@@ -59,6 +56,10 @@ export class ValkeyProcessManager {
   constructor(logger: Logger, options: ValkeyProcessManagerOptions) {
     this.logger = logger;
     this.options = options;
+    this.portAllocator = new PortAllocator({
+      portRangeStart: options.portRangeStart,
+      portRangeEnd: options.portRangeEnd,
+    });
   }
 
   isValkeyBinaryAvailable(): boolean {
@@ -95,7 +96,7 @@ export class ValkeyProcessManager {
       return this.buildDegradedEndpoint(instanceName);
     }
 
-    const port = await this.allocateNextFreePort();
+    const port = await this.portAllocator.allocate();
 
     if (port == null) {
       this.logger.warn(
@@ -142,7 +143,7 @@ export class ValkeyProcessManager {
       // the port for real before buildDegradedEndpoint probes the range.
       childProcess.kill();
       await childProcess.exited;
-      this.allocatedPorts.delete(port);
+      this.portAllocator.release(port);
 
       this.logger.warn(
         `Memorystore instance's valkey-server never became ready on port ${port} within ${READINESS_TIMEOUT_MS}ms, falling back to a degraded endpoint`
@@ -160,7 +161,7 @@ export class ValkeyProcessManager {
     const degradedPort = this.degradedPortsByInstanceName.get(instanceName);
 
     if (degradedPort != null) {
-      this.allocatedPorts.delete(degradedPort);
+      this.portAllocator.release(degradedPort);
       this.degradedPortsByInstanceName.delete(instanceName);
     }
 
@@ -171,7 +172,7 @@ export class ValkeyProcessManager {
     server.process.kill();
     await server.process.exited;
 
-    this.allocatedPorts.delete(server.port);
+    this.portAllocator.release(server.port);
     this.serversByInstanceName.delete(instanceName);
   }
 
@@ -211,10 +212,9 @@ export class ValkeyProcessManager {
    * range, or a readiness timeout), a port already bound by a DIFFERENT
    * instance's live `valkey-server` must never be advertised here — a client
    * for this instance would silently read and write that other instance's
-   * data. This searches forward from the hash port for one that is neither
-   * claimed by this manager nor answering a live connection, and throws
-   * rather than falling back to a colliding port if the whole range is
-   * occupied.
+   * data. This prefers the hash port, then the lowest free port in the
+   * range, and throws rather than falling back to a colliding port if the
+   * whole range is occupied.
    */
   private async buildDegradedEndpoint(instanceName: string): Promise<ValkeyEndpoint> {
     const hashPort = this.deriveDeterministicPort(instanceName);
@@ -223,7 +223,7 @@ export class ValkeyProcessManager {
       return { address: ADVERTISED_HOST, port: hashPort };
     }
 
-    const port = await this.findUnusedPortStartingFrom(hashPort);
+    const port = await this.portAllocator.allocate({ preferredPort: hashPort });
 
     if (port == null) {
       throw new MemoryStoreError(
@@ -237,68 +237,9 @@ export class ValkeyProcessManager {
     // Held for as long as this instance advertises the address, so a later
     // successfully-spawned instance can never be allocated the port out from
     // under it. Released by stopServerForInstance when the instance goes away.
-    this.allocatedPorts.add(port);
     this.degradedPortsByInstanceName.set(instanceName, port);
 
     return { address: ADVERTISED_HOST, port };
-  }
-
-  /**
-   * Find a port in the configured range that is both unclaimed by this
-   * manager and not already answering connections.
-   *
-   * <p>A live check (not just this manager's own bookkeeping) matters
-   * because a foreign or orphaned process (e.g. a valkey-server left running
-   * by a previous, ungracefully-killed emulator instance) could already be
-   * listening on a port this manager has never allocated itself.
-   */
-  private async allocateNextFreePort(): Promise<number | null> {
-    for (let port = this.options.portRangeStart; port <= this.options.portRangeEnd; port++) {
-      if (this.allocatedPorts.has(port)) continue;
-
-      // Claimed BEFORE the live-connection probe below (the only `await` in
-      // this loop) so a concurrent allocateNextFreePort scanning the same
-      // range can never observe this port as free too. Released again if the
-      // probe turns out to be occupied by something this manager didn't
-      // allocate.
-      this.allocatedPorts.add(port);
-
-      if (await this.isPortListening(port)) {
-        this.allocatedPorts.delete(port);
-        continue;
-      }
-
-      return port;
-    }
-
-    return null;
-  }
-
-  private async findUnusedPortStartingFrom(startPort: number): Promise<number | null> {
-    const rangeSize = this.options.portRangeEnd - this.options.portRangeStart + 1;
-
-    for (let offset = 0; offset < rangeSize; offset++) {
-      const port =
-        this.options.portRangeStart +
-        ((startPort - this.options.portRangeStart + offset) % rangeSize);
-
-      if (this.allocatedPorts.has(port)) continue;
-
-      // Claimed BEFORE the live-connection probe (the only `await` in this
-      // loop) so a concurrent degraded allocation scanning the same range can
-      // never observe this port as free too, exactly as allocateNextFreePort
-      // does. Released again if the probe finds it already occupied.
-      this.allocatedPorts.add(port);
-
-      if (await this.isPortListening(port)) {
-        this.allocatedPorts.delete(port);
-        continue;
-      }
-
-      return port;
-    }
-
-    return null;
   }
 
   private deriveDeterministicPort(instanceName: string): number {
@@ -325,32 +266,11 @@ export class ValkeyProcessManager {
       // would make a dead spawn look "ready".
       if (childProcess.exitCode != null) return false;
 
-      if (await this.isPortListening(port)) return true;
+      if (await isPortListening(port)) return true;
 
       await Bun.sleep(READINESS_POLL_INTERVAL_MS);
     }
 
     return false;
-  }
-
-  private async isPortListening(port: number): Promise<boolean> {
-    try {
-      const socket = await Bun.connect({
-        hostname: PROBE_HOST,
-        port,
-        socket: {
-          data() {},
-          open() {},
-          close() {},
-          error() {},
-        },
-      });
-
-      socket.end();
-
-      return true;
-    } catch {
-      return false;
-    }
   }
 }
