@@ -1,6 +1,6 @@
 {
   "name": "kinglet",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "kinglet - a local emulator for Google Cloud Platform services",
   "main": "dist/index.js",
   "repository": {
