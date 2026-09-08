@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.3.0](https://github.com/gauthamchandra/kinglet/compare/v2.2.0...v2.3.0) (2026-09-08)
+
+
+### Features
+
+* **cloudsql:** add CLOUDSQL_POSTGIS opt-in flag ([#80](https://github.com/gauthamchandra/kinglet/issues/80)) ([663ee39](https://github.com/gauthamchandra/kinglet/commit/663ee39f6cacb395a491ccb83be65524fca4e1d0))
+* **cloudsql:** serve a real Postgres endpoint per instance via PGlite ([#55](https://github.com/gauthamchandra/kinglet/issues/55)) ([c8979ee](https://github.com/gauthamchandra/kinglet/commit/c8979ee6eed53aaeb8ee7b6077afdea08a9d6dc7))
+* **compute:** add Cloud Armor control plane and local listener ([#63](https://github.com/gauthamchandra/kinglet/issues/63)) ([00e217a](https://github.com/gauthamchandra/kinglet/commit/00e217a7fcbe42335996c95b2d852756dff8b783))
+* **compute:** add Cloud Armor evaluation engine ([#60](https://github.com/gauthamchandra/kinglet/issues/60)) ([5fb2c04](https://github.com/gauthamchandra/kinglet/commit/5fb2c04a5a2119e195b29a07fd9c258000f6f457))
+* **compute:** bind and report the Cloud Armor evaluation server ([fd7b21d](https://github.com/gauthamchandra/kinglet/commit/fd7b21d3ef481c9d31605b1e6fc55daf6fbe18a7))
+* **compute:** make the Cloud Armor evaluation server reachable from Docker ([#78](https://github.com/gauthamchandra/kinglet/issues/78)) ([fd7b21d](https://github.com/gauthamchandra/kinglet/commit/fd7b21d3ef481c9d31605b1e6fc55daf6fbe18a7))
+* **terraform:** add Tasks and Scheduler validation fixtures ([#53](https://github.com/gauthamchandra/kinglet/issues/53)) ([f4af1c9](https://github.com/gauthamchandra/kinglet/commit/f4af1c955a81569e7bb37b1d36efc28575fcc06c))
+
+
+### Bug Fixes
+
+* **docs:** make the compatibility matrix generator deterministic ([#74](https://github.com/gauthamchandra/kinglet/issues/74)) ([30b5895](https://github.com/gauthamchandra/kinglet/commit/30b58956cc0d5e89baec437713dd2d459b905f65))
+
 ## [2.2.0](https://github.com/gauthamchandra/kinglet/compare/v2.1.0...v2.2.0) (2026-08-30)
 
 
