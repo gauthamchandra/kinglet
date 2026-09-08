@@ -306,6 +306,7 @@ function computePolicyResourcePath(selfLink: string): string | null {
 
 export interface ArmorListenerOptions {
   port: number;
+  hostname?: string | undefined;
   defaultPolicyName?: string | undefined;
   getPolicies: () => Promise<SecurityPolicyResponse[]>;
   logger?: Logger;
@@ -313,9 +314,10 @@ export interface ArmorListenerOptions {
 
 export function startArmorListener(options: ArmorListenerOptions): Server {
   const { port, defaultPolicyName, getPolicies, logger } = options;
+  const hostname = options.hostname ?? '127.0.0.1';
 
   const server = Bun.serve({
-    hostname: '127.0.0.1',
+    hostname,
     port,
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);

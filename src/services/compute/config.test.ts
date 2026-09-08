@@ -42,4 +42,22 @@ describe('compute config', () => {
 
     expect(config.services.compute.listenerPort).toBe(8787);
   });
+
+  test('default evaluation server bind is 127.0.0.1', async () => {
+    const config = await loadConfigFromEnv({});
+
+    expect(config.services.compute.listenerBind).toBe('127.0.0.1');
+  });
+
+  test('COMPUTE_LISTENER_BIND sets listenerBind', async () => {
+    const config = await loadConfigFromEnv({ COMPUTE_LISTENER_BIND: '0.0.0.0' });
+
+    expect(config.services.compute.listenerBind).toBe('0.0.0.0');
+  });
+
+  test('COMPUTE_LISTENER_BIND rejects an address that is not 127.0.0.1 or 0.0.0.0', async () => {
+    const promise = loadConfigFromEnv({ COMPUTE_LISTENER_BIND: '192.0.2.1' });
+
+    await expect(promise).rejects.toThrow();
+  });
 });

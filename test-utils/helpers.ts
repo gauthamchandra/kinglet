@@ -2,6 +2,7 @@
  * Test helper utilities
  */
 
+import { createServer, type Server } from 'node:net';
 import { type Config, ConfigSchema } from '@/config/schema.ts';
 import type { Operation, QueryConditions, StorageProvider } from '@/shared/types/index.ts';
 
@@ -154,23 +155,25 @@ export function generateTestId(): string {
 }
 
 /**
- * Find an available port using Node.js net module
- * Returns a promise that resolves to an available port number
+ * Bind `port` and resolve with the bound number. The server is pushed onto
+ * `held` so the caller can keep every reservation until the full set is known.
  */
-export async function getAvailablePort(): Promise<number> {
-  const net = await import('node:net');
-
+function listenAndHold(held: Server[], port: number): Promise<number> {
   return new Promise((resolve, reject) => {
-    const server = net.createServer();
+    const server = createServer();
 
-    server.listen(0, () => {
+    server.listen(port, () => {
       const address = server.address();
+
       if (address && typeof address === 'object') {
-        const port = address.port;
-        server.close(() => resolve(port));
-      } else {
-        server.close(() => reject(new Error('Failed to get server address')));
+        held.push(server);
+
+        resolve(address.port);
+
+        return;
       }
+
+      server.close(() => reject(new Error('Failed to get server address')));
     });
 
     server.on('error', err => {
@@ -179,15 +182,129 @@ export async function getAvailablePort(): Promise<number> {
   });
 }
 
+async function closeHeld(held: readonly Server[]): Promise<void> {
+  await Promise.all(
+    held.map(
+      server =>
+        new Promise<void>(resolve => {
+          server.close(() => resolve());
+        })
+    )
+  );
+}
+
 /**
- * Get multiple available ports at once
+ * Find an available port using Node.js net module.
+ * Returns a promise that resolves to an available port number.
  */
-export async function getAvailablePorts(count: number): Promise<number[]> {
-  const ports: number[] = [];
-  for (let i = 0; i < count; i++) {
-    ports.push(await getAvailablePort());
+export async function getAvailablePort(): Promise<number> {
+  const [port] = await getAvailablePorts(1);
+
+  if (port == null) {
+    throw new Error('Failed to allocate a port');
   }
-  return ports;
+
+  return port;
+}
+
+/**
+ * Claim `count` distinct ephemeral ports by holding every reservation until
+ * the set is complete, then releasing.
+ *
+ * Binding `port: 0` twice in sequence (bind, close, bind again) can return
+ * the same number: the first port is free before the second claim. A mutex
+ * does not fix that. `reserved` ports that are still free are held during
+ * allocation so the OS will not hand them out as port 0.
+ */
+export async function getAvailablePorts(
+  count: number,
+  reserved: readonly number[] = []
+): Promise<number[]> {
+  if (count < 1) {
+    throw new Error('count must be at least 1');
+  }
+
+  const held: Server[] = [];
+
+  try {
+    for (const port of reserved) {
+      try {
+        await listenAndHold(held, port);
+      } catch {
+        // Already bound elsewhere, so the OS will not hand it out as port 0.
+      }
+    }
+
+    const ports: number[] = [];
+
+    for (let i = 0; i < count; i++) {
+      ports.push(await listenAndHold(held, 0));
+    }
+
+    if (new Set(ports).size !== ports.length) {
+      throw new Error(`port allocator returned duplicates: ${ports.join(', ')}`);
+    }
+
+    if (ports.some(port => reserved.includes(port))) {
+      throw new Error(
+        `port allocator reused a reserved port: ${ports.join(', ')} vs ${reserved.join(', ')}`
+      );
+    }
+
+    return ports;
+  } finally {
+    await closeHeld(held);
+  }
+}
+
+/**
+ * Resolve two listener ports that must not collide. Explicit values are kept
+ * as-is (and rejected when equal); missing values are filled from
+ * {@link getAvailablePorts} while any already-chosen port is held.
+ */
+export async function allocateDistinctPorts(explicit: {
+  first?: number | undefined;
+  second?: number | undefined;
+}): Promise<{ first: number; second: number }> {
+  const { first: explicitFirst, second: explicitSecond } = explicit;
+
+  if (explicitFirst != null && explicitSecond != null) {
+    if (explicitFirst === explicitSecond) {
+      throw new Error(
+        `ports must differ (both are ${explicitFirst}) so a second listener can bind`
+      );
+    }
+
+    return { first: explicitFirst, second: explicitSecond };
+  }
+
+  if (explicitFirst != null) {
+    const [second] = await getAvailablePorts(1, [explicitFirst]);
+
+    if (second == null) {
+      throw new Error('Failed to allocate a distinct port');
+    }
+
+    return { first: explicitFirst, second };
+  }
+
+  if (explicitSecond != null) {
+    const [first] = await getAvailablePorts(1, [explicitSecond]);
+
+    if (first == null) {
+      throw new Error('Failed to allocate a distinct port');
+    }
+
+    return { first, second: explicitSecond };
+  }
+
+  const [first, second] = await getAvailablePorts(2);
+
+  if (first == null || second == null) {
+    throw new Error('Failed to allocate distinct ports');
+  }
+
+  return { first, second };
 }
 
 /**

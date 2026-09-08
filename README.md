@@ -25,11 +25,12 @@ The project is named after the [golden-crowned kinglet](https://en.wikipedia.org
 ```bash
 docker run -d \
   -p 8765:8765 \
+  -p 8787:8787 \
   --name kinglet \
   ghcr.io/gauthamchandra/kinglet:latest
 
 curl http://localhost:8765/health
-# {"status":"ok"}
+# {"status":"ok","kingletCloudArmorEvaluationServer":{"started":true,"port":8787,"bind":"0.0.0.0"}}
 ```
 
 See [docs/getting-started/quickstart.md](docs/getting-started/quickstart.md) for Docker Compose and more detail.
@@ -39,6 +40,7 @@ See [docs/getting-started/quickstart.md](docs/getting-started/quickstart.md) for
 | Topic | Link |
 | --- | --- |
 | Quick start (Docker Compose, etc.) | [docs/getting-started/quickstart.md](docs/getting-started/quickstart.md) |
+| Testing Cloud Armor policies | [docs/getting-started/cloud-armor.md](docs/getting-started/cloud-armor.md) |
 | Client library setup | [docs/getting-started/client-libraries.md](docs/getting-started/client-libraries.md) |
 | Compatibility matrix | [docs/compatibility/index.md](docs/compatibility/index.md) |
 | Configuration | [docs/reference/configuration.md](docs/reference/configuration.md) |
