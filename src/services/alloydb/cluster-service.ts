@@ -6,6 +6,7 @@ import type { OperationResponse, OperationsStore } from '@/core/operations/opera
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
 import { buildInstanceListPrefix, type InstanceRepository } from './instance-repository.ts';
@@ -19,12 +20,12 @@ import {
   clusterRecordToResponse,
   clusterRequestToRecord,
   isValidClusterId,
+  isValidUserId,
   MUTABLE_CLUSTER_FIELDS,
   normalizeSpecFieldValue,
   parseInstanceName,
   parseSpecJson,
   readInitialUser,
-  readInitialUsername,
   UserType,
   userRequestToRecord,
 } from './types.ts';
@@ -57,6 +58,7 @@ export class ClusterService {
   private readonly users: UserRepository;
   private readonly operations: OperationsStore;
   private readonly clusterMutex: ResourceMutex;
+  private readonly logger: Logger;
   private readonly dataPlane: PostgresDataPlane;
 
   constructor(
@@ -65,6 +67,7 @@ export class ClusterService {
     users: UserRepository,
     operations: OperationsStore,
     clusterMutex: ResourceMutex,
+    logger: Logger,
     dataPlane: PostgresDataPlane = new DisabledDataPlane()
   ) {
     this.clusters = clusters;
@@ -72,6 +75,7 @@ export class ClusterService {
     this.users = users;
     this.operations = operations;
     this.clusterMutex = clusterMutex;
+    this.logger = logger;
     this.dataPlane = dataPlane;
   }
 
@@ -112,32 +116,16 @@ export class ClusterService {
 
     const record = clusterRequestToRecord(name, body);
 
-    if (options.validateOnly === true) {
-      return this.operations.buildUnpersistedOperation(
-        project,
-        location,
-        name,
-        'create',
-        RESOURCE_TYPE,
-        clusterRecordToResponse(record)
-      );
-    }
+    return this.completeMutation(project, location, name, 'create', options, record, async () => {
+      const created = await this.clusters.create(record);
 
-    const created = await this.clusters.create(record);
+      // The initial user is the cluster's first connectable role. Persist it as a
+      // User row (with password) so the data plane can authenticate connections
+      // the same way a later users.create would.
+      await this.createInitialUser(project, location, clusterId, body);
 
-    // The initial user is the cluster's first connectable role. Persist it as a
-    // User row (with password) so the data plane can authenticate connections
-    // the same way a later users.create would.
-    await this.upsertInitialUser(project, location, clusterId, body);
-
-    return this.operations.createOperation(
-      project,
-      location,
-      name,
-      'create',
-      RESOURCE_TYPE,
-      clusterRecordToResponse(created)
-    );
+      return created;
+    });
   }
 
   async getCluster(project: string, location: string, clusterId: string): Promise<ClusterResponse> {
@@ -205,30 +193,8 @@ export class ClusterService {
     const updates = buildClusterUpdates(existing, body, options.updateMask);
     const updated: ClusterRecord = { ...existing, ...updates };
 
-    if (options.validateOnly === true) {
-      return this.operations.buildUnpersistedOperation(
-        project,
-        location,
-        name,
-        'update',
-        RESOURCE_TYPE,
-        clusterRecordToResponse(updated)
-      );
-    }
-
-    const applied = await this.clusters.update(name, updates);
-
-    if (!applied) {
-      throw new AlloyDbError('NOT_FOUND', `Cluster ${name} not found`, name);
-    }
-
-    return this.operations.createOperation(
-      project,
-      location,
-      name,
-      'update',
-      RESOURCE_TYPE,
-      clusterRecordToResponse(applied)
+    return this.completeMutation(project, location, name, 'update', options, updated, () =>
+      this.clusters.update(name, updates)
     );
   }
 
@@ -285,16 +251,27 @@ export class ClusterService {
       const parsed = parseInstanceName(instance.name);
 
       if (!parsed) {
-        throw new AlloyDbError(
-          'INTERNAL',
-          `Instance name ${instance.name} is not a valid resource name`
+        this.logger.warn(
+          `Skipping data-plane drop for AlloyDB instance with unparseable name ${instance.name}`
         );
+        continue;
       }
 
-      await this.dataPlane.dropInstance(
-        project,
-        buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId)
-      );
+      // One instance's drop failing must not abort the cascade: stopping mid-loop
+      // would leave the instances already dropped holding rows that still report
+      // READY with nothing listening, and every retry would fail on the same
+      // instance, so the cluster could never be deleted. The rows always go.
+      try {
+        await this.dataPlane.dropInstance(
+          project,
+          buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId)
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to drop the data plane for AlloyDB instance ${instance.name} while deleting ${name}; its Postgres data may remain on disk`,
+          error
+        );
+      }
     }
 
     await this.instances.deleteByPrefix(buildInstanceListPrefix(project, location, clusterId));
@@ -305,12 +282,53 @@ export class ClusterService {
   }
 
   /**
+   * Emit the operation for a mutation, applying it first unless this is a
+   * `validateOnly` request. Validation has already run by this point, so a dry run
+   * differs from the real thing only in whether anything is written.
+   */
+  private async completeMutation(
+    project: string,
+    location: string,
+    name: string,
+    verb: string,
+    options: ValidatableOptions,
+    projected: Omit<ClusterRecord, keyof BaseRecord>,
+    apply: () => Promise<ClusterRecord | null>
+  ): Promise<OperationResponse> {
+    if (options.validateOnly === true) {
+      return this.operations.buildUnpersistedOperation(
+        project,
+        location,
+        name,
+        verb,
+        RESOURCE_TYPE,
+        clusterRecordToResponse(projected)
+      );
+    }
+
+    const applied = await apply();
+
+    if (!applied) {
+      throw new AlloyDbError('NOT_FOUND', `Cluster ${name} not found`, name);
+    }
+
+    return this.operations.createOperation(
+      project,
+      location,
+      name,
+      verb,
+      RESOURCE_TYPE,
+      clusterRecordToResponse(applied)
+    );
+  }
+
+  /**
    * Persist the cluster's initial user (username + password) as a User row so
    * the data plane can authenticate it. Create-only: rotating the password
    * afterwards goes through users.patch, so a rename-only cluster PATCH cannot
    * blank the stored secret.
    */
-  private async upsertInitialUser(
+  private async createInitialUser(
     project: string,
     location: string,
     clusterId: string,
@@ -320,19 +338,8 @@ export class ClusterService {
 
     if (!username) return;
 
-    const userName = buildUserName(project, location, clusterId, username);
-    const existing = await this.users.getByName(userName);
-
-    if (existing) {
-      if (password !== null) {
-        await this.users.update(userName, { password });
-      }
-
-      return;
-    }
-
     await this.users.create(
-      userRequestToRecord(userName, {
+      userRequestToRecord(buildUserName(project, location, clusterId, username), {
         password: password ?? '',
         userType: UserType.ALLOYDB_BUILT_IN,
       })
@@ -431,22 +438,34 @@ function validateInitialUser(body: Record<string, unknown>): void {
   const username = initialUser?.user;
   const password = initialUser?.password;
 
-  // Real AlloyDB requires both on create — the username and the password for the
-  // initial postgres role. The password is stored on the matching User row for
+  // Both are required on create — the username and the password for the initial
+  // postgres role. Inferred rather than stated outright: the discovery document
+  // marks `Cluster.initialUser` itself Required but puts no required flag on
+  // `UserPassword.user`/`.password`, and a cluster with neither has no way in.
+  // Flagged in the PR. The password is stored on the matching User row for
   // data-plane auth and never returned on the cluster resource.
   if (
-    typeof username === 'string' &&
-    username.length > 0 &&
-    typeof password === 'string' &&
-    password.length > 0
+    typeof username !== 'string' ||
+    username.length === 0 ||
+    typeof password !== 'string' ||
+    password.length === 0
   ) {
-    return;
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      'Cluster.initialUser is required and must carry both a "user" username and a "password"'
+    );
   }
 
-  throw new AlloyDbError(
-    'INVALID_ARGUMENT',
-    'Cluster.initialUser is required and must carry both a "user" username and a "password"'
-  );
+  // The username becomes a User row of its own, so it has to satisfy the same id
+  // rule users.create enforces. Without this, cluster create mints a user whose
+  // name breaks the discovery document's `users/[^/]+` shape and which no client
+  // can then GET, PATCH or DELETE.
+  if (!isValidUserId(username)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `Cluster.initialUser.user "${username}" must not contain "/"`
+    );
+  }
 }
 
 /**
@@ -468,9 +487,10 @@ function buildClusterUpdates(
 
   for (const field of maskedFields) {
     // `initialUser` carries a password: only the username lands on the cluster
-    // row. The password is upserted onto the matching User row by the caller.
+    // row. On create the password is persisted on the matching User row; a PATCH
+    // deliberately does not rotate it (see createInitialUser).
     if (field === 'initialUser') {
-      updates.initialUserName = readInitialUsername(body);
+      updates.initialUserName = readInitialUser(body).username;
       continue;
     }
 

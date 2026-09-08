@@ -6,6 +6,7 @@ import type { OperationResponse, OperationsStore } from '@/core/operations/opera
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
 import type { InstanceRepository } from './instance-repository.ts';
@@ -26,7 +27,6 @@ import {
   MUTABLE_INSTANCE_FIELDS,
   normalizeEnum,
   normalizeSpecFieldValue,
-  parseInstanceName,
   parseSpecJson,
 } from './types.ts';
 import { resolveMaskedFields } from './update-mask.ts';
@@ -61,6 +61,7 @@ export class InstanceService {
   private readonly clusters: ClusterRepository;
   private readonly operations: OperationsStore;
   private readonly clusterMutex: ResourceMutex;
+  private readonly logger: Logger;
   private readonly dataPlane: PostgresDataPlane;
 
   constructor(
@@ -68,12 +69,14 @@ export class InstanceService {
     clusters: ClusterRepository,
     operations: OperationsStore,
     clusterMutex: ResourceMutex,
+    logger: Logger,
     dataPlane: PostgresDataPlane = new DisabledDataPlane()
   ) {
     this.instances = instances;
     this.clusters = clusters;
     this.operations = operations;
     this.clusterMutex = clusterMutex;
+    this.logger = logger;
     this.dataPlane = dataPlane;
   }
 
@@ -145,8 +148,7 @@ export class InstanceService {
       // advertise an address nothing answers on. Undoing the rows keeps create
       // atomic. Drop the data plane rather than merely stop it so a failed
       // start cannot leave half-built files for the next create of this name.
-      await this.dataPlane.dropInstance(project, dataPlaneKey);
-      await this.instances.delete(name);
+      await this.rollbackFailedCreate(project, dataPlaneKey, name);
 
       throw new AlloyDbError(
         'INTERNAL',
@@ -204,6 +206,34 @@ export class InstanceService {
       instances: result.instances.map(instanceRecordToResponse),
       nextPageToken: result.nextPageToken,
     };
+  }
+
+  /**
+   * Undo a create whose data plane never came up.
+   *
+   * <p>Each step is guarded so the error the caller sees is the one that explains
+   * the failure, and the row is deleted even when the drop is what failed —
+   * unguarded, it would survive as exactly the orphan this exists to prevent.
+   */
+  private async rollbackFailedCreate(
+    project: string,
+    dataPlaneKey: string,
+    name: string
+  ): Promise<void> {
+    try {
+      await this.dataPlane.dropInstance(project, dataPlaneKey);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to drop the data plane while rolling back ${name}; its Postgres data may remain on disk`,
+        error
+      );
+    }
+
+    try {
+      await this.instances.delete(name);
+    } catch (error) {
+      this.logger.warn(`Failed to delete the row while rolling back ${name}`, error);
+    }
   }
 
   async updateInstance(
@@ -283,12 +313,10 @@ export class InstanceService {
     instanceId: string,
     options: ValidatableOptions
   ): Promise<OperationResponse> {
-    const name = buildInstanceName(project, location, clusterId, instanceId);
-
     // Serialized with create/update: deleting a cluster's primary while a read
     // pool is mid-placement-check would otherwise leave the pool without one.
     return this.clusterMutex.runExclusively(buildClusterName(project, location, clusterId), () =>
-      this.deleteInstanceExclusively(project, location, clusterId, name, options)
+      this.deleteInstanceExclusively(project, location, clusterId, instanceId, options)
     );
   }
 
@@ -296,9 +324,10 @@ export class InstanceService {
     project: string,
     location: string,
     clusterId: string,
-    name: string,
+    instanceId: string,
     options: ValidatableOptions
   ): Promise<OperationResponse> {
+    const name = buildInstanceName(project, location, clusterId, instanceId);
     const instance = await this.getInstanceOrThrow(name);
 
     await this.validatePrimaryHasNoDependentReadPools(project, location, clusterId, instance);
@@ -313,15 +342,9 @@ export class InstanceService {
       );
     }
 
-    const parsed = parseInstanceName(name);
-
-    if (!parsed) {
-      throw new AlloyDbError('INTERNAL', `Instance name ${name} is not a valid resource name`);
-    }
-
     await this.dataPlane.dropInstance(
       project,
-      buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId)
+      buildDataPlaneInstanceKey(location, clusterId, instanceId)
     );
 
     await this.instances.delete(name);

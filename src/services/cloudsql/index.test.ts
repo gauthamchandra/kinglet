@@ -7,7 +7,7 @@ import { ConfigSchema } from '@/config/schema.ts';
 import type { RouteContext, RouteRequest } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
-import { CloudSqlService, DEFAULT_DATA_PLANE_OPTIONS } from './index.ts';
+import { CloudSqlService, DEFAULT_CLOUDSQL_DATA_PLANE_OPTIONS } from './index.ts';
 
 function makeRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
   return {
@@ -66,7 +66,7 @@ describe('CloudSqlService', () => {
       logging: {},
     }).services.cloudsql.dataPlane;
 
-    expect(DEFAULT_DATA_PLANE_OPTIONS).toMatchObject({
+    expect(DEFAULT_CLOUDSQL_DATA_PLANE_OPTIONS).toMatchObject({
       enabled: schemaDefaults.enabled,
       portRangeStart: schemaDefaults.portRangeStart,
       portRangeEnd: schemaDefaults.portRangeEnd,

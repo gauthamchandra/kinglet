@@ -102,18 +102,16 @@ beforeEach(async () => {
     operations.initialize(),
   ]);
 
-  const responseUtils = new ResponseUtils(
-    new StandardResponseFormatter(new Logger('test', 'error'))
-  );
-
+  const logger = new Logger('test', 'error');
+  const responseUtils = new ResponseUtils(new StandardResponseFormatter(logger));
   const clusterMutex = new ResourceMutex();
 
   clusterHandlers = new ClusterHandlers(
-    new ClusterService(clusters, instances, users, operations, clusterMutex),
+    new ClusterService(clusters, instances, users, operations, clusterMutex, logger),
     responseUtils
   );
   instanceHandlers = new InstanceHandlers(
-    new InstanceService(instances, clusters, operations, clusterMutex),
+    new InstanceService(instances, clusters, operations, clusterMutex, logger),
     responseUtils
   );
   userHandlers = new UserHandlers(new UserService(users, clusters, clusterMutex), responseUtils);

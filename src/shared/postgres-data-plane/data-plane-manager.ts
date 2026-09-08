@@ -28,7 +28,7 @@ import {
 /** The address handed to clients, matching Memorystore's reasoning: loopback
  * is correct both for kinglet run directly on the developer's machine and for
  * kinglet in Docker with the data-plane range published. */
-const ADVERTISED_HOST = '127.0.0.1';
+export const ADVERTISED_HOST = '127.0.0.1';
 
 export interface PostgresDataPlane {
   /**

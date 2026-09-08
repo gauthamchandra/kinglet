@@ -170,12 +170,12 @@ async function main(): Promise<void> {
       logger.info('Memorystore for Valkey service enabled and started');
     }
 
+    // Both Postgres data planes — AlloyDB here, Cloud SQL just below — take their
+    // durability from kinglet's own store and keep their data beside it, so
+    // `STORAGE_TYPE=memory` really does mean nothing is written to disk.
     if (config.services.alloydb.enabled) {
       alloydbService = new AlloyDbService(storageManager, new Logger('AlloyDB'), {
         ...config.services.alloydb.dataPlane,
-        // The data plane keeps its Postgres data beside kinglet's own store
-        // and matches its durability, so `STORAGE_TYPE=memory` really does
-        // mean nothing is written to disk.
         storageType: config.storage.type,
         sqlitePath: config.storage.sqlitePath,
       });
@@ -188,9 +188,6 @@ async function main(): Promise<void> {
     if (config.services.cloudsql.enabled) {
       cloudSqlService = new CloudSqlService(storageManager, new Logger('CloudSQL'), {
         ...config.services.cloudsql.dataPlane,
-        // The data plane keeps its Postgres data beside kinglet's own store
-        // and matches its durability, so `STORAGE_TYPE=memory` really does
-        // mean nothing is written to disk.
         storageType: config.storage.type,
         sqlitePath: config.storage.sqlitePath,
       });

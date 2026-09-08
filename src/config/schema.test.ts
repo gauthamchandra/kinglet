@@ -426,6 +426,27 @@ describe('Configuration Schema', () => {
       expect(config.services.alloydb.dataPlane.portRangeEnd).toBe(16640);
     });
 
+    test('ConfigSchema rejects an alloydb port range where portRangeStart exceeds portRangeEnd', () => {
+      expect(() => {
+        ConfigSchema.parse({
+          server: {},
+          storage: {},
+          auth: {},
+          services: {
+            pubsub: {},
+            scheduler: {},
+            tasks: {},
+            secrets: {},
+            storage: {},
+            workflows: {},
+            kms: {},
+            alloydb: { dataPlane: { portRangeStart: 5640, portRangeEnd: 5540 } },
+          },
+          logging: {},
+        });
+      }).toThrow(/portRangeStart/);
+    });
+
     test('EnvConfigSchema parses the alloydb env vars', () => {
       const env = EnvConfigSchema.parse({
         ALLOYDB_DATA_PLANE: 'false',

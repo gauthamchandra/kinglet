@@ -311,6 +311,36 @@ describe('updateUser', () => {
     ]);
   });
 
+  /**
+   * An empty stored password makes the wire server accept the user without one,
+   * so a mask that names `password` without supplying one must leave the secret
+   * alone rather than clear it — otherwise a metadata PATCH turns an
+   * authenticated instance into an open one.
+   */
+  test('updateUser_maskingPasswordWithoutSupplyingOne_leavesTheStoredSecretIntact', async () => {
+    await service.updateUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'hunter2' },
+      { updateMask: 'password' }
+    );
+
+    await service.updateUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { databaseRoles: ['pg_read_all_data'] },
+      { updateMask: 'password,databaseRoles' }
+    );
+
+    expect(
+      (await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, USER_ID)))?.password
+    ).toBe('hunter2');
+  });
+
   test('updateUser_storesAPasswordSuppliedInThePatchWithoutEchoingIt', async () => {
     const user = await service.updateUser(
       PROJECT,

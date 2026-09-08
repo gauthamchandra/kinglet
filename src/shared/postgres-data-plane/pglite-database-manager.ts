@@ -295,9 +295,7 @@ export class PGliteDatabaseManager {
     const resolvedRoot = resolve(root);
 
     if (directory !== resolvedRoot && !directory.startsWith(`${resolvedRoot}${sep}`)) {
-      throw new Error(
-        `Refusing to use a ${this.options.dataDirectoryName} data directory outside ${resolvedRoot}`
-      );
+      throw new Error(`Refusing to use a data directory outside ${resolvedRoot}`);
     }
 
     return directory;

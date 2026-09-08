@@ -30,6 +30,7 @@ import {
   MUTABLE_INSTANCE_FIELDS,
   MUTABLE_USER_FIELDS,
   normalizeEnum,
+  parseDataPlaneInstanceKey,
   parseInstanceName,
   readInitialUser,
   USER_TYPE_ENUM,
@@ -286,12 +287,13 @@ describe('cluster conversion', () => {
    * `Cluster.initialUser` is input-only. The API response never echoes the
    * password; persistence of credentials lives on the User row (create path).
    */
-  test('clusterRequestToRecord_persistsTheInitialUsername', () => {
+  test('clusterRequestToRecord_persistsTheInitialUsernameButNeverThePassword', () => {
     const record = clusterRequestToRecord(CLUSTER_NAME, {
       initialUser: { user: 'postgres', password: 'hunter2' },
     });
 
     expect(record.initialUserName).toBe('postgres');
+    expect(JSON.stringify(record)).not.toContain('hunter2');
   });
 
   test('clusterRecordToResponse_omitsInitialUserEntirely', () => {
@@ -380,6 +382,17 @@ describe('buildDataPlaneInstanceKey', () => {
   test('buildDataPlaneInstanceKey_joinsLocationClusterAndInstance', () => {
     expect(buildDataPlaneInstanceKey('us-central1', 'c1', 'i1')).toBe('us-central1/c1/i1');
   });
+
+  test('parseDataPlaneInstanceKey_invertsBuildDataPlaneInstanceKey', () => {
+    expect(parseDataPlaneInstanceKey(buildDataPlaneInstanceKey('us-central1', 'c1', 'i1'))).toEqual(
+      { location: 'us-central1', clusterId: 'c1', instanceId: 'i1' }
+    );
+  });
+
+  test('parseDataPlaneInstanceKey_returnsNullForAKeyWithTheWrongShape', () => {
+    expect(parseDataPlaneInstanceKey('us-central1/c1')).toBeNull();
+    expect(parseDataPlaneInstanceKey('flat')).toBeNull();
+  });
 });
 
 describe('instance conversion', () => {
@@ -403,7 +416,7 @@ describe('instance conversion', () => {
    * kinglet-only listen port is not in the API response (ADR-013); callers
    * that hold the service ask {@link AlloyDbService.getDataPlanePort}.
    */
-  test('instanceRecordToResponse_reportsALoopbackIpAddressPlaceholder', () => {
+  test('instanceRecordToResponse_reportsTheLoopbackAdvertisedAddress', () => {
     const response = instanceRecordToResponse(
       instanceRequestToRecord(INSTANCE_NAME, { instanceType: 'PRIMARY' })
     );

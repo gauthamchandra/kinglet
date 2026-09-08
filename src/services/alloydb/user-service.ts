@@ -20,6 +20,7 @@ import {
   AlloyDbError,
   buildClusterName,
   buildUserName,
+  isValidUserId,
   MUTABLE_USER_FIELDS,
   normalizeEnum,
   normalizeSpecFieldValue,
@@ -237,14 +238,9 @@ export class UserService {
   }
 }
 
-/**
- * The discovery document gives user ids no pattern — they become PostgreSQL role
- * names, which are permissive — so validation is limited to what would genuinely
- * break: an empty id, or one containing the separator that delimits resource
- * names.
- */
+/** Throwing wrapper over {@link isValidUserId}. */
 function validateUserId(userId: string): void {
-  if (userId.length > 0 && !userId.includes('/')) return;
+  if (isValidUserId(userId)) return;
 
   throw new AlloyDbError(
     'INVALID_ARGUMENT',
@@ -288,10 +284,14 @@ function buildUserUpdates(
     }
 
     // Password is input-only in responses but must be stored for data-plane auth.
-    // A masked clear (field absent from the body) resets it to empty, matching
-    // Cloud SQL's "empty password means no password required" contract.
+    // Only written when the body actually carries one: an empty stored password
+    // means the wire server accepts the user without one, so letting a mask that
+    // names `password` without supplying it clear the secret would turn an
+    // authenticated instance into an open one. Cloud SQL's admin service takes
+    // the same position (see SqlAdminService.updateUser).
     if (field === 'password') {
-      updates.password = typeof body.password === 'string' ? body.password : '';
+      if (typeof body.password === 'string') updates.password = body.password;
+
       continue;
     }
 

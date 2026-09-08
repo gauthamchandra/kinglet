@@ -14,6 +14,7 @@
 import type { RouteResponse } from '@/core/gateway/request-router.ts';
 import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import type { BaseRecord, TableSchema } from '@/core/storage/types.ts';
+import { ADVERTISED_HOST } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 
 // ── Table Constants ──
 
@@ -168,17 +169,6 @@ export function normalizeEnum(value: unknown, byNumber: EnumNumberMap): unknown 
   return value;
 }
 
-/**
- * The address reported by `Instance.ipAddress` and `ConnectionInfo.ipAddress`.
- *
- * <p>Loopback matches Memorystore and Cloud SQL: correct both when kinglet runs
- * on the developer's machine and when it runs in Docker with the data-plane
- * range published. The kinglet-only listen port is logged at start and exposed
- * via {@link AlloyDbService.getDataPlanePort} — the AlloyDB API has nowhere to
- * report it.
- */
-const PLACEHOLDER_IP_ADDRESS = '127.0.0.1';
-
 /** The only database an emulated instance has — AlloyDB has no databases API. */
 export const DEFAULT_DATABASE_NAME = 'postgres';
 
@@ -317,6 +307,16 @@ export function isValidClusterId(clusterId: string): boolean {
 
 export function isValidInstanceId(instanceId: string): boolean {
   return INSTANCE_ID_PATTERN.test(instanceId);
+}
+
+/**
+ * The discovery document gives user ids no pattern — they become PostgreSQL role
+ * names, which are permissive — so validation is limited to what would genuinely
+ * break: an empty id, or one containing the separator that delimits resource
+ * names.
+ */
+export function isValidUserId(userId: string): boolean {
+  return userId.length > 0 && !userId.includes('/');
 }
 
 // ── Mutable Field Sets ──
@@ -605,11 +605,6 @@ export function readInitialUser(body: Record<string, unknown>): {
   };
 }
 
-/** Username half of {@link readInitialUser}, for callers that only need the name. */
-export function readInitialUsername(body: Record<string, unknown>): string | null {
-  return readInitialUser(body).username;
-}
-
 /**
  * Instance key the shared data plane uses for one AlloyDB instance.
  *
@@ -624,6 +619,22 @@ export function buildDataPlaneInstanceKey(
   instanceId: string
 ): string {
   return `${location}/${clusterId}/${instanceId}`;
+}
+
+/**
+ * Inverse of {@link buildDataPlaneInstanceKey}, or null when the key does not
+ * have exactly the three segments that function produces.
+ */
+export function parseDataPlaneInstanceKey(
+  key: string
+): { location: string; clusterId: string; instanceId: string } | null {
+  const segments = key.split('/');
+
+  if (segments.length !== 3) return null;
+
+  const [location = '', clusterId = '', instanceId = ''] = segments;
+
+  return { location, clusterId, instanceId };
 }
 
 /**
@@ -672,7 +683,7 @@ export function clusterRequestToRecord(
     // CREATING — it is READY by the time the caller sees the Operation.
     state: ClusterState.READY,
     clusterType: ClusterType.PRIMARY,
-    initialUserName: readInitialUsername(body),
+    initialUserName: readInitialUser(body).username,
     reconciling: 0,
     createTime: now,
     updateTime: now,
@@ -728,7 +739,7 @@ export function instanceRecordToResponse(
     uid: record.uid,
     state: record.state,
     instanceType: record.instanceType,
-    ipAddress: PLACEHOLDER_IP_ADDRESS,
+    ipAddress: ADVERTISED_HOST,
     reconciling: record.reconciling === 1,
     createTime: record.createTime,
     updateTime: record.updateTime,
@@ -741,7 +752,7 @@ export function buildConnectionInfo(
 ): ConnectionInfo {
   return {
     name: `${record.name}${CONNECTION_INFO_SUFFIX}`,
-    ipAddress: PLACEHOLDER_IP_ADDRESS,
+    ipAddress: ADVERTISED_HOST,
     instanceUid: record.uid,
   };
 }

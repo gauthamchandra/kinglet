@@ -27,10 +27,14 @@ import { buildOperationName, OperationsStore } from '@/core/operations/operation
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
-import type { ProductDataPlaneOptions } from '@/shared/postgres-data-plane/host.ts';
+import type {
+  PersistedInstance,
+  ServiceDataPlaneOptions,
+} from '@/shared/postgres-data-plane/host.ts';
 import {
   ALLOYDB_DATA_PLANE_PRODUCT,
   createPostgresDataPlane,
+  restartPersistedInstances,
 } from '@/shared/postgres-data-plane/host.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { parsePageSize } from '@/shared/utils/pagination.ts';
@@ -49,6 +53,7 @@ import {
   buildDataPlaneInstanceKey,
   buildUserName,
   DEFAULT_DATABASE_NAME,
+  parseDataPlaneInstanceKey,
   parseInstanceName,
 } from './types.ts';
 import { UserHandlers } from './user-handlers.ts';
@@ -61,14 +66,10 @@ const ALLOYDB_API_TYPE_PREFIX = 'google.cloud.alloydb.v1';
 const OPERATIONS_COLLECTION_PATH = '/v1/projects/:project/locations/:location/operations';
 const OPERATION_PATH = `${OPERATIONS_COLLECTION_PATH}/:operationId`;
 
-export interface AlloyDbDataPlaneOptions extends Partial<ProductDataPlaneOptions> {
-  enabled?: boolean;
-}
-
 // Mirrors the config schema's defaults (see src/config/schema.ts). Tests that
 // only exercise the control plane pass `{ enabled: false }` to avoid building
 // wasm Postgres instances they never connect to.
-export const DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS: Required<AlloyDbDataPlaneOptions> = {
+export const DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOptions> = {
   enabled: true,
   portRangeStart: 5540,
   portRangeEnd: 5639,
@@ -81,7 +82,7 @@ export class AlloyDbService {
   private readonly storage: StorageManager;
   private readonly logger: Logger;
   private readonly responseUtils: ResponseUtils;
-  private readonly dataPlaneOptions: Required<AlloyDbDataPlaneOptions>;
+  private readonly dataPlaneOptions: Required<ServiceDataPlaneOptions>;
 
   private dataPlane: PostgresDataPlane = new DisabledDataPlane();
   private operationsStore: OperationsStore | null = null;
@@ -90,7 +91,7 @@ export class AlloyDbService {
   private userHandlers: UserHandlers | null = null;
   private locationHandlers: LocationHandlers | null = null;
 
-  constructor(storage: StorageManager, logger: Logger, dataPlaneOptions?: AlloyDbDataPlaneOptions) {
+  constructor(storage: StorageManager, logger: Logger, dataPlaneOptions?: ServiceDataPlaneOptions) {
     this.storage = storage;
     this.logger = logger;
     this.responseUtils = new ResponseUtils(new StandardResponseFormatter(logger));
@@ -120,9 +121,14 @@ export class AlloyDbService {
       ALLOYDB_DATA_PLANE_PRODUCT,
       this.dataPlaneOptions,
       async (project, instanceKey, user) => {
-        // instanceKey is location/clusterId/instanceId; users are cluster-scoped.
-        const [location = '', clusterId = ''] = instanceKey.split('/');
-        const record = await users.getByName(buildUserName(project, location, clusterId, user));
+        const parsed = parseDataPlaneInstanceKey(instanceKey);
+
+        if (!parsed) return null;
+
+        // Users are cluster-scoped, so the instance segment plays no part.
+        const record = await users.getByName(
+          buildUserName(project, parsed.location, parsed.clusterId, user)
+        );
 
         return record ? { password: record.password } : null;
       }
@@ -135,11 +141,26 @@ export class AlloyDbService {
     const clusterMutex = new ResourceMutex();
 
     this.clusterHandlers = new ClusterHandlers(
-      new ClusterService(clusters, instances, users, operations, clusterMutex, this.dataPlane),
+      new ClusterService(
+        clusters,
+        instances,
+        users,
+        operations,
+        clusterMutex,
+        this.logger,
+        this.dataPlane
+      ),
       this.responseUtils
     );
     this.instanceHandlers = new InstanceHandlers(
-      new InstanceService(instances, clusters, operations, clusterMutex, this.dataPlane),
+      new InstanceService(
+        instances,
+        clusters,
+        operations,
+        clusterMutex,
+        this.logger,
+        this.dataPlane
+      ),
       this.responseUtils
     );
     this.userHandlers = new UserHandlers(
@@ -149,7 +170,7 @@ export class AlloyDbService {
     this.locationHandlers = new LocationHandlers(this.responseUtils);
 
     if (this.dataPlaneOptions.enabled) {
-      await this.restartPersistedInstances(instances);
+      await this.rehydrateDataPlane(instances);
     }
 
     this.logger.info('AlloyDB service initialized');
@@ -240,17 +261,13 @@ export class AlloyDbService {
   }
 
   /**
-   * Bring the data plane back up for instances that outlived the last run.
-   *
-   * <p>With durable storage the control-plane rows survive a restart, so
-   * without this an instance would keep being listed and described while
-   * nothing listened on its endpoint — and no admin call short of a recreate
-   * would ever bring it back.
+   * Rows that outlived the last run, keyed the way the data plane knows them.
+   * Rehydration itself — and why it matters — is {@link restartPersistedInstances}.
    */
-  private async restartPersistedInstances(instances: InstanceRepository): Promise<void> {
-    const all = await instances.listAllInstances();
+  private async rehydrateDataPlane(instances: InstanceRepository): Promise<void> {
+    const persisted: PersistedInstance[] = [];
 
-    for (const instance of all) {
+    for (const instance of await instances.listAllInstances()) {
       const parsed = parseInstanceName(instance.name);
 
       if (!parsed) {
@@ -260,21 +277,20 @@ export class AlloyDbService {
         continue;
       }
 
-      try {
-        await this.dataPlane.startInstance(
-          parsed.project,
-          buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId),
-          [DEFAULT_DATABASE_NAME]
-        );
-      } catch (error) {
-        // One instance that cannot get a port back must degrade only itself,
-        // not abort startup for every other persisted instance.
-        this.logger.warn(
-          `Failed to restart the data plane for AlloyDB instance ${instance.name}, leaving it degraded`,
-          error
-        );
-      }
+      persisted.push({
+        name: instance.name,
+        project: parsed.project,
+        instance: buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId),
+        databases: [DEFAULT_DATABASE_NAME],
+      });
     }
+
+    await restartPersistedInstances(
+      this.logger,
+      ALLOYDB_DATA_PLANE_PRODUCT,
+      this.dataPlane,
+      persisted
+    );
   }
 
   private buildOperationsRoutes(): RouteDefinition[] {

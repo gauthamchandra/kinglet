@@ -4,54 +4,9 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
-import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { CloudSqlRepository } from './repository.ts';
 import { SqlAdminError, SqlAdminService } from './service.ts';
-
-/**
- * Records what the admin service asks of the data plane, so the calls can be
- * asserted without booting wasm Postgres or binding ports.
- */
-class RecordingDataPlane implements PostgresDataPlane {
-  readonly calls: string[] = [];
-  startFailure: Error | null = null;
-
-  async startInstance(project: string, instance: string, databases: string[]): Promise<number> {
-    this.calls.push(`start:${project}/${instance}:${databases.join(',')}`);
-
-    if (this.startFailure) throw this.startFailure;
-
-    return 5432;
-  }
-
-  async stopInstance(project: string, instance: string): Promise<void> {
-    this.calls.push(`stop:${project}/${instance}`);
-  }
-
-  async dropInstance(project: string, instance: string): Promise<void> {
-    this.calls.push(`drop:${project}/${instance}`);
-  }
-
-  async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {
-    this.calls.push(`restart:${project}/${instance}:${databases.join(',')}`);
-  }
-
-  async openDatabase(project: string, instance: string, database: string): Promise<void> {
-    this.calls.push(`openDatabase:${project}/${instance}/${database}`);
-  }
-
-  async dropDatabase(project: string, instance: string, database: string): Promise<void> {
-    this.calls.push(`dropDatabase:${project}/${instance}/${database}`);
-  }
-
-  async stopAll(): Promise<void> {
-    this.calls.push('stopAll');
-  }
-
-  getPort(): number | null {
-    return 5432;
-  }
-}
 
 describe('SqlAdminService', () => {
   let repo: CloudSqlRepository;

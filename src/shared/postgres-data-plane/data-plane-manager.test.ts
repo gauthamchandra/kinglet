@@ -115,6 +115,24 @@ describe('DataPlaneManager', () => {
     expect(manager.getPort('p1', 'us-central1/c1/i1')).toBe(nested);
   });
 
+  /**
+   * The connect path is what `splitInstanceKey` actually feeds: AlloyDB packs
+   * `location/cluster/instance` into the instance segment, so a split on every
+   * slash rather than the first one hands `resolveConnection` the wrong
+   * DatabaseKey and refuses every AlloyDB connection. `startInstance`/`getPort`
+   * above never reach that code — they key off plain concatenation.
+   */
+  test('serves queries on an instance whose key contains slashes', async () => {
+    const manager = makeManager();
+    const port = (await manager.startInstance('p1', 'us-central1/c1/i1', ['postgres'])) ?? 0;
+
+    await runQuery(port, 'postgres', 'postgres', '', 'CREATE TABLE nested (a int)');
+
+    expect(
+      await runQuery(port, 'postgres', 'postgres', '', 'SELECT count(*)::int AS n FROM nested')
+    ).toEqual([{ n: 0 }]);
+  });
+
   test('reports no port for an instance that was never started', () => {
     expect(makeManager().getPort('p1', 'ghost')).toBeNull();
   });
@@ -363,6 +381,20 @@ describe('DataPlaneManager', () => {
 
     expect(manager.getPort('p1', 'a')).toBeNull();
     expect(manager.getPort('p1', 'b')).toBeNull();
+  });
+
+  /**
+   * `stopAll` recovers each project/instance pair by splitting the key it stored,
+   * so a slash-bearing AlloyDB key that round-trips wrong leaves the listener
+   * bound with nothing tracking it.
+   */
+  test('stopAll tears down an instance whose key contains slashes', async () => {
+    const manager = makeManager();
+
+    await manager.startInstance('p1', 'us-central1/c1/i1', ['postgres']);
+    await manager.stopAll();
+
+    expect(manager.getPort('p1', 'us-central1/c1/i1')).toBeNull();
   });
 });
 

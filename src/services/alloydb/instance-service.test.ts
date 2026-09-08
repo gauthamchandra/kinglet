@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { OperationsStore } from '@/core/operations/operations-store.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
-import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import { createMockLogger } from '../../../test-utils/mock-logger.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import { InstanceRepository } from './instance-repository.ts';
 import { InstanceService } from './instance-service.ts';
@@ -23,47 +25,11 @@ const CLUSTER_ID = 'c1';
 const INSTANCE_ID = 'i1';
 const INSTANCE_NAME = buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID);
 
-class RecordingDataPlane implements PostgresDataPlane {
-  readonly calls: string[] = [];
-  startFailure: Error | null = null;
-
-  async startInstance(project: string, instance: string, databases: string[]): Promise<number> {
-    this.calls.push(`start:${project}/${instance}:${databases.join(',')}`);
-
-    if (this.startFailure) throw this.startFailure;
-
-    return 5540;
-  }
-
-  async stopInstance(project: string, instance: string): Promise<void> {
-    this.calls.push(`stop:${project}/${instance}`);
-  }
-
-  async dropInstance(project: string, instance: string): Promise<void> {
-    this.calls.push(`drop:${project}/${instance}`);
-  }
-
-  async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {
-    this.calls.push(`restart:${project}/${instance}:${databases.join(',')}`);
-  }
-
-  async openDatabase(): Promise<void> {}
-
-  async dropDatabase(): Promise<void> {}
-
-  async stopAll(): Promise<void> {
-    this.calls.push('stopAll');
-  }
-
-  getPort(): number | null {
-    return 5540;
-  }
-}
-
 let storage: StorageManager;
 let clusters: ClusterRepository;
 let instances: InstanceRepository;
 let service: InstanceService;
+let logger: Logger;
 let dataPlane: RecordingDataPlane;
 
 function instanceFromOperation(operation: { response?: Record<string, unknown> }) {
@@ -84,8 +50,16 @@ beforeEach(async () => {
 
   await Promise.all([clusters.initialize(), instances.initialize(), operations.initialize()]);
 
-  dataPlane = new RecordingDataPlane();
-  service = new InstanceService(instances, clusters, operations, new ResourceMutex(), dataPlane);
+  dataPlane = new RecordingDataPlane({ port: 5540 });
+  logger = createMockLogger();
+  service = new InstanceService(
+    instances,
+    clusters,
+    operations,
+    new ResourceMutex(),
+    logger,
+    dataPlane
+  );
 
   await clusters.create(
     clusterRequestToRecord(buildClusterName(PROJECT, LOCATION, CLUSTER_ID), {
@@ -153,7 +127,7 @@ describe('createInstance', () => {
     expect(instance['@type']).toBe('type.googleapis.com/google.cloud.alloydb.v1.Instance');
   });
 
-  test('createInstance_reportsTheLoopbackAddressPlaceholder', async () => {
+  test('createInstance_reportsTheLoopbackAdvertisedAddress', async () => {
     const operation = await service.createInstance(
       PROJECT,
       LOCATION,
@@ -395,6 +369,48 @@ describe('createInstance', () => {
       service.getInstance(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID)
     ).rejects.toHaveProperty('code', 'NOT_FOUND');
     expect(await storage.count(ALLOYDB_OPERATIONS_TABLE)).toBe(0);
+  });
+
+  /**
+   * The row check above would still pass if the eager start ran before the
+   * `validateOnly` return — a dry run would boot a wasm Postgres and bind a port.
+   */
+  test('createInstance_withValidateOnly_startsNoDataPlane', async () => {
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      { validateOnly: true }
+    );
+
+    expect(dataPlane.calls).toEqual([]);
+  });
+
+  /**
+   * An unguarded rollback replaces the error that explains the failure with its
+   * own and skips the row deletion, leaving exactly the orphaned row it exists
+   * to prevent.
+   */
+  test('createInstance_whenTheRollbackAlsoFails_keepsTheOriginalCauseAndStillDeletesTheRow', async () => {
+    dataPlane.startFailure = new Error('no free ports');
+    dataPlane.dropFailure = new Error('EACCES');
+
+    const create = service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      {}
+    );
+
+    await expect(create).rejects.toHaveProperty('code', 'INTERNAL');
+    await expect(create).rejects.toThrow(/no free ports/);
+
+    expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -762,6 +778,19 @@ describe('deleteInstance', () => {
     expect((await service.getInstance(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID)).name).toBe(
       INSTANCE_NAME
     );
+  });
+
+  /**
+   * The row check above would still pass if `dropInstance` ran before the
+   * `validateOnly` return — the row would survive and its Postgres data would
+   * be gone.
+   */
+  test('deleteInstance_withValidateOnly_dropsNoDataPlane', async () => {
+    await service.deleteInstance(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID, {
+      validateOnly: true,
+    });
+
+    expect(dataPlane.calls.filter(call => call.startsWith('drop:'))).toEqual([]);
   });
 
   // The delete counterpart of the create/update rule that a read pool needs a
