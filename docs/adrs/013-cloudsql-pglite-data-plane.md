@@ -173,9 +173,9 @@ answers "does my Terraform work?" but not "does my application code work?".
   one PGlite is one database, and PGlite has no `CREATE DATABASE`.
 - **The engine is Postgres 18 whatever `databaseVersion` says.** A
   `POSTGRES_14` instance still answers `SELECT version()` with 18.
-- **PostGIS is opt-in.** Set `CLOUDSQL_POSTGIS=true` to link PostGIS into every
-  database. It is off by default because it significantly increases
-  per-database boot time. Existing on-disk
+- **PostGIS is opt-in.** Set `CLOUDSQL_POSTGIS=true` or `ALLOYDB_POSTGIS=true`
+  to link PostGIS into every database for that product. It is off by default
+  because it significantly increases per-database boot time. Existing on-disk
   databases gain PostGIS after a restart with the flag enabled — no recreation
   needed. All 26 contrib extensions plus pgvector are always available.
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
