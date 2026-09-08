@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { TCPSocketListener } from 'bun';
-import { PortAllocator } from './port-allocator.ts';
+import { isPortListening, PortAllocator } from './port-allocator.ts';
 
 const TEST_PORT_BASE = 46100;
 
@@ -96,6 +96,16 @@ describe('PortAllocator', () => {
     await allocator.allocate();
 
     expect(await allocator.allocate()).toBeNull();
+  });
+
+  test('isPortListening reports whether a loopback listener answers', async () => {
+    const range = nextRange(1);
+
+    expect(await isPortListening(range.portRangeStart)).toBe(false);
+
+    squat(range.portRangeStart);
+
+    expect(await isPortListening(range.portRangeStart)).toBe(true);
   });
 
   test('gives concurrent callers distinct ports', async () => {

@@ -153,6 +153,43 @@ describe('ValkeyProcessManager', () => {
         await manager.stopServerForInstance(instanceName);
       }
     });
+
+    test('startServerForInstance_givenThePreferredHashPortIsTaken_fallsBackToTheStartOfTheRange', async () => {
+      const portRangeStart = 19300;
+      const portRangeEnd = 19310;
+      const instanceName = 'projects/p/locations/us-central1/instances/hash-pref';
+      const hashProbe = new ValkeyProcessManager(new Logger('test', 'error'), {
+        enabled: false,
+        portRangeStart,
+        portRangeEnd,
+      });
+      const hashPort = (await hashProbe.startServerForInstance(instanceName)).port;
+
+      expect(hashPort).toBeGreaterThan(portRangeStart);
+
+      const foreignListener = Bun.listen({
+        hostname: '127.0.0.1',
+        port: hashPort,
+        socket: { data() {}, open() {}, close() {}, error() {} },
+      });
+      const sequentialManager = new ValkeyProcessManager(new Logger('test', 'error'), {
+        enabled: true,
+        binaryPath: '/nonexistent/path/to/valkey-server',
+        portRangeStart,
+        portRangeEnd,
+      });
+
+      try {
+        const endpoint = await sequentialManager.startServerForInstance(instanceName);
+
+        // Wrap-around from the hash would walk hash+1 first. Sequential
+        // fallback from the shared allocator lands on the first free port.
+        expect(endpoint.port).toBe(portRangeStart);
+      } finally {
+        foreignListener.stop(true);
+        await sequentialManager.stopAllServers();
+      }
+    });
   });
 
   describe('spawn and lifecycle path against a stand-in binary', () => {
