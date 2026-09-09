@@ -73,6 +73,15 @@ describe('SubscriptionService', () => {
     expect(sub.pushConfig?.attributes).toEqual({ 'x-goog-version': 'v1' });
   });
 
+  test('createSubscription empty expirationPolicy.ttl means never expire', async () => {
+    const sub = await service.createSubscription('p', 'never-expire', {
+      topic: 'projects/p/topics/t',
+      expirationPolicy: { ttl: '' },
+    });
+
+    expect(sub.expirationPolicy).toEqual({ ttl: '' });
+  });
+
   test('createSubscription copies topicMessageRetentionDuration from the topic', async () => {
     await topicService.createTopic('p', 'retained', { messageRetentionDuration: '3600s' });
 
@@ -616,6 +625,21 @@ describe('SubscriptionService', () => {
 
     expect(updated.filter).toBe('attributes.env = "prod"');
     expect(updated.enableMessageOrdering).toBe(true);
+  });
+
+  test('updateSubscription updateMask persists bigqueryConfig and cloudStorageConfig', async () => {
+    await service.createSubscription('p', 'echo-sub', { topic: 'projects/p/topics/t' });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/echo-sub', {
+      subscription: {
+        bigqueryConfig: { table: 'proj.dataset.table', writeMetadata: true },
+        cloudStorageConfig: { bucket: 'kinglet-bucket' },
+      },
+      updateMask: 'bigqueryConfig,cloudStorageConfig',
+    });
+
+    expect(updated.bigqueryConfig).toEqual({ table: 'proj.dataset.table', writeMetadata: true });
+    expect(updated.cloudStorageConfig).toEqual({ bucket: 'kinglet-bucket' });
   });
 
   test('listTopicSubscriptions paginates', async () => {

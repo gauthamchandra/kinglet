@@ -223,6 +223,29 @@ describe('SnapshotService', () => {
     ]);
   });
 
+  test('listTopicSnapshots paginates', async () => {
+    await service.createSnapshot('p', 'page-a', {
+      subscription: 'projects/p/subscriptions/s1',
+    });
+    await service.createSnapshot('p', 'page-b', {
+      subscription: 'projects/p/subscriptions/s1',
+    });
+
+    const first = await service.listTopicSnapshots('projects/p/topics/t', 1);
+
+    expect(first.snapshots).toHaveLength(1);
+    expect(first.nextPageToken).toBeTypeOf('string');
+
+    const second = await service.listTopicSnapshots(
+      'projects/p/topics/t',
+      1,
+      first.nextPageToken
+    );
+
+    expect(second.snapshots).toHaveLength(1);
+    expect(second.snapshots[0]).not.toBe(first.snapshots[0]);
+  });
+
   test('listTopicSnapshots throws NOT_FOUND for missing topic', async () => {
     const promise = service.listTopicSnapshots('projects/p/topics/missing');
 

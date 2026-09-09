@@ -11,6 +11,7 @@ import {
   buildSubscriptionName,
   buildTopicName,
   CreateSubscriptionRequestSchema,
+  defaultExpirationPolicy,
   handlePubSubError,
   mergeUpdateMask,
   PubSubError,
@@ -307,6 +308,17 @@ describe('mergeUpdateMask', () => {
     expect(mergeUpdateMask({}, ['pushConfig', 'labels'])).toEqual({
       updateMask: 'pushConfig,labels',
     });
+  });
+});
+
+describe('defaultExpirationPolicy', () => {
+  test('omitted policy becomes the 31-day GCP default', () => {
+    expect(defaultExpirationPolicy(undefined)).toEqual({ ttl: '2678400s' });
+    expect(defaultExpirationPolicy(null)).toEqual({ ttl: '2678400s' });
+  });
+
+  test('empty ttl means the subscription never expires', () => {
+    expect(defaultExpirationPolicy({ ttl: '' })).toEqual({ ttl: '' });
   });
 });
 

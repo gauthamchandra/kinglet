@@ -216,6 +216,67 @@ describe('Pub/Sub E2E: Raw HTTP API', () => {
     expect(pullBody.receivedMessages[0]?.message.data).toBe(btoa('published-first'));
   });
 
+  test('6b. Subscription filter delivers only matching attributes', async () => {
+    const filterTopic = 'filter-topic';
+    const filterSub = 'filter-sub';
+
+    const createTopic = await fetch(emulatorUrl(`/v1/projects/${project}/topics/${filterTopic}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+
+    expect(createTopic.status).toBe(200);
+
+    const createSub = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${filterSub}`),
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: `projects/${project}/topics/${filterTopic}`,
+          filter: 'attributes.env = "prod"',
+        }),
+      }
+    );
+
+    expect(createSub.status).toBe(200);
+
+    const publish = await fetch(
+      emulatorUrl(`/v1/projects/${project}/topics/${filterTopic}:publish`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { data: btoa('keep-me'), attributes: { env: 'prod' } },
+            { data: btoa('drop-me'), attributes: { env: 'dev' } },
+          ],
+        }),
+      }
+    );
+
+    expect(publish.status).toBe(200);
+
+    const pull = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${filterSub}:pull`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxMessages: 10 }),
+      }
+    );
+
+    expect(pull.status).toBe(200);
+
+    const pullBody = (await pull.json()) as {
+      receivedMessages: Array<{ message: { data: string } }>;
+    };
+
+    expect(pullBody.receivedMessages).toHaveLength(1);
+    expect(pullBody.receivedMessages[0]?.message.data).toBe(btoa('keep-me'));
+  });
+
   test('6. Publish messages to a topic', async () => {
     const response = await fetch(emulatorUrl(`/v1/projects/${project}/topics/${topicId}:publish`), {
       method: 'POST',
