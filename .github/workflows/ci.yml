@@ -87,7 +87,13 @@ jobs:
           # take the agent-authored path even when the display name contains [bot]. A substring
           # match would reject the humans behind jules@gmail.com or someone@openai.com. Extend
           # this list as new agents appear.
-          AGENT_SIGNOFF_EMAILS='cursoragent@cursor\.com|noreply@anthropic\.com|codex@openai\.com|devin@cognition\.ai|([^<>]*\+)?(copilot|devin-ai-integration\[bot\]|google-labs-jules\[bot\])@users\.noreply\.github\.com'
+          #
+          # Copilot's GitHub App uses copilot[bot]@users.noreply.github.com; older / VS Code
+          # trailers use copilot@... without [bot]. [bot] is optional so both match. Do not drop
+          # the unbracketed form — that is still a real Copilot address.
+          AGENT_SIGNOFF_EMAILS='cursoragent@cursor\.com|noreply@anthropic\.com|codex@openai\.com|devin@cognition\.ai|([^<>]*\+)?(copilot(\[bot\])?|copilot-swe-agent\[bot\]|devin-ai-integration\[bot\]|google-labs-jules\[bot\])@users\.noreply\.github\.com'
+          # git -s / GitHub Co-authored-by form. A bare "Signed-off-by: anonymous" is not a DCO sign-off.
+          HUMAN_IDENTITY='.+ <[^[:space:]>]+@[^>]+>'
 
           while read -r sha; do
             body="$(git show -s --format='%B' "$sha")"
@@ -112,8 +118,8 @@ jobs:
             # trailer. kinglet-releaser[bot] / release-please do not match AGENT_SIGNOFF_EMAILS
             # and still skip below.
             if printf '%s\n' "$author_email" | grep -qiE "^($AGENT_SIGNOFF_EMAILS)$"; then
-              human_signoffs="$(printf '%s\n' "$signoffs" | grep -viE "<($AGENT_SIGNOFF_EMAILS)>" || true)"
-              human_coauthors="$(printf '%s\n' "$coauthors" | grep -viE "<($AGENT_SIGNOFF_EMAILS)>" || true)"
+              human_signoffs="$(printf '%s\n' "$signoffs" | grep -viE "<($AGENT_SIGNOFF_EMAILS)>" | grep -iE "^Signed-off-by: $HUMAN_IDENTITY" || true)"
+              human_coauthors="$(printf '%s\n' "$coauthors" | grep -viE "<($AGENT_SIGNOFF_EMAILS)>" | grep -iE "^Co-authored-by: $HUMAN_IDENTITY" || true)"
 
               if [ -z "$human_signoffs" ]; then
                 echo "::error::$(git show -s --format='%h %s' "$sha") is agent-authored and missing a human Signed-off-by"
