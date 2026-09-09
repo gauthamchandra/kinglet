@@ -59,10 +59,7 @@ export abstract class ResourceRepository<T extends NamedRecord> {
   }
 
   async initialize(): Promise<void> {
-    const existingTables = await this.storage.listTables();
-
-    if (existingTables.includes(this.tableName)) return;
-
+    // Always call createTable so SQLite/hybrid can add columns (ADR-010).
     await this.storage.createTable(this.tableName, this.tableSchema);
   }
 

@@ -287,7 +287,9 @@ export class SubscriptionHandlers {
     try {
       const { project, topic } = req.params;
       const topicName = buildTopicName(project as string, topic as string);
-      const result = await this.service.listTopicSubscriptions(topicName);
+      const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : undefined;
+      const pageToken = req.query.pageToken as string | undefined;
+      const result = await this.service.listTopicSubscriptions(topicName, pageSize, pageToken);
 
       return this.responseUtils.success(result);
     } catch (err) {

@@ -87,6 +87,14 @@ export class SubscriptionRepository extends ResourceRepository<SubscriptionRecor
     return result.data;
   }
 
+  async listAllSubscriptions(): Promise<SubscriptionRecord[]> {
+    const result = await this.storage.find<SubscriptionRecord>(PUBSUB_SUBSCRIPTIONS_TABLE, {
+      sort: [{ field: 'name', direction: 'asc' }],
+    });
+
+    return result.data;
+  }
+
   async findPushSubscriptions(): Promise<SubscriptionRecord[]> {
     const result = await this.storage.find<SubscriptionRecord>(PUBSUB_SUBSCRIPTIONS_TABLE, {
       filter: {

@@ -12,6 +12,7 @@ import type { Logger } from '@/shared/utils/logger.ts';
 import type { MessageRepository, PublishMessageInput } from './message-repository.ts';
 import type { SubscriptionRepository } from './subscription-repository.ts';
 import type { DeadLetterPolicy, PushConfig, RetryPolicy } from './types.ts';
+import { DEFAULT_MESSAGE_RETENTION } from './types.ts';
 
 type HttpClient = (url: string, init: RequestInit) => Promise<Response>;
 type PublishFn = (topicName: string, messages: PublishMessageInput[]) => Promise<void>;
@@ -127,7 +128,30 @@ export class DeliveryEngine {
         this.cleanupCounter = 0;
 
         try {
-          const cleaned = await this.messageRepo.cleanupAckedMessages();
+          const retainBySubscription = new Map<
+            string,
+            { retainAcked: boolean; retentionSeconds: number }
+          >();
+          const allSubs = await this.subRepo.listAllSubscriptions();
+
+          for (const sub of allSubs) {
+            let retentionSeconds: number;
+
+            try {
+              retentionSeconds = parseDurationSeconds(
+                sub.messageRetentionDuration || DEFAULT_MESSAGE_RETENTION
+              );
+            } catch {
+              retentionSeconds = 604800;
+            }
+
+            retainBySubscription.set(sub.name, {
+              retainAcked: sub.retainAckedMessages === 1,
+              retentionSeconds,
+            });
+          }
+
+          const cleaned = await this.messageRepo.cleanupAckedMessages(retainBySubscription);
 
           if (cleaned > 0) {
             this.logger.info(`Cleaned up ${cleaned} acked messages`);

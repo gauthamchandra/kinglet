@@ -18,6 +18,7 @@ import {
   parseSubscriptionName,
   parseTopicName,
   schemaRecordToResponse,
+  serializePushConfig,
   topicRecordToResponse,
 } from './types.ts';
 
@@ -284,6 +285,24 @@ describe('handlePubSubError', () => {
     const result = handlePubSubError(err, 'Topic', mockResponseUtils as never);
 
     expect(result.status).toBe(400);
+  });
+});
+
+describe('serializePushConfig', () => {
+  test('empty or missing endpoint serializes as pull (null)', () => {
+    expect(serializePushConfig(undefined)).toBeNull();
+    expect(serializePushConfig(null)).toBeNull();
+    expect(serializePushConfig({})).toBeNull();
+    expect(serializePushConfig({ attributes: { 'x-goog-version': 'v1' } })).toBeNull();
+  });
+
+  test('defaults x-goog-version for a push endpoint', () => {
+    expect(
+      JSON.parse(serializePushConfig({ pushEndpoint: 'https://example.com/push' }) ?? '{}')
+    ).toEqual({
+      pushEndpoint: 'https://example.com/push',
+      attributes: { 'x-goog-version': 'v1' },
+    });
   });
 });
 

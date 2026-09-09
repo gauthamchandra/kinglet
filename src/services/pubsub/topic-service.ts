@@ -3,11 +3,13 @@
  */
 
 import type { MessageRepository } from './message-repository.ts';
+import type { SubscriptionRepository } from './subscription-repository.ts';
 import type { TopicRepository } from './topic-repository.ts';
 import type { ListTopicsResponse, TopicResponse } from './types.ts';
 import {
   buildTopicName,
   CreateTopicRequestSchema,
+  DELETED_TOPIC_NAME,
   PubSubError,
   topicRecordToResponse,
   topicRequestToRecord,
@@ -16,10 +18,16 @@ import {
 export class TopicService {
   private repo: TopicRepository;
   private messageRepo: MessageRepository;
+  private subRepo: SubscriptionRepository | undefined;
 
-  constructor(repo: TopicRepository, messageRepo: MessageRepository) {
+  constructor(
+    repo: TopicRepository,
+    messageRepo: MessageRepository,
+    subRepo?: SubscriptionRepository
+  ) {
     this.repo = repo;
     this.messageRepo = messageRepo;
+    this.subRepo = subRepo;
   }
 
   async createTopic(project: string, topic: string, body: unknown): Promise<TopicResponse> {
@@ -129,6 +137,14 @@ export class TopicService {
       throw new PubSubError('NOT_FOUND', `Topic ${name} not found`, name);
     }
 
-    await this.messageRepo.deleteMessagesByTopic(name);
+    if (this.subRepo) {
+      const subs = await this.subRepo.listSubscriptionsByTopic(name);
+
+      for (const sub of subs) {
+        await this.subRepo.updateSubscription(sub.name, { topic: DELETED_TOPIC_NAME });
+      }
+    }
+
+    await this.messageRepo.detachMessagesFromTopic(name);
   }
 }

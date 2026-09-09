@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { allocateDistinctPorts } from '../test-utils/helpers.ts';
 import { runArmorEvaluationCases } from './armor-evaluation.ts';
 import type { TerraformValidationCase } from './manifest.ts';
+import { runPubsubPushToPullConversion } from './pubsub-conversion.ts';
 
 const ROOT_DIR = resolve(import.meta.dir, '..');
 const TF_DIR = resolve(ROOT_DIR, 'terraform');
@@ -338,44 +339,93 @@ export async function runValidationCase(
 
     await initTerraform(stateDir);
 
-    const applyArgs = [
-      'apply',
-      '-input=false',
-      '-auto-approve',
-      '-no-color',
-      `-state=${stateFile}`,
+    const extraVars = (delivery?: 'push' | 'pull'): string[] => [
       `-var=kinglet_endpoint=${kinglet.endpoint}`,
-      ...targetArgs(validationCase.targets),
+      ...(delivery ? [`-var=subscription_delivery=${delivery}`] : []),
     ];
-    const apply = await runTerraformCommand(applyArgs, tfEnv);
 
-    if (apply.exitCode !== 0) {
-      throw new Error(`[${validationCase.id}] terraform apply failed:\n${apply.output}`);
-    }
+    if (validationCase.id === 'pubsub') {
+      await runPubsubPushToPullConversion({
+        endpoint: kinglet.endpoint,
+        apply: async delivery => {
+          const apply = await runTerraformCommand(
+            [
+              'apply',
+              '-input=false',
+              '-auto-approve',
+              '-no-color',
+              `-state=${stateFile}`,
+              ...extraVars(delivery),
+              ...targetArgs(validationCase.targets),
+            ],
+            tfEnv
+          );
 
-    if (validationCase.id === 'armor') {
-      if (kinglet.listenerEndpoint == null) {
-        throw new Error(`[${validationCase.id}] evaluation server endpoint was not published`);
+          if (apply.exitCode !== 0) {
+            throw new Error(`[${validationCase.id}] terraform apply failed:\n${apply.output}`);
+          }
+        },
+        plan: async delivery => {
+          const plan = await runTerraformCommand(
+            [
+              'plan',
+              '-input=false',
+              '-detailed-exitcode',
+              '-no-color',
+              `-state=${stateFile}`,
+              ...extraVars(delivery),
+              ...targetArgs(validationCase.targets),
+            ],
+            tfEnv
+          );
+
+          if (plan.exitCode !== 0) {
+            throw new Error(
+              `[${validationCase.id}] post-apply plan detected drift (exit ${plan.exitCode}):\n${plan.output}`
+            );
+          }
+        },
+      });
+    } else {
+      const applyArgs = [
+        'apply',
+        '-input=false',
+        '-auto-approve',
+        '-no-color',
+        `-state=${stateFile}`,
+        ...extraVars(),
+        ...targetArgs(validationCase.targets),
+      ];
+      const apply = await runTerraformCommand(applyArgs, tfEnv);
+
+      if (apply.exitCode !== 0) {
+        throw new Error(`[${validationCase.id}] terraform apply failed:\n${apply.output}`);
       }
 
-      await runArmorEvaluationCases(kinglet.listenerEndpoint);
-    }
+      if (validationCase.id === 'armor') {
+        if (kinglet.listenerEndpoint == null) {
+          throw new Error(`[${validationCase.id}] evaluation server endpoint was not published`);
+        }
 
-    const planArgs = [
-      'plan',
-      '-input=false',
-      '-detailed-exitcode',
-      '-no-color',
-      `-state=${stateFile}`,
-      `-var=kinglet_endpoint=${kinglet.endpoint}`,
-      ...targetArgs(validationCase.targets),
-    ];
-    const plan = await runTerraformCommand(planArgs, tfEnv);
+        await runArmorEvaluationCases(kinglet.listenerEndpoint);
+      }
 
-    if (plan.exitCode !== 0) {
-      throw new Error(
-        `[${validationCase.id}] post-apply plan detected drift (exit ${plan.exitCode}):\n${plan.output}`
-      );
+      const planArgs = [
+        'plan',
+        '-input=false',
+        '-detailed-exitcode',
+        '-no-color',
+        `-state=${stateFile}`,
+        ...extraVars(),
+        ...targetArgs(validationCase.targets),
+      ];
+      const plan = await runTerraformCommand(planArgs, tfEnv);
+
+      if (plan.exitCode !== 0) {
+        throw new Error(
+          `[${validationCase.id}] post-apply plan detected drift (exit ${plan.exitCode}):\n${plan.output}`
+        );
+      }
     }
 
     const destroyArgs = [
@@ -384,7 +434,7 @@ export async function runValidationCase(
       '-auto-approve',
       '-no-color',
       `-state=${stateFile}`,
-      `-var=kinglet_endpoint=${kinglet.endpoint}`,
+      ...extraVars(validationCase.id === 'pubsub' ? 'pull' : undefined),
       ...targetArgs(validationCase.targets),
     ];
     const destroy = await runTerraformCommand(destroyArgs, tfEnv);

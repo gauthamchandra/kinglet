@@ -148,7 +148,11 @@ export class SnapshotService {
     }
   }
 
-  async listTopicSnapshots(topicName: string): Promise<ListTopicSnapshotsResponse> {
+  async listTopicSnapshots(
+    topicName: string,
+    pageSize?: number,
+    pageToken?: string
+  ): Promise<ListTopicSnapshotsResponse> {
     const topic = await this.topicRepo.getTopicByName(topicName);
 
     if (!topic) {
@@ -156,10 +160,21 @@ export class SnapshotService {
     }
 
     const snapshots = await this.snapshotRepo.listSnapshotsByTopic(topicName);
-
-    return {
-      snapshots: snapshots.map(s => s.name),
+    const offset = pageToken != null && pageToken !== '' ? Number.parseInt(pageToken, 10) : 0;
+    const start = Number.isFinite(offset) && offset > 0 ? offset : 0;
+    const names = snapshots.map(s => s.name);
+    const limit = pageSize != null && pageSize > 0 ? pageSize : names.length;
+    const items = names.slice(start, start + limit);
+    const nextOffset = start + items.length;
+    const response: ListTopicSnapshotsResponse = {
+      snapshots: items,
     };
+
+    if (nextOffset < names.length) {
+      response.nextPageToken = String(nextOffset);
+    }
+
+    return response;
   }
 
   private toResponse(record: {

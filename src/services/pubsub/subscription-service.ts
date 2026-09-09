@@ -2,11 +2,14 @@
  * Subscription Service - business logic for Pub/Sub subscriptions, publish, pull, and ack
  */
 
+import { parseDurationSeconds } from '@/shared/utils/duration.ts';
+import { messageMatchesFilter, parseAttributeFilter } from './attribute-filter.ts';
 import type { MessageRepository } from './message-repository.ts';
 import type { SnapshotRepository } from './snapshot-repository.ts';
 import type { SubscriptionRepository } from './subscription-repository.ts';
 import type { TopicRepository } from './topic-repository.ts';
 import type {
+  ExpirationPolicy,
   ListSubscriptionsResponse,
   ListTopicSubscriptionsResponse,
   PublishResponse,
@@ -18,10 +21,44 @@ import {
   CreateSubscriptionRequestSchema,
   DEFAULT_ACK_DEADLINE_SECONDS,
   DEFAULT_MESSAGE_RETENTION,
+  defaultExpirationPolicy,
   PublishRequestSchema,
   PubSubError,
+  serializePushConfig,
   subscriptionRecordToResponse,
 } from './types.ts';
+
+function retentionCutoffIso(retention: string | null | undefined): string | undefined {
+  if (retention == null || retention === '') {
+    return undefined;
+  }
+
+  try {
+    const seconds = parseDurationSeconds(retention);
+
+    return new Date(Date.now() - seconds * 1000).toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+function paginateNames(
+  names: string[],
+  pageSize?: number,
+  pageToken?: string
+): { items: string[]; nextPageToken?: string } {
+  const offset = pageToken != null && pageToken !== '' ? Number.parseInt(pageToken, 10) : 0;
+  const start = Number.isFinite(offset) && offset > 0 ? offset : 0;
+  const limit = pageSize != null && pageSize > 0 ? pageSize : names.length;
+  const items = names.slice(start, start + limit);
+  const nextOffset = start + items.length;
+
+  if (nextOffset < names.length) {
+    return { items, nextPageToken: String(nextOffset) };
+  }
+
+  return { items };
+}
 
 export class SubscriptionService {
   private subRepo: SubscriptionRepository;
@@ -57,6 +94,17 @@ export class SubscriptionService {
 
     const data = parsed.data;
 
+    if (data.filter) {
+      try {
+        parseAttributeFilter(data.filter);
+      } catch (err) {
+        throw new PubSubError(
+          'INVALID_ARGUMENT',
+          err instanceof Error ? err.message : 'Invalid subscription filter'
+        );
+      }
+    }
+
     // Verify topic exists
     const topic = await this.topicRepo.getTopicByName(data.topic);
 
@@ -73,10 +121,14 @@ export class SubscriptionService {
       throw new PubSubError('ALREADY_EXISTS', `Subscription ${name} already exists`, name);
     }
 
+    const expiration = defaultExpirationPolicy(
+      data.expirationPolicy as ExpirationPolicy | null | undefined
+    );
+
     const record = await this.subRepo.createSubscription({
       name,
       topic: data.topic,
-      pushConfig: data.pushConfig ? JSON.stringify(data.pushConfig) : null,
+      pushConfig: serializePushConfig(data.pushConfig),
       bigqueryConfig: data.bigqueryConfig ? JSON.stringify(data.bigqueryConfig) : null,
       cloudStorageConfig: data.cloudStorageConfig ? JSON.stringify(data.cloudStorageConfig) : null,
       ackDeadlineSeconds: data.ackDeadlineSeconds ?? DEFAULT_ACK_DEADLINE_SECONDS,
@@ -84,14 +136,24 @@ export class SubscriptionService {
       messageRetentionDuration: data.messageRetentionDuration ?? DEFAULT_MESSAGE_RETENTION,
       labels: data.labels ? JSON.stringify(data.labels) : null,
       enableMessageOrdering: data.enableMessageOrdering ? 1 : 0,
-      expirationPolicy: data.expirationPolicy ? JSON.stringify(data.expirationPolicy) : null,
+      expirationPolicy: expiration ? JSON.stringify(expiration) : null,
       filter: data.filter ?? null,
       deadLetterPolicy: data.deadLetterPolicy ? JSON.stringify(data.deadLetterPolicy) : null,
       retryPolicy: data.retryPolicy ? JSON.stringify(data.retryPolicy) : null,
       detached: 0,
       enableExactlyOnceDelivery: data.enableExactlyOnceDelivery ? 1 : 0,
-      topicMessageRetentionDuration: null,
+      topicMessageRetentionDuration: topic.messageRetentionDuration,
       state: 'ACTIVE',
+    });
+
+    const retainAfter =
+      retentionCutoffIso(topic.messageRetentionDuration) ??
+      retentionCutoffIso(record.messageRetentionDuration);
+
+    await this.messageRepo.fanOutExistingMessages(data.topic, name, {
+      filter: record.filter,
+      retainAfter,
+      matchesFilter: messageMatchesFilter,
     });
 
     return subscriptionRecordToResponse(record);
@@ -150,7 +212,7 @@ export class SubscriptionService {
             updates.labels = subData.labels ? JSON.stringify(subData.labels) : null;
             break;
           case 'pushConfig':
-            updates.pushConfig = subData.pushConfig ? JSON.stringify(subData.pushConfig) : null;
+            updates.pushConfig = serializePushConfig(subData.pushConfig);
             break;
           case 'retainAckedMessages':
             updates.retainAckedMessages = subData.retainAckedMessages ? 1 : 0;
@@ -174,14 +236,51 @@ export class SubscriptionService {
           case 'enableExactlyOnceDelivery':
             updates.enableExactlyOnceDelivery = subData.enableExactlyOnceDelivery ? 1 : 0;
             break;
+          case 'filter':
+            if (subData.filter) {
+              try {
+                parseAttributeFilter(subData.filter as string);
+              } catch (err) {
+                throw new PubSubError(
+                  'INVALID_ARGUMENT',
+                  err instanceof Error ? err.message : 'Invalid subscription filter'
+                );
+              }
+            }
+
+            updates.filter = (subData.filter as string | undefined) ?? null;
+            break;
+          case 'enableMessageOrdering':
+            updates.enableMessageOrdering = subData.enableMessageOrdering ? 1 : 0;
+            break;
+          case 'bigqueryConfig':
+            updates.bigqueryConfig = subData.bigqueryConfig
+              ? JSON.stringify(subData.bigqueryConfig)
+              : null;
+            break;
+          case 'cloudStorageConfig':
+            updates.cloudStorageConfig = subData.cloudStorageConfig
+              ? JSON.stringify(subData.cloudStorageConfig)
+              : null;
+            break;
         }
       }
+    }
+
+    const existing = await this.subRepo.getSubscriptionByName(name);
+
+    if (!existing) {
+      throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`, name);
     }
 
     const updated = await this.subRepo.updateSubscription(name, updates);
 
     if (!updated) {
       throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`, name);
+    }
+
+    if (Object.hasOwn(updates, 'pushConfig') && updated.pushConfig == null) {
+      await this.messageRepo.releasePendingLeases(name);
     }
 
     return subscriptionRecordToResponse(updated);
@@ -212,15 +311,18 @@ export class SubscriptionService {
       throw new PubSubError('NOT_FOUND', `Topic ${topicName} not found`, topicName);
     }
 
-    // Find all active (non-detached) subscriptions for this topic
     const activeSubs = await this.subRepo.findActiveSubscriptionsForTopic(topicName);
-    const subNames = activeSubs.map(s => s.name);
+    const messageIds: string[] = [];
 
-    const messageIds = await this.messageRepo.publishMessages(
-      topicName,
-      parsed.data.messages,
-      subNames
-    );
+    for (const message of parsed.data.messages) {
+      const matching = activeSubs
+        .filter(sub => messageMatchesFilter(message.attributes, sub.filter))
+        .map(sub => sub.name);
+
+      const ids = await this.messageRepo.publishMessages(topicName, [message], matching);
+
+      messageIds.push(...ids);
+    }
 
     return { messageIds };
   }
@@ -304,9 +406,15 @@ export class SubscriptionService {
       );
     }
 
+    const nextPushConfig = serializePushConfig(pushBody.pushConfig);
+
     await this.subRepo.updateSubscription(subscriptionName, {
-      pushConfig: pushBody.pushConfig ? JSON.stringify(pushBody.pushConfig) : null,
+      pushConfig: nextPushConfig,
     });
+
+    if (nextPushConfig == null) {
+      await this.messageRepo.releasePendingLeases(subscriptionName);
+    }
   }
 
   async detachSubscription(subscriptionName: string): Promise<void> {
@@ -337,7 +445,11 @@ export class SubscriptionService {
     }
 
     if (seekBody.time) {
-      await this.messageRepo.resetDeliveredMessagesByTime(subscriptionName, seekBody.time);
+      await this.messageRepo.resetDeliveredMessagesByTime(
+        subscriptionName,
+        seekBody.time,
+        sub.retainAckedMessages === 1
+      );
     } else if (seekBody.snapshot && this.snapshotRepo) {
       const snapshot = await this.snapshotRepo.getSnapshotByName(seekBody.snapshot);
 
@@ -352,11 +464,19 @@ export class SubscriptionService {
       // Use snapshot creation time as the seek point
       const snapshotTime = snapshot.createdAt.toISOString();
 
-      await this.messageRepo.resetDeliveredMessagesByTime(subscriptionName, snapshotTime);
+      await this.messageRepo.resetDeliveredMessagesByTime(
+        subscriptionName,
+        snapshotTime,
+        sub.retainAckedMessages === 1
+      );
     }
   }
 
-  async listTopicSubscriptions(topicName: string): Promise<ListTopicSubscriptionsResponse> {
+  async listTopicSubscriptions(
+    topicName: string,
+    pageSize?: number,
+    pageToken?: string
+  ): Promise<ListTopicSubscriptionsResponse> {
     // Verify topic exists
     const topic = await this.topicRepo.getTopicByName(topicName);
 
@@ -365,9 +485,19 @@ export class SubscriptionService {
     }
 
     const subs = await this.subRepo.listSubscriptionsByTopic(topicName);
-
-    return {
-      subscriptions: subs.map(s => s.name),
+    const paged = paginateNames(
+      subs.map(s => s.name),
+      pageSize,
+      pageToken
+    );
+    const response: ListTopicSubscriptionsResponse = {
+      subscriptions: paged.items,
     };
+
+    if (paged.nextPageToken) {
+      response.nextPageToken = paged.nextPageToken;
+    }
+
+    return response;
   }
 }

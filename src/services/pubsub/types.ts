@@ -28,6 +28,9 @@ export const AckStatus = {
 
 export const DEFAULT_ACK_DEADLINE_SECONDS = 10;
 export const DEFAULT_MESSAGE_RETENTION = '604800s'; // 7 days
+const DEFAULT_EXPIRATION_TTL = '2678400s'; // 31 days — GCP default
+const DEFAULT_PUSH_X_GOOG_VERSION = 'v1';
+export const DELETED_TOPIC_NAME = '_deleted-topic_';
 
 // ── Error Class ──
 
@@ -555,6 +558,67 @@ function parseJsonFieldOptional<T>(json: string | null): T | undefined {
   }
 }
 
+/** Empty / missing pushConfig (or no endpoint) means pull delivery. */
+function isPullPushConfig(config: unknown): boolean {
+  if (config == null) {
+    return true;
+  }
+
+  if (typeof config !== 'object') {
+    return true;
+  }
+
+  const endpoint = (config as PushConfig).pushEndpoint;
+
+  return endpoint == null || endpoint === '';
+}
+
+export function serializePushConfig(config: unknown): string | null {
+  if (isPullPushConfig(config)) {
+    return null;
+  }
+
+  const parsed = config as PushConfig;
+
+  return JSON.stringify({
+    ...parsed,
+    attributes: {
+      'x-goog-version': DEFAULT_PUSH_X_GOOG_VERSION,
+      ...parsed.attributes,
+    },
+  });
+}
+
+function normalizePushConfigForResponse(config: PushConfig | undefined): PushConfig | undefined {
+  if (isPullPushConfig(config)) {
+    return undefined;
+  }
+
+  const parsed = config as PushConfig;
+
+  return {
+    ...parsed,
+    attributes: {
+      'x-goog-version': DEFAULT_PUSH_X_GOOG_VERSION,
+      ...parsed.attributes,
+    },
+  };
+}
+
+export function defaultExpirationPolicy(
+  provided: ExpirationPolicy | null | undefined
+): ExpirationPolicy | null {
+  if (provided === undefined) {
+    return { ttl: DEFAULT_EXPIRATION_TTL };
+  }
+
+  if (provided === null) {
+    return { ttl: DEFAULT_EXPIRATION_TTL };
+  }
+
+  return provided;
+}
+
 export function topicRecordToResponse(record: TopicRecord): TopicResponse {
   const response: TopicResponse = {
     name: record.name,
@@ -664,7 +728,9 @@ export function subscriptionRecordToResponse(record: SubscriptionRecord): Subscr
     response.labels = labels;
   }
 
-  const pushConfig = parseJsonFieldOptional<PushConfig>(record.pushConfig);
+  const pushConfig = normalizePushConfigForResponse(
+    parseJsonFieldOptional<PushConfig>(record.pushConfig)
+  );
 
   if (pushConfig) {
     response.pushConfig = pushConfig;

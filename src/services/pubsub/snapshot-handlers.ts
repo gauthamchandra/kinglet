@@ -146,7 +146,9 @@ export class SnapshotHandlers {
     try {
       const { project, topic } = req.params;
       const topicName = buildTopicName(project as string, topic as string);
-      const result = await this.service.listTopicSnapshots(topicName);
+      const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : undefined;
+      const pageToken = req.query.pageToken as string | undefined;
+      const result = await this.service.listTopicSnapshots(topicName, pageSize, pageToken);
 
       return this.responseUtils.success(result);
     } catch (err) {
