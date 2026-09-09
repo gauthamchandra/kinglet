@@ -217,8 +217,11 @@ describe('CloudSqlService', () => {
       await createInstance(dataPlaneService, 'db-a');
       await dataPlaneService.stop();
 
+      // The wire server binds 0.0.0.0, so this check has to as well: on macOS a
+      // 127.0.0.1 bind succeeds beside a live wildcard listener, which would let
+      // this pass with the endpoint still open.
       const rebound = Bun.listen({
-        hostname: '127.0.0.1',
+        hostname: '0.0.0.0',
         port: PORT_RANGE_START,
         socket: { data() {}, open() {}, close() {}, error() {} },
       });

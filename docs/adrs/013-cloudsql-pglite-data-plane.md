@@ -215,6 +215,11 @@ mapping onto a per-instance PGlite.
 - **Only the `postgres` database exists.** AlloyDB has no databases admin API,
   so the emulator never opens any other name. Clients must connect to
   `postgres`.
+- **`clusters.patch` does not rotate the initial user.** A PATCH naming
+  `initialUser` records the new username on the cluster only; the User row the
+  data plane authenticates against keeps its existing name and password, and a
+  password supplied in that PATCH is dropped. Rotate credentials through
+  `users.patch`. Real AlloyDB applies the new password.
 
 ## Implementation Notes
 

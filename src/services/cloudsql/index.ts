@@ -51,6 +51,10 @@ export class CloudSqlService {
   }
 
   async initialize(): Promise<void> {
+    // Idempotent: a second call would build a second data plane and orphan the
+    // first's listeners and PGlites, since stop() only reaches the one held.
+    if (this.adminService) return;
+
     const repository = new CloudSqlRepository(this.storage);
 
     await repository.initialize();

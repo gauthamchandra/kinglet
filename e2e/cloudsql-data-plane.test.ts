@@ -218,7 +218,9 @@ describe('Cloud SQL data plane e2e', () => {
       // The default database must not see the other database's table.
       const postgres = connect(instancePort, 'postgres');
 
-      await expect(run(postgres, 'SELECT id FROM events')).rejects.toThrow();
+      await expect(run(postgres, 'SELECT id FROM events')).rejects.toThrow(
+        /relation "events" does not exist/
+      );
     },
     INSTANCE_BOOT_TIMEOUT_MS
   );
@@ -226,19 +228,23 @@ describe('Cloud SQL data plane e2e', () => {
   test('the wrong password is refused', async () => {
     const sql = connect(instancePort, 'postgres', 'postgres', 'not-the-password');
 
-    await expect(run(sql, 'SELECT 1')).rejects.toThrow();
+    await expect(run(sql, 'SELECT 1')).rejects.toThrow(
+      /password authentication failed for user "postgres"/
+    );
   });
 
   test('an unknown database is refused', async () => {
     const sql = connect(instancePort, 'no-such-database');
 
-    await expect(run(sql, 'SELECT 1')).rejects.toThrow();
+    await expect(run(sql, 'SELECT 1')).rejects.toThrow(
+      /database "no-such-database" does not exist/
+    );
   });
 
   test('an unknown user is refused', async () => {
     const sql = connect(instancePort, 'postgres', 'ghost', '');
 
-    await expect(run(sql, 'SELECT 1')).rejects.toThrow();
+    await expect(run(sql, 'SELECT 1')).rejects.toThrow(/role "ghost" does not exist/);
   });
 
   test('a user added through the admin API can connect with its own password', async () => {
@@ -353,7 +359,9 @@ describe('Cloud SQL data plane e2e', () => {
 
       const first = connect(instancePort, 'postgres');
 
-      await expect(run(first, 'SELECT id FROM only_here')).rejects.toThrow();
+      await expect(run(first, 'SELECT id FROM only_here')).rejects.toThrow(
+        /relation "only_here" does not exist/
+      );
     },
     INSTANCE_BOOT_TIMEOUT_MS
   );

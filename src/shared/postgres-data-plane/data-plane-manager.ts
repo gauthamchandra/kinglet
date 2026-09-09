@@ -174,7 +174,21 @@ export class DataPlaneManager implements PostgresDataPlane {
       throw error;
     }
 
-    const { port, wireServer } = await this.bindListener(key);
+    let bound: { port: number; wireServer: PostgresWireServer };
+
+    try {
+      bound = await this.bindListener(key, previousPort);
+    } catch (error) {
+      // Mirror of the open-failure path above: a bind that fails must not leave
+      // wasm Postgres running with no listener in front of it until shutdown.
+      for (const database of opened) {
+        await this.databaseManager.close({ project, instance, database });
+      }
+
+      throw error;
+    }
+
+    const { port, wireServer } = bound;
     const running: RunningInstance = { port, wireServer, databases: opened };
 
     this.instances.set(key, running);
@@ -190,11 +204,14 @@ export class DataPlaneManager implements PostgresDataPlane {
   }
 
   /**
-   * Bind this instance's listener, keeping the port it was already on when
-   * there was one so a restart does not move an address clients hold.
+   * Bind this instance's listener, preferring the port it was on before a
+   * restart so the address clients hold does not move. The caller passes that
+   * port in: by the time this runs the old listener has been stopped and its
+   * entry removed, so it cannot be read back from `instances`.
    */
   private async bindListener(
-    instanceKey: string
+    instanceKey: string,
+    previousPort?: number
   ): Promise<{ port: number; wireServer: PostgresWireServer }> {
     const allocated = await this.portAllocator.allocateBound(
       port => {
@@ -209,7 +226,7 @@ export class DataPlaneManager implements PostgresDataPlane {
         return wireServer;
       },
       {
-        preferredPort: this.instances.get(instanceKey)?.port,
+        preferredPort: previousPort,
         onBindFailure: (port, error) =>
           this.logger.debug(
             `Port ${port} looked free but could not be bound for ${instanceKey}, trying the next`,

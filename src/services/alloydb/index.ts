@@ -99,6 +99,10 @@ export class AlloyDbService {
   }
 
   async initialize(): Promise<void> {
+    // Idempotent: a second call would build a second data plane and orphan the
+    // first's listeners and PGlites, since stop() only reaches the one held.
+    if (this.operationsStore) return;
+
     const clusters = new ClusterRepository(this.storage);
     const instances = new InstanceRepository(this.storage);
     const users = new UserRepository(this.storage);

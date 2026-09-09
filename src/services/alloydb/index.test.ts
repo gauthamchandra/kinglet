@@ -565,8 +565,11 @@ describe('data plane', () => {
     await createClusterAndInstance(dataPlaneService);
     await dataPlaneService.stop();
 
+    // The wire server binds 0.0.0.0, so this check has to as well: on macOS a
+    // 127.0.0.1 bind succeeds beside a live wildcard listener, which would let
+    // this pass with the endpoint still open.
     const rebound = Bun.listen({
-      hostname: '127.0.0.1',
+      hostname: '0.0.0.0',
       port: PORT_RANGE_START,
       socket: { data() {}, open() {}, close() {}, error() {} },
     });
@@ -592,6 +595,32 @@ describe('data plane', () => {
     expect(await queryOne(PORT_RANGE_START)).toEqual([{ one: 1 }]);
 
     await revived.stop();
+  });
+
+  /**
+   * initialize_calledTwice_doesNotThrow above runs with the data plane off. On, a
+   * second call used to build a second manager and re-run rehydration, so the
+   * first manager's listener stayed bound with nothing left holding it.
+   */
+  test('a second initialize keeps the first data plane rather than orphaning it', async () => {
+    const dataPlaneService = await startService();
+
+    await createClusterAndInstance(dataPlaneService);
+    await dataPlaneService.initialize();
+    await dataPlaneService.stop();
+
+    // The wire server binds 0.0.0.0, so this check has to as well: on macOS a
+    // 127.0.0.1 bind succeeds beside a live wildcard listener, which would let
+    // this pass with the endpoint still open.
+    const rebound = Bun.listen({
+      hostname: '0.0.0.0',
+      port: PORT_RANGE_START,
+      socket: { data() {}, open() {}, close() {}, error() {} },
+    });
+
+    expect(rebound.port).toBe(PORT_RANGE_START);
+
+    rebound.stop(true);
   });
 
   test('reports no port for an instance that was never created', async () => {

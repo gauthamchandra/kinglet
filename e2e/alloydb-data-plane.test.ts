@@ -180,7 +180,9 @@ describe('AlloyDB data plane e2e', () => {
   test('a wrong password is rejected', async () => {
     const sql = connect(instancePort, 'postgres', 'postgres', 'not-the-password');
 
-    await expect(run(sql, 'SELECT 1')).rejects.toThrow();
+    await expect(run(sql, 'SELECT 1')).rejects.toThrow(
+      /password authentication failed for user "postgres"/
+    );
   });
 
   test('contrib and pgvector extensions can be created', async () => {
