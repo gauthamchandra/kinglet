@@ -217,40 +217,50 @@ describe('AlloyDB data plane e2e: official client library', () => {
   const CLIENT_INSTANCE = 'primary';
   const CLIENT_PASSWORD = 'client-secret';
 
+  function officialClient(port: number): AlloyDBAdminClient {
+    return new AlloyDBAdminClient({
+      fallback: 'rest',
+      apiEndpoint: 'localhost',
+      port,
+      protocol: 'http',
+      auth: createFakeAuth(PROJECT) as never,
+    });
+  }
+
+  async function createClusterViaClient(
+    client: AlloyDBAdminClient,
+    clusterId: string
+  ): Promise<string> {
+    const parent = `projects/${PROJECT}/locations/${LOCATION}`;
+    const [operation] = await client.createCluster({
+      parent,
+      clusterId,
+      cluster: {
+        network: `projects/${PROJECT}/global/networks/default`,
+        initialUser: { user: 'postgres', password: CLIENT_PASSWORD },
+      },
+    });
+
+    await operation.promise();
+
+    return `${parent}/clusters/${clusterId}`;
+  }
+
   test(
     'a cluster and instance created through @google-cloud/alloydb are a usable Postgres',
     async () => {
-      const client = new AlloyDBAdminClient({
-        fallback: 'rest',
-        apiEndpoint: 'localhost',
-        port: emulatorPort,
-        protocol: 'http',
-        auth: createFakeAuth(PROJECT) as never,
-      });
-      const parent = `projects/${PROJECT}/locations/${LOCATION}`;
+      const client = officialClient(emulatorPort);
 
       try {
-        const [clusterOperation] = await client.createCluster({
-          parent,
-          clusterId: CLIENT_CLUSTER,
-          cluster: {
-            network: `projects/${PROJECT}/global/networks/default`,
-            initialUser: { user: 'postgres', password: CLIENT_PASSWORD },
-          },
-        });
-
-        await clusterOperation.promise();
-
+        const cluster = await createClusterViaClient(client, CLIENT_CLUSTER);
         const [instanceOperation] = await client.createInstance({
-          parent: `${parent}/clusters/${CLIENT_CLUSTER}`,
+          parent: cluster,
           instanceId: CLIENT_INSTANCE,
           instance: { instanceType: 'PRIMARY' },
         });
         const [instance] = await instanceOperation.promise();
 
-        expect(instance.name).toBe(
-          `${parent}/clusters/${CLIENT_CLUSTER}/instances/${CLIENT_INSTANCE}`
-        );
+        expect(instance.name).toBe(`${cluster}/instances/${CLIENT_INSTANCE}`);
         expect(instance.ipAddress).toBe('127.0.0.1');
       } finally {
         await client.close();
@@ -271,4 +281,84 @@ describe('AlloyDB data plane e2e: official client library', () => {
     },
     INSTANCE_BOOT_TIMEOUT_MS
   );
+
+  /**
+   * A service whose whole port range is one port: the first instance takes it,
+   * so the second cannot start its data plane. Real AlloyDB reports that on the
+   * operation, and the client's LRO rejects — the create call itself must not
+   * fail with a 500 the client was never written to expect.
+   */
+  describe('when the data plane cannot start', () => {
+    const ONLY_PORT = 15890;
+
+    let exhaustedServer: Server;
+    let exhaustedService: AlloyDbService;
+    let exhaustedPort: number;
+
+    beforeAll(async () => {
+      exhaustedPort = await getAvailablePort();
+
+      const storage = new StorageManager();
+
+      await storage.initialize({ type: 'memory' });
+
+      exhaustedService = new AlloyDbService(storage, new Logger('e2e', 'error'), {
+        enabled: true,
+        portRangeStart: ONLY_PORT,
+        portRangeEnd: ONLY_PORT,
+        storageType: 'memory',
+        sqlitePath: './data/emulator.db',
+        postgis: false,
+      });
+
+      await exhaustedService.initialize();
+
+      exhaustedServer = Bun.serve({
+        port: exhaustedPort,
+        fetch: buildRouter(exhaustedService.getRoutes()),
+      });
+    });
+
+    afterAll(async () => {
+      exhaustedServer.stop();
+      await exhaustedService.stop();
+    });
+
+    test(
+      'the official client sees a rejected LRO and no instance, not a transport error',
+      async () => {
+        const client = officialClient(exhaustedPort);
+
+        try {
+          const first = await createClusterViaClient(client, 'takes-the-port');
+          const [firstOperation] = await client.createInstance({
+            parent: first,
+            instanceId: 'primary',
+            instance: { instanceType: 'PRIMARY' },
+          });
+
+          await firstOperation.promise();
+
+          const second = await createClusterViaClient(client, 'no-port-left');
+          const attempt = async () => {
+            const [operation] = await client.createInstance({
+              parent: second,
+              instanceId: 'primary',
+              instance: { instanceType: 'PRIMARY' },
+            });
+
+            await operation.promise();
+          };
+
+          await expect(attempt()).rejects.toThrow(/Failed to start the data plane/);
+          await expect(client.getInstance({ name: `${second}/instances/primary` })).rejects.toThrow(
+            /not found/i
+          );
+        } finally {
+          await client.close();
+        }
+      },
+      INSTANCE_BOOT_TIMEOUT_MS
+    );
+  });
 });

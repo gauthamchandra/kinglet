@@ -84,10 +84,14 @@ describe('createInstance', () => {
     ]);
   });
 
-  test('createInstance_rollsBackWhenTheDataPlaneFailsToStart', async () => {
+  /**
+   * Real AlloyDB reports a provisioning failure on the operation, not on the
+   * create call — so this resolves, and the failure is the operation's `error`.
+   */
+  test('createInstance_whenTheDataPlaneFailsToStart_returnsAFailedOperationAndRollsBack', async () => {
     dataPlane.startFailure = new Error('no free ports');
 
-    const create = service.createInstance(
+    const operation = await service.createInstance(
       PROJECT,
       LOCATION,
       CLUSTER_ID,
@@ -96,10 +100,12 @@ describe('createInstance', () => {
       {}
     );
 
-    await expect(create).rejects.toBeInstanceOf(AlloyDbError);
-    await expect(create).rejects.toHaveProperty('code', 'INTERNAL');
-    await expect(create).rejects.toThrow(/no free ports/);
-
+    expect(operation.done).toBe(true);
+    expect(operation.error).toEqual({
+      code: 13,
+      message: expect.stringContaining('no free ports'),
+    });
+    expect(operation).not.toHaveProperty('response');
     expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
     expect(dataPlane.calls).toContain(
       `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}`
@@ -393,11 +399,16 @@ describe('createInstance', () => {
    * own and skips the row deletion, leaving exactly the orphaned row it exists
    * to prevent.
    */
+  /**
+   * An unguarded rollback would replace the cause that explains the failure with
+   * its own and skip the row deletion, leaving exactly the orphan it exists to
+   * prevent.
+   */
   test('createInstance_whenTheRollbackAlsoFails_keepsTheOriginalCauseAndStillDeletesTheRow', async () => {
     dataPlane.startFailure = new Error('no free ports');
     dataPlane.dropFailure = new Error('EACCES');
 
-    const create = service.createInstance(
+    const operation = await service.createInstance(
       PROJECT,
       LOCATION,
       CLUSTER_ID,
@@ -406,9 +417,10 @@ describe('createInstance', () => {
       {}
     );
 
-    await expect(create).rejects.toHaveProperty('code', 'INTERNAL');
-    await expect(create).rejects.toThrow(/no free ports/);
-
+    expect(operation.error).toEqual({
+      code: 13,
+      message: expect.stringContaining('no free ports'),
+    });
     expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
     expect(logger.warn).toHaveBeenCalledTimes(1);
   });

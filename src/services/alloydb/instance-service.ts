@@ -35,6 +35,9 @@ const RESOURCE_TYPE = 'Instance';
 
 const INSTANCE_TYPES: ReadonlySet<string> = new Set(Object.values(InstanceType));
 
+/** google.rpc.Code.INTERNAL, as carried on a failed operation's `error`. */
+const RPC_CODE_INTERNAL = 13;
+
 export interface ValidatableOptions {
   validateOnly?: boolean | undefined;
 }
@@ -150,11 +153,23 @@ export class InstanceService {
       // start cannot leave half-built files for the next create of this name.
       await this.rollbackFailedCreate(project, dataPlaneKey, name);
 
-      throw new AlloyDbError(
-        'INTERNAL',
-        `Failed to start the data plane for ${name}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+      // Reported on the operation rather than thrown: real AlloyDB answers the
+      // create with 200 and an Operation, and a provisioning failure surfaces as
+      // that operation's `error` — which is what the client library's LRO
+      // rejects on. Throwing here would hand the client a 500 it never expects
+      // from instances.create.
+      return this.operations.createFailedOperation(
+        project,
+        location,
+        name,
+        'create',
+        RESOURCE_TYPE,
+        {
+          code: RPC_CODE_INTERNAL,
+          message: `Failed to start the data plane for ${name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }
       );
     }
 
