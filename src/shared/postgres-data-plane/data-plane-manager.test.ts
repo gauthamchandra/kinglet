@@ -245,7 +245,8 @@ describe('DataPlaneManager', () => {
 
     expect(second).not.toBe(first);
     expect(manager.getPort('p1', 'b')).toBe(second);
-  });
+    // Three wasm Postgres boots; the two-boot tests here already run ~3.8s on CI.
+  }, 30_000);
 
   test('restart rebinds the instance and gives its previous port back', async () => {
     const manager = makeManager();
