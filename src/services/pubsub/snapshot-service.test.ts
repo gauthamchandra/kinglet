@@ -236,11 +236,7 @@ describe('SnapshotService', () => {
     expect(first.snapshots).toHaveLength(1);
     expect(first.nextPageToken).toBeTypeOf('string');
 
-    const second = await service.listTopicSnapshots(
-      'projects/p/topics/t',
-      1,
-      first.nextPageToken
-    );
+    const second = await service.listTopicSnapshots('projects/p/topics/t', 1, first.nextPageToken);
 
     expect(second.snapshots).toHaveLength(1);
     expect(second.snapshots[0]).not.toBe(first.snapshots[0]);
