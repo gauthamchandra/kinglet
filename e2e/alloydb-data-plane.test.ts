@@ -8,12 +8,13 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { AlloyDBAdminClient } from '@google-cloud/alloydb';
 import type { Server } from 'bun';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
-import { buildRouter } from './e2e-helpers.ts';
+import { buildRouter, createFakeAuth } from './e2e-helpers.ts';
 
 // Away from AlloyDB's default 5540 range and from Cloud SQL's e2e range.
 const PORT_RANGE_START = 15800;
@@ -202,4 +203,72 @@ describe('AlloyDB data plane e2e', () => {
     );
     expect(alloydbService.getDataPlanePort(PROJECT, LOCATION, CLUSTER, 'ghost')).toBeNull();
   });
+});
+
+/**
+ * The raw-HTTP suite above proves the endpoint; this proves the real consumer
+ * reaches it. The workflow suite drives the official client with the data plane
+ * off, so nothing else exercises the client against an instance that actually
+ * listens — including the initialUser password it supplies being the one the
+ * wire server then authenticates.
+ */
+describe('AlloyDB data plane e2e: official client library', () => {
+  const CLIENT_CLUSTER = 'client-cluster';
+  const CLIENT_INSTANCE = 'primary';
+  const CLIENT_PASSWORD = 'client-secret';
+
+  test(
+    'a cluster and instance created through @google-cloud/alloydb are a usable Postgres',
+    async () => {
+      const client = new AlloyDBAdminClient({
+        fallback: 'rest',
+        apiEndpoint: 'localhost',
+        port: emulatorPort,
+        protocol: 'http',
+        auth: createFakeAuth(PROJECT) as never,
+      });
+      const parent = `projects/${PROJECT}/locations/${LOCATION}`;
+
+      try {
+        const [clusterOperation] = await client.createCluster({
+          parent,
+          clusterId: CLIENT_CLUSTER,
+          cluster: {
+            network: `projects/${PROJECT}/global/networks/default`,
+            initialUser: { user: 'postgres', password: CLIENT_PASSWORD },
+          },
+        });
+
+        await clusterOperation.promise();
+
+        const [instanceOperation] = await client.createInstance({
+          parent: `${parent}/clusters/${CLIENT_CLUSTER}`,
+          instanceId: CLIENT_INSTANCE,
+          instance: { instanceType: 'PRIMARY' },
+        });
+        const [instance] = await instanceOperation.promise();
+
+        expect(instance.name).toBe(
+          `${parent}/clusters/${CLIENT_CLUSTER}/instances/${CLIENT_INSTANCE}`
+        );
+        expect(instance.ipAddress).toBe('127.0.0.1');
+      } finally {
+        await client.close();
+      }
+
+      const port = alloydbService.getDataPlanePort(
+        PROJECT,
+        LOCATION,
+        CLIENT_CLUSTER,
+        CLIENT_INSTANCE
+      );
+
+      expect(port).not.toBeNull();
+
+      const sql = connect(port ?? 0, 'postgres', 'postgres', CLIENT_PASSWORD);
+
+      expect(await rows(sql, 'SELECT 1 AS one')).toEqual([{ one: 1 }]);
+    },
+    INSTANCE_BOOT_TIMEOUT_MS
+  );
 });
