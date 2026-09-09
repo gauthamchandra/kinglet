@@ -204,12 +204,18 @@ Each ADR should include: Status, Context, Decision, Rationale, Alternatives Cons
 
 This is an open-source project under the DCO. Every commit must be signed off under the identity of the **human who requested the work** — the sign-off certifies that a person reviewed the change and stands behind it.
 
-You may run `git commit -s` on that human's behalf, but only after:
+Ask that human and get an explicit sign-off before putting their name on the commit. Do not assume it.
 
-- **Asking them and getting an explicit sign-off.** Do not assume approval — ask the human who requested the work to confirm they have reviewed the change and want their name on it. Their sign-off is the whole point; applying it without asking defeats it.
-- **Stamping their identity, not yours.** `git commit -s` derives the `Signed-off-by` name and email straight from git config, so make sure `user.name`/`user.email` are the human's before committing. CI rejects any sign-off carrying a coding-agent identity (Cursor, Claude, Copilot, Devin, …), so signing under your own identity fails the `DCO sign-off` job.
+**Cloud agents:** keep `user.name` / `user.email` as the agent. GitHub Verified is keyed to the committer, and the SSH signing key belongs to the agent account. Overriding git config with the human's identity makes GitHub report `unknown_key`. Put the human on both trailers, and do **not** run `git commit -s` (that appends a banned agent `Signed-off-by`):
 
-Credit yourself with a `Co-authored-by:` trailer — agent assistance is expected here and that trailer is welcome (it is deliberately not checked).
+```
+Co-authored-by: Human Name <human@example.com>
+Signed-off-by: Human Name <human@example.com>
+```
+
+**Humans committing locally:** `git commit -s` is fine; CI requires `Signed-off-by` to match the author.
+
+CI rejects any `Signed-off-by` carrying a coding-agent identity (Cursor, Claude, Copilot, Devin, …).
 
 See CONTRIBUTING.md → Developer Certificate of Origin (DCO) for the full contract.
 
@@ -262,7 +268,7 @@ DCO sign-off, and AI disclosure are the template, not padding.
 ## Guidelines
 
 - When implementing a task, be sure to first read through the ADRs that exist in docs/adrs so you understand the historical decisions that have been made.
-- **Sign off every commit** with `git commit -s` (DCO is enforced in CI). In a local clone, `git config format.signoff true` adds the sign-off automatically.
+- **Sign off every commit** under the human who requested the work (see Commit sign-off). Cloud agents must not run `git commit -s` under their own identity.
 - Co-locate tests with source files for easier discovery
 - Try to use `bunx` over `npx` wherever possible
 - When moving code to a new location in response to feedback from the user, do not leave useless comments such as "// BEGIN is now called explicitly via begin() method".

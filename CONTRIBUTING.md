@@ -200,13 +200,15 @@ sync) are skipped — an app cannot certify the DCO on anyone's behalf.
 **The sign-off must carry a human's identity.** For the same reason a bot can't certify the
 DCO, a coding agent can't certify it under its own name — the sign-off asserts that a person
 reviewed the code and stands behind it. CI rejects any `Signed-off-by` line carrying a known
-agent identity (Cursor, Claude, Copilot, Devin, …). An agent *may* run `git commit -s` on your
-behalf, but only after you have reviewed the change and given it your sign-off — and with git
-configured to your name and email, so the trailer derives straight from your git config and is
-genuinely yours. Crediting the agent is still welcome — put it in a `Co-authored-by` trailer,
-which is *not* checked. Using agents here is expected (see [AI-assisted
-contributions](#ai-assisted-contributions)); putting a sign-off on code no human reviewed is
-the line.
+agent identity (Cursor, Claude, Copilot, Devin, …).
+
+Cloud agents keep their own `user.name` / `user.email` so GitHub can verify the commit
+(the signing key is the agent's). After you have reviewed the change and given a sign-off,
+the agent authors the commit as itself and puts you on both `Co-authored-by` and
+`Signed-off-by`. Do not ask it to rewrite git config to your identity. Humans committing
+locally still use `git commit -s` so `Signed-off-by` matches the author. Using agents here
+is expected (see [AI-assisted contributions](#ai-assisted-contributions)); putting a
+sign-off on code no human reviewed is the line.
 
 ---
 
