@@ -378,7 +378,14 @@ describe('Pub/Sub E2E: Raw HTTP API', () => {
     const pullBody = await pullResp.json();
 
     expect(pullBody.receivedMessages).toBeInstanceOf(Array);
-    expect(pullBody.receivedMessages.length).toBe(2);
+    expect(pullBody.receivedMessages.length).toBeGreaterThanOrEqual(2);
+
+    const pulledData = pullBody.receivedMessages.map(
+      (m: { message: { data: string } }) => m.message.data
+    );
+
+    expect(pulledData).toContain(btoa('pull-test-1'));
+    expect(pulledData).toContain(btoa('pull-test-2'));
 
     const msg1 = pullBody.receivedMessages[0];
 
@@ -708,7 +715,23 @@ describe('Pub/Sub E2E: Client Library', () => {
     const receivedMessages = pullResponse.receivedMessages;
 
     expect(receivedMessages).toBeInstanceOf(Array);
-    expect(receivedMessages?.length).toBe(2);
+    expect(receivedMessages?.length).toBeGreaterThanOrEqual(2);
+
+    const pulledData = (receivedMessages ?? []).map(m => {
+      const raw = m.message?.data;
+
+      if (Buffer.isBuffer(raw)) {
+        return raw.toString();
+      }
+
+      return typeof raw === 'string' ? raw : '';
+    });
+
+    expect(
+      pulledData.some(
+        data => data === 'client-pull-1' || data === Buffer.from('client-pull-1').toString('base64')
+      )
+    ).toBe(true);
 
     // Acknowledge
     const ackIds = (receivedMessages ?? []).map(

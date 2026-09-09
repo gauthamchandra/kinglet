@@ -234,6 +234,29 @@ describe('SubscriptionHandlers', () => {
     expect(mockService.updateSubscription).toHaveBeenCalled();
   });
 
+  test('handleUpdateSubscription reads updateMask from the query string', async () => {
+    const routes = handlers.getRoutes();
+    const route = findRoute(routes, 'pubsub.subscriptions.patch');
+
+    await route.handler(
+      makeRequest({
+        method: 'PATCH',
+        params: { project: 'p', subscription: 's' },
+        query: { updateMask: 'pushConfig' },
+        body: { subscription: { pushConfig: {} } },
+      }),
+      makeContext()
+    );
+
+    expect(mockService.updateSubscription).toHaveBeenCalledWith(
+      'projects/p/subscriptions/s',
+      expect.objectContaining({
+        updateMask: 'pushConfig',
+        subscription: { pushConfig: {} },
+      })
+    );
+  });
+
   // ── Publish ──
 
   test('handlePublish returns 200 with messageIds', async () => {

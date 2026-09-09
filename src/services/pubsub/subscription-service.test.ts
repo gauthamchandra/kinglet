@@ -592,6 +592,17 @@ describe('SubscriptionService', () => {
     expect(replayed.receivedMessages[0]?.message.data).toBe(btoa('replay-me'));
   });
 
+  test('updateSubscription accepts snake_case updateMask fields from Terraform', async () => {
+    await service.createSubscription('p', 'snake-sub', { topic: 'projects/p/topics/t' });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/snake-sub', {
+      subscription: { pushConfig: { pushEndpoint: 'https://example.com/tf' } },
+      updateMask: 'push_config',
+    });
+
+    expect(updated.pushConfig?.pushEndpoint).toBe('https://example.com/tf');
+  });
+
   test('updateSubscription updateMask supports filter and enableMessageOrdering', async () => {
     await service.createSubscription('p', 'mask-sub', { topic: 'projects/p/topics/t' });
 

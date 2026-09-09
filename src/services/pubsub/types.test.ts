@@ -12,6 +12,7 @@ import {
   buildTopicName,
   CreateSubscriptionRequestSchema,
   handlePubSubError,
+  mergeUpdateMask,
   PubSubError,
   parseSchemaName,
   parseSnapshotName,
@@ -285,6 +286,27 @@ describe('handlePubSubError', () => {
     const result = handlePubSubError(err, 'Topic', mockResponseUtils as never);
 
     expect(result.status).toBe(400);
+  });
+});
+
+describe('mergeUpdateMask', () => {
+  test('prefers body updateMask over the query', () => {
+    expect(mergeUpdateMask({ updateMask: 'labels' }, 'pushConfig')).toEqual({
+      updateMask: 'labels',
+    });
+  });
+
+  test('uses the query when the body omits updateMask', () => {
+    expect(mergeUpdateMask({ subscription: { pushConfig: {} } }, 'pushConfig')).toEqual({
+      subscription: { pushConfig: {} },
+      updateMask: 'pushConfig',
+    });
+  });
+
+  test('joins repeated query updateMask values', () => {
+    expect(mergeUpdateMask({}, ['pushConfig', 'labels'])).toEqual({
+      updateMask: 'pushConfig,labels',
+    });
   });
 });
 

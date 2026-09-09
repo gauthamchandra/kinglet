@@ -52,6 +52,28 @@ export class PubSubError extends Error {
   }
 }
 
+/** Terraform/Google clients often send updateMask as a query param, not in the JSON body. */
+export function mergeUpdateMask(body: unknown, queryMask: unknown): Record<string, unknown> {
+  const base =
+    body != null && typeof body === 'object' && !Array.isArray(body)
+      ? { ...(body as Record<string, unknown>) }
+      : {};
+
+  if (typeof base.updateMask === 'string' && base.updateMask.length > 0) {
+    return base;
+  }
+
+  const fromQuery = Array.isArray(queryMask)
+    ? queryMask.filter(part => typeof part === 'string').join(',')
+    : queryMask;
+
+  if (typeof fromQuery === 'string' && fromQuery.length > 0) {
+    base.updateMask = fromQuery;
+  }
+
+  return base;
+}
+
 export function handlePubSubError(
   err: unknown,
   resourceType: string,

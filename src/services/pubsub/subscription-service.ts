@@ -201,8 +201,34 @@ export class SubscriptionService {
     if (updateMask) {
       const fields = updateMask.split(',').map(f => f.trim());
 
-      for (const field of fields) {
-        switch (field) {
+      for (const rawField of fields) {
+        const field = rawField.includes('.') ? rawField.split('.').pop() : rawField;
+        const normalized =
+          field === 'push_config'
+            ? 'pushConfig'
+            : field === 'ack_deadline_seconds'
+              ? 'ackDeadlineSeconds'
+              : field === 'retain_acked_messages'
+                ? 'retainAckedMessages'
+                : field === 'message_retention_duration'
+                  ? 'messageRetentionDuration'
+                  : field === 'expiration_policy'
+                    ? 'expirationPolicy'
+                    : field === 'dead_letter_policy'
+                      ? 'deadLetterPolicy'
+                      : field === 'retry_policy'
+                        ? 'retryPolicy'
+                        : field === 'enable_exactly_once_delivery'
+                          ? 'enableExactlyOnceDelivery'
+                          : field === 'enable_message_ordering'
+                            ? 'enableMessageOrdering'
+                            : field === 'bigquery_config'
+                              ? 'bigqueryConfig'
+                              : field === 'cloud_storage_config'
+                                ? 'cloudStorageConfig'
+                                : field;
+
+        switch (normalized) {
           case 'ackDeadlineSeconds':
             if (subData.ackDeadlineSeconds != null) {
               updates.ackDeadlineSeconds = subData.ackDeadlineSeconds;
