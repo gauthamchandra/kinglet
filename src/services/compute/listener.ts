@@ -20,6 +20,24 @@ import type { SecurityPolicyResponse } from './types.ts';
 // ── Kinglet-only header names (only referenced here) ──
 
 const KINGLET_ORIGIN_IP_HEADER = 'x-kinglet-origin-ip';
+const KINGLET_ORIGIN_ASN_HEADER = 'x-kinglet-origin-asn';
+const KINGLET_ORIGIN_REGION_CODE_HEADER = 'x-kinglet-origin-region-code';
+const KINGLET_ORIGIN_JA3_HEADER = 'x-kinglet-origin-ja3';
+const KINGLET_ORIGIN_JA4_HEADER = 'x-kinglet-origin-ja4';
+const KINGLET_ORIGIN_SNI_HEADER = 'x-kinglet-origin-sni';
+const KINGLET_REQUEST_HEADERS = new Set([
+  KINGLET_ORIGIN_IP_HEADER,
+  KINGLET_ORIGIN_ASN_HEADER,
+  KINGLET_ORIGIN_REGION_CODE_HEADER,
+  KINGLET_ORIGIN_JA3_HEADER,
+  KINGLET_ORIGIN_JA4_HEADER,
+  KINGLET_ORIGIN_SNI_HEADER,
+]);
+const MAX_ORIGIN_ASN = 4294967295;
+const JA3_FINGERPRINT_RE = /^[0-9a-fA-F]{32}$/;
+const JA4_FINGERPRINT_RE = /^[tq][0-9]{2}[di][0-9]{4}[a-z0-9]{2}_[0-9a-f]{12}_[0-9a-f]{12}$/i;
+const SNI_HOSTNAME_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
 const KINGLET_SECURITY_POLICY_HEADER = 'x-kinglet-security-policy';
 const KINGLET_ENFORCED_PRIORITY_HEADER = 'x-kinglet-enforced-priority';
 const KINGLET_ENFORCED_ACTION_HEADER = 'x-kinglet-enforced-action';
@@ -66,10 +84,48 @@ export function buildRequestAttributesFromListenerRequest(
     originIp = tcpPeer;
   }
 
+  const asnResult = parseOriginAsn(headers[KINGLET_ORIGIN_ASN_HEADER]);
+
+  if (!asnResult.ok) {
+    return { error: asnResult.error };
+  }
+
+  const regionResult = parseOriginRegionCode(headers[KINGLET_ORIGIN_REGION_CODE_HEADER]);
+
+  if (!regionResult.ok) {
+    return { error: regionResult.error };
+  }
+
+  const ja3Result = parseTlsFingerprint(
+    headers[KINGLET_ORIGIN_JA3_HEADER],
+    'X-Kinglet-Origin-JA3',
+    JA3_FINGERPRINT_RE
+  );
+
+  if (!ja3Result.ok) {
+    return { error: ja3Result.error };
+  }
+
+  const ja4Result = parseTlsFingerprint(
+    headers[KINGLET_ORIGIN_JA4_HEADER],
+    'X-Kinglet-Origin-JA4',
+    JA4_FINGERPRINT_RE
+  );
+
+  if (!ja4Result.ok) {
+    return { error: ja4Result.error };
+  }
+
+  const sniResult = parseOriginSni(headers[KINGLET_ORIGIN_SNI_HEADER]);
+
+  if (!sniResult.ok) {
+    return { error: sniResult.error };
+  }
+
   const strippedHeaders: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() !== KINGLET_ORIGIN_IP_HEADER) {
+    if (!KINGLET_REQUEST_HEADERS.has(key.toLowerCase())) {
       strippedHeaders[key] = value;
     }
   }
@@ -93,6 +149,26 @@ export function buildRequestAttributesFromListenerRequest(
     userIpRequestHeaders: input.userIpRequestHeaders,
   };
 
+  if (asnResult.asn != null) {
+    requestInput.asn = asnResult.asn;
+  }
+
+  if (regionResult.regionCode != null) {
+    requestInput.regionCode = regionResult.regionCode;
+  }
+
+  if (ja3Result.value != null) {
+    requestInput.tlsJa3Fingerprint = ja3Result.value;
+  }
+
+  if (ja4Result.value != null) {
+    requestInput.tlsJa4Fingerprint = ja4Result.value;
+  }
+
+  if (sniResult.sni != null) {
+    requestInput.sni = sniResult.sni;
+  }
+
   if (input.jsonParsing != null) {
     requestInput.jsonParsing = input.jsonParsing;
   }
@@ -100,6 +176,98 @@ export function buildRequestAttributesFromListenerRequest(
   const attributes = buildRequestAttributes(requestInput);
 
   return { attributes };
+}
+
+function parseOriginAsn(
+  raw: string | undefined
+): { ok: true; asn?: number } | { ok: false; error: string } {
+  if (raw == null) {
+    return { ok: true };
+  }
+
+  const trimmed = raw.trim();
+
+  if (trimmed === '') {
+    return { ok: true, asn: 0 };
+  }
+
+  if (!/^\d+$/.test(trimmed)) {
+    return { ok: false, error: `Invalid X-Kinglet-Origin-ASN value: ${raw}` };
+  }
+
+  const asn = Number(trimmed);
+
+  if (asn > MAX_ORIGIN_ASN) {
+    return { ok: false, error: `Invalid X-Kinglet-Origin-ASN value: ${raw}` };
+  }
+
+  return { ok: true, asn };
+}
+
+function parseOriginRegionCode(
+  raw: string | undefined
+): { ok: true; regionCode?: string } | { ok: false; error: string } {
+  if (raw == null) {
+    return { ok: true };
+  }
+
+  const trimmed = raw.trim();
+
+  if (trimmed === '') {
+    return { ok: true, regionCode: '' };
+  }
+
+  if (!/^[A-Za-z]{2}$/.test(trimmed)) {
+    return { ok: false, error: `Invalid X-Kinglet-Origin-Region-Code value: ${raw}` };
+  }
+
+  return { ok: true, regionCode: trimmed.toUpperCase() };
+}
+
+function parseTlsFingerprint(
+  raw: string | undefined,
+  headerName: string,
+  pattern: RegExp
+): { ok: true; value?: string } | { ok: false; error: string } {
+  if (raw == null) {
+    return { ok: true };
+  }
+
+  const trimmed = raw.trim();
+
+  if (trimmed === '') {
+    return { ok: true, value: '' };
+  }
+
+  if (!pattern.test(trimmed)) {
+    return { ok: false, error: `Invalid ${headerName} value: ${raw}` };
+  }
+
+  return { ok: true, value: trimmed.toLowerCase() };
+}
+
+function parseOriginSni(
+  raw: string | undefined
+): { ok: true; sni?: string } | { ok: false; error: string } {
+  if (raw == null) {
+    return { ok: true };
+  }
+
+  const trimmed = raw.trim();
+
+  if (trimmed === '') {
+    return { ok: true, sni: '' };
+  }
+
+  // RFC 6066 §3: SNI HostName is ASCII without a trailing dot. DNS FQDN
+  // notation includes one; TLS stacks strip it before the ClientHello.
+  const hostname = trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed;
+
+  if (hostname === '' || hostname.length > 253 || !SNI_HOSTNAME_RE.test(hostname)) {
+    return { ok: false, error: `Invalid X-Kinglet-Origin-SNI value: ${raw}` };
+  }
+
+  return { ok: true, sni: hostname.toLowerCase() };
 }
 
 // ── Decision → HTTP response ──

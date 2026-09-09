@@ -20,10 +20,6 @@ import {
   SQLSTATE_PROTOCOL_VIOLATION,
 } from './postgres-wire-server.ts';
 
-const TEST_PORT_BASE = 45900;
-
-let nextTestPort = TEST_PORT_BASE;
-
 // ── Frame builders (the client side of the protocol) ──
 
 function buildStartupPacket(parameters: Record<string, string>, version = 196608): Uint8Array {
@@ -251,17 +247,16 @@ function startServer(
     user: string
   ) => Promise<ConnectionResolution>
 ): number {
-  const port = nextTestPort++;
   const server = new PostgresWireServer({
     instanceKey: 'p1/inst',
-    port,
+    port: 0,
     resolveConnection,
   });
 
   server.listen();
   servers.push(server);
 
-  return port;
+  return server.port;
 }
 
 afterEach(() => {
@@ -680,6 +675,7 @@ describe('PostgresWireServer', () => {
     const port = startServer(async () => allow(queue, ''));
     const server = servers[servers.length - 1];
 
+    expect(port).toBeGreaterThan(0);
     expect(server?.port).toBe(port);
     expect(() => server?.listen()).not.toThrow();
   });

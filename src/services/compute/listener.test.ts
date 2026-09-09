@@ -93,6 +93,411 @@ describe('buildRequestAttributesFromListenerRequest: IP resolution', () => {
   });
 });
 
+describe('buildRequestAttributesFromListenerRequest: ASN and region', () => {
+  function input(headers: Record<string, string>) {
+    return {
+      method: 'GET',
+      path: '/path',
+      query: '',
+      headers,
+      tcpPeer: '127.0.0.1',
+      body: '',
+      scheme: 'http',
+      userIpRequestHeaders: [],
+    };
+  }
+
+  test('populates origin.asn and origin.regionCode from kinglet headers', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-origin-ip': '203.0.113.10',
+        'x-kinglet-origin-asn': '15169',
+        'x-kinglet-origin-region-code': 'US',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.asn).toBe(15169);
+    expect(result.attributes.origin.regionCode).toBe('US');
+  });
+
+  test('strips ASN and region kinglet headers before CEL', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-origin-ip': '203.0.113.10',
+        'x-kinglet-origin-asn': '15169',
+        'x-kinglet-origin-region-code': 'US',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.request.headers['x-kinglet-origin-asn']).toBeUndefined();
+    expect(result.attributes.request.headers['x-kinglet-origin-region-code']).toBeUndefined();
+    expect(result.attributes.request.headers['x-kinglet-origin-ip']).toBeUndefined();
+  });
+
+  test('defaults asn to 0 and region to empty when headers are absent', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-ip': '203.0.113.10' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.asn).toBe(0);
+    expect(result.attributes.origin.regionCode).toBe('');
+  });
+
+  test('accepts explicit ASN 0 and empty region as unresolved', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-origin-ip': '203.0.113.10',
+        'x-kinglet-origin-asn': '0',
+        'x-kinglet-origin-region-code': '',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.asn).toBe(0);
+    expect(result.attributes.origin.regionCode).toBe('');
+  });
+
+  test('uppercases a two-letter region code', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-origin-ip': '203.0.113.10',
+        'x-kinglet-origin-region-code': 'us',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.regionCode).toBe('US');
+  });
+
+  test('allows ASN without a region header', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-origin-ip': '203.0.113.10',
+        'x-kinglet-origin-asn': '15169',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.asn).toBe(15169);
+    expect(result.attributes.origin.regionCode).toBe('');
+  });
+
+  test('returns error for a non-integer ASN', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-asn': 'not-an-asn' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-ASN value: not-an-asn',
+    });
+  });
+
+  test('returns error for a negative ASN', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-asn': '-1' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-ASN value: -1',
+    });
+  });
+
+  test('returns error for an ASN above uint32 max', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-asn': '4294967296' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-ASN value: 4294967296',
+    });
+  });
+
+  test('accepts uint32 max ASN', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-asn': '4294967295' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.asn).toBe(4294967295);
+  });
+
+  test('returns error for a region that is not two letters', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-region-code': 'USA' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-Region-Code value: USA',
+    });
+  });
+});
+
+describe('buildRequestAttributesFromListenerRequest: JA3 and JA4', () => {
+  const ja3 = 'e7d705a3286e19ea42f587a344ee6862';
+  const ja4 = 't13d1516h2_8daaf6152771_b186095e22b6';
+
+  function input(headers: Record<string, string>) {
+    return {
+      method: 'GET',
+      path: '/path',
+      query: '',
+      headers,
+      tcpPeer: '127.0.0.1',
+      body: '',
+      scheme: 'http',
+      userIpRequestHeaders: [],
+    };
+  }
+
+  test('populates JA3 and JA4 fingerprints from kinglet headers', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-origin-ip': '203.0.113.10',
+        'x-kinglet-origin-ja3': ja3,
+        'x-kinglet-origin-ja4': ja4,
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.tlsJa3Fingerprint).toBe(ja3);
+    expect(result.attributes.origin.tlsJa4Fingerprint).toBe(ja4);
+  });
+
+  test('strips JA3 and JA4 kinglet headers before CEL', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-origin-ja3': ja3,
+        'x-kinglet-origin-ja4': ja4,
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.request.headers['x-kinglet-origin-ja3']).toBeUndefined();
+    expect(result.attributes.request.headers['x-kinglet-origin-ja4']).toBeUndefined();
+  });
+
+  test('defaults fingerprints to empty when headers are absent', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-ip': '203.0.113.10' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.tlsJa3Fingerprint).toBe('');
+    expect(result.attributes.origin.tlsJa4Fingerprint).toBe('');
+  });
+
+  test('accepts empty fingerprint headers as unresolved', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-origin-ja3': '',
+        'x-kinglet-origin-ja4': '',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.tlsJa3Fingerprint).toBe('');
+    expect(result.attributes.origin.tlsJa4Fingerprint).toBe('');
+  });
+
+  test('lowercases a JA3 hex fingerprint', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-ja3': ja3.toUpperCase() })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.origin.tlsJa3Fingerprint).toBe(ja3);
+  });
+
+  test('returns error for a JA3 that is not 32 hex characters', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-ja3': 'not-a-ja3' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-JA3 value: not-a-ja3',
+    });
+  });
+
+  test('returns error for a JA4 that does not match the fingerprint shape', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-ja4': 'not-a-ja4' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-JA4 value: not-a-ja4',
+    });
+  });
+});
+
+describe('buildRequestAttributesFromListenerRequest: SNI', () => {
+  function input(headers: Record<string, string>) {
+    return {
+      method: 'GET',
+      path: '/path',
+      query: '',
+      headers,
+      tcpPeer: '127.0.0.1',
+      body: '',
+      scheme: 'http',
+      userIpRequestHeaders: [],
+    };
+  }
+
+  test('populates sni from the kinglet header', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        host: 'app.example.com',
+        'x-kinglet-origin-sni': 'cdn.example.com',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.sni).toBe('cdn.example.com');
+    expect(result.attributes.request.headers.host).toBe('app.example.com');
+  });
+
+  test('strips the SNI kinglet header before CEL', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-sni': 'cdn.example.com' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.request.headers['x-kinglet-origin-sni']).toBeUndefined();
+  });
+
+  test('defaults sni to empty when the header is absent', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-ip': '203.0.113.10' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.sni).toBe('');
+  });
+
+  test('accepts an empty SNI header as unresolved', () => {
+    const result = buildRequestAttributesFromListenerRequest(input({ 'x-kinglet-origin-sni': '' }));
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.sni).toBe('');
+  });
+
+  test('lowercases the SNI hostname', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-sni': 'CDN.Example.COM' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.sni).toBe('cdn.example.com');
+  });
+
+  test('does not treat Host as SNI', () => {
+    const result = buildRequestAttributesFromListenerRequest(input({ host: 'app.example.com' }));
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.sni).toBe('');
+    expect(result.attributes.request.headers.host).toBe('app.example.com');
+  });
+
+  test('returns error for a SNI that is not a hostname', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-sni': 'not a host' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-SNI value: not a host',
+    });
+  });
+
+  test('strips one trailing FQDN dot before storing SNI', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-sni': 'cdn.example.com.' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.sni).toBe('cdn.example.com');
+  });
+
+  test('returns error for a lone trailing dot', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-sni': '.' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-SNI value: .',
+    });
+  });
+
+  test('returns error for a double trailing dot', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-origin-sni': 'cdn.example.com..' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Origin-SNI value: cdn.example.com..',
+    });
+  });
+});
+
 describe('buildRequestAttributesFromListenerRequest: XFF rewriting', () => {
   test('appends peer to existing X-Forwarded-For', () => {
     const result = buildRequestAttributesFromListenerRequest({

@@ -90,7 +90,7 @@ provider "google" {
 }
 ```
 
-[`terraform/compute.tf`](../../terraform/compute.tf) is a 15-rule example
+[`terraform/compute.tf`](../../terraform/compute.tf) is an 18-rule example
 (path, IP, method, User-Agent, query, Host, RE2, preview, redirect, throttle,
 `deny(404)` / `deny(502)`, default allow). Your own `google_compute_security_policy`
 module is the usual input.
@@ -112,6 +112,24 @@ Always send `X-Kinglet-Origin-IP` (from Docker, the TCP peer is a bridge/NAT
 address) and `Host` (otherwise `Host` is `127.0.0.1:8787`). Use
 `redirect: 'manual'`. Assert **action and priority**, not status alone. Run
 rate-limit cases sequentially and give each bucket its own IP.
+
+Rules on `origin.asn` / `origin.region_code` need
+`X-Kinglet-Origin-ASN` and `X-Kinglet-Origin-Region-Code`. Kinglet does not
+yet look those up from the peer — that is a known gap versus GCP (see
+[ADR-014](../adrs/014-cloud-armor-asn-region-headers.md#deferred-work)).
+TEST-NET addresses would miss a real feed anyway.
+
+Rules on `origin.tls_ja3_fingerprint` / `origin.tls_ja4_fingerprint` need
+`X-Kinglet-Origin-JA3` (32 hex characters) and `X-Kinglet-Origin-JA4`.
+`enforceOnKey: SNI` needs `X-Kinglet-Origin-SNI` (a hostname). A trailing
+FQDN dot is stripped (RFC 6066 SNI has none). GCP has no `origin.sni`
+CEL field — do not write one. `Host` is not SNI.
+
+Kinglet does not terminate TLS, so fingerprints and SNI never come from
+the wire. `request.scheme` stays `http`.
+
+A bad override is 400 and does not evaluate, same as a bad Origin-IP. The
+headers are stripped before CEL.
 
 ```ts
 import { expect, test } from 'bun:test';
@@ -231,6 +249,49 @@ test('deny(502)', async () => {
   expect(res.status).toBe(502);
   expect(res.headers.get('x-kinglet-enforced-priority')).toBe('1400');
 });
+
+test('ASN and region deny', async () => {
+  const res = await evaluate('/public', {
+    originIp: '203.0.113.10',
+    headers: {
+      'X-Kinglet-Origin-ASN': '15169',
+      'X-Kinglet-Origin-Region-Code': 'US',
+    },
+  });
+
+  expect(res.status).toBe(403);
+  expect(res.headers.get('x-kinglet-enforced-priority')).toBe('1500');
+});
+
+test('JA3 fingerprint deny', async () => {
+  const res = await evaluate('/public', {
+    originIp: '203.0.113.10',
+    headers: { 'X-Kinglet-Origin-JA3': 'e7d705a3286e19ea42f587a344ee6862' },
+  });
+
+  expect(res.status).toBe(403);
+  expect(res.headers.get('x-kinglet-enforced-priority')).toBe('1600');
+});
+
+test('SNI throttle is sequential and per SNI', async () => {
+  const first = await evaluate('/sni-limited', {
+    originIp: '203.0.113.50',
+    headers: { 'X-Kinglet-Origin-SNI': 'cdn.example.com' },
+  });
+  const second = await evaluate('/sni-limited', {
+    originIp: '203.0.113.50',
+    headers: { 'X-Kinglet-Origin-SNI': 'cdn.example.com' },
+  });
+  const other = await evaluate('/sni-limited', {
+    originIp: '203.0.113.51',
+    headers: { 'X-Kinglet-Origin-SNI': 'other.example.com' },
+  });
+
+  expect(first.status).toBe(200);
+  expect(second.status).toBe(429);
+  expect(other.status).toBe(200);
+  expect(second.headers.get('x-kinglet-enforced-priority')).toBe('1700');
+});
 ```
 
 The in-repo harness runs the same requests after apply (`terraform/armor-evaluation.ts`).
@@ -242,7 +303,7 @@ The in-repo harness runs the same requests after apply (`terraform/armor-evaluat
 | WAF / `evaluatePreconfiguredWaf` | Writes succeed; the function is **false**; default allow often wins |
 | Address groups, threat intel, Adaptive Protection, reCAPTCHA | Same: apply may echo fields; the match never happens |
 | Policy attached to a backend / URL map | The evaluation server picks one policy (`COMPUTE_ARMOR_DEFAULT_POLICY` or the sole policy). In GCP, no attachment means no Armor |
-| HTTPS, JA3, SNI, geo | `request.scheme` is `http`; fingerprints / ASN / region are empty |
+| HTTPS, JA3, SNI, geo | `request.scheme` is `http`. JA3/JA4/SNI are whatever you send on `X-Kinglet-Origin-JA3` / `JA4` / `SNI`, not a TLS handshake. `Host` is not SNI. ASN / region are **not** looked up from the peer (deferred; [ADR-014](../adrs/014-cloud-armor-asn-region-headers.md#deferred-work)) |
 | CDN / proxy topology | `origin.ip` is the load-balancer peer. Set `X-Kinglet-Origin-IP` to **egress**, not the end user, when the rule is `SRC_IPS_V1` |
 | GCP rate-limit flakiness | Local counters are exact and single-process |
 

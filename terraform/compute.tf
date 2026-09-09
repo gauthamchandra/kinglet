@@ -1,6 +1,6 @@
 resource "google_compute_security_policy" "example" {
   name        = "kinglet-validation-policy"
-  description = "Cloud Armor evaluation fixture: path, IP, header, query, method, preview, redirect, throttle, default allow"
+  description = "Cloud Armor evaluation fixture: path, IP, header, query, method, preview, redirect, throttle, ASN/region, JA3, SNI, default allow"
 
   # 100 — path prefix deny
   rule {
@@ -197,6 +197,56 @@ resource "google_compute_security_policy" "example" {
     match {
       expr {
         expression = "request.path.startsWith('/upstream-down')"
+      }
+    }
+  }
+
+  # 1500 — ASN + region (listener overrides; kinglet does not look these up)
+  rule {
+    action      = "deny(403)"
+    priority    = 1500
+    description = "Deny advertised Google ASN from US"
+
+    match {
+      expr {
+        expression = "origin.asn == 15169 && origin.region_code == 'US'"
+      }
+    }
+  }
+
+  # 1600 — JA3 (listener override; kinglet does not terminate TLS)
+  rule {
+    action      = "deny(403)"
+    priority    = 1600
+    description = "Deny a known JA3 fingerprint"
+
+    match {
+      expr {
+        expression = "origin.tls_ja3_fingerprint == 'e7d705a3286e19ea42f587a344ee6862'"
+      }
+    }
+  }
+
+  # 1700 — SNI throttle (listener override; not a CEL attribute)
+  rule {
+    action      = "throttle"
+    priority    = 1700
+    description = "Throttle /sni-limited to 1 request per 60s per SNI"
+
+    match {
+      expr {
+        expression = "request.path.startsWith('/sni-limited')"
+      }
+    }
+
+    rate_limit_options {
+      conform_action = "allow"
+      exceed_action  = "deny(429)"
+      enforce_on_key = "SNI"
+
+      rate_limit_threshold {
+        count        = 1
+        interval_sec = 60
       }
     }
   }

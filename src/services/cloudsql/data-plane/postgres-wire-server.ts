@@ -276,7 +276,7 @@ export class PostgresWireServer {
   }
 
   get port(): number {
-    return this.options.port;
+    return this.listener?.port ?? this.options.port;
   }
 
   stop(): void {
