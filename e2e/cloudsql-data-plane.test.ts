@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sqladmin } from '@googleapis/sqladmin';
 import type { Server } from 'bun';
 import { toStorageConfig } from '@/core/storage/config.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
@@ -540,4 +541,87 @@ describe('Cloud SQL data plane e2e with PostGIS', () => {
 
     await sql.end();
   });
+});
+
+/**
+ * A service whose whole port range is one port: the first instance takes it, so
+ * the second cannot start its data plane. Real Cloud SQL reports that on the
+ * operation — DONE, with an OperationErrors list — and the insert itself still
+ * returns 200. Driven through Google's generated client, which parses the
+ * response against the published discovery document.
+ */
+describe('Cloud SQL data plane e2e: a data plane that cannot start', () => {
+  const ONLY_PORT = 15760;
+
+  let exhaustedServer: Server;
+  let exhaustedService: CloudSqlService;
+
+  beforeAll(async () => {
+    const storage = new StorageManager();
+
+    await storage.initialize({ type: 'memory' });
+
+    exhaustedService = new CloudSqlService(storage, new Logger('e2e', 'error'), {
+      enabled: true,
+      portRangeStart: ONLY_PORT,
+      portRangeEnd: ONLY_PORT,
+      storageType: 'memory',
+      sqlitePath: './data/emulator.db',
+    });
+
+    await exhaustedService.initialize();
+
+    exhaustedServer = Bun.serve({
+      port: await getAvailablePort(),
+      fetch: buildRouter(exhaustedService.getRoutes()),
+    });
+  });
+
+  afterAll(async () => {
+    exhaustedServer.stop();
+    await exhaustedService.stop();
+  });
+
+  test(
+    'the official client gets a 200 whose operation carries the error, and no instance',
+    async () => {
+      const admin = sqladmin({
+        version: 'v1',
+        rootUrl: `http://localhost:${exhaustedServer.port}/`,
+        auth: 'kinglet-emulator',
+      });
+      const requestBody = { databaseVersion: 'POSTGRES_16', rootPassword: ROOT_PASSWORD };
+
+      const first = await admin.instances.insert({
+        project: PROJECT,
+        requestBody: { ...requestBody, name: 'takes-the-port' },
+      });
+
+      expect(first.status).toBe(200);
+      expect(first.data.error).toBeUndefined();
+
+      const second = await admin.instances.insert({
+        project: PROJECT,
+        requestBody: { ...requestBody, name: 'no-port-left' },
+      });
+
+      expect(second.status).toBe(200);
+      expect(second.data.status).toBe('DONE');
+      expect(second.data.error).toEqual({
+        kind: 'sql#operationErrors',
+        errors: [
+          {
+            kind: 'sql#operationError',
+            code: 'INTERNAL_ERROR',
+            message: expect.stringContaining('Failed to start the data plane'),
+          },
+        ],
+      });
+
+      await expect(
+        admin.instances.get({ project: PROJECT, instance: 'no-port-left' })
+      ).rejects.toThrow(/not found/i);
+    },
+    INSTANCE_BOOT_TIMEOUT_MS
+  );
 });

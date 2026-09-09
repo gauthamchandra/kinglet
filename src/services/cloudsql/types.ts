@@ -82,6 +82,8 @@ export interface SqlOperationRecord extends BaseRecord {
   insertTime: string;
   startTime: string;
   endTime: string;
+  /** JSON-serialized {@link OperationErrors}; null for an operation that succeeded. */
+  error: string | null;
 }
 
 // ── Table Schemas ──
@@ -158,6 +160,9 @@ export const cloudsqlOperationsTableSchema: TableSchema = {
     { name: 'insertTime', type: 'string' },
     { name: 'startTime', type: 'string' },
     { name: 'endTime', type: 'string' },
+    // Nullable so ADR-010 additive sync can add it to an existing installation's
+    // operations table: SQLite refuses ADD COLUMN … NOT NULL without a default.
+    { name: 'error', type: 'json', nullable: true },
   ],
   indexes: [
     { name: 'idx_cloudsql_operations_name', columns: ['name'], unique: true },
@@ -210,6 +215,19 @@ export interface UserResponse {
   type: string;
 }
 
+/** One entry of {@link OperationErrors}. `code` is a string in sqladmin, unlike google.rpc.Status. */
+export interface OperationError {
+  kind: 'sql#operationError';
+  code: string;
+  message: string;
+}
+
+/** The sqladmin `Operation.error` envelope — a list, not a single status. */
+export interface OperationErrors {
+  kind: 'sql#operationErrors';
+  errors: OperationError[];
+}
+
 export interface OperationResponse {
   kind: 'sql#operation';
   name: string;
@@ -223,6 +241,7 @@ export interface OperationResponse {
   insertTime: string;
   startTime: string;
   endTime: string;
+  error?: OperationErrors;
 }
 
 // ── Zod Request Schemas ──
@@ -337,7 +356,7 @@ export function userRecordToResponse(record: SqlUserRecord): UserResponse {
 }
 
 export function operationRecordToResponse(record: SqlOperationRecord): OperationResponse {
-  return {
+  const response: OperationResponse = {
     kind: 'sql#operation',
     name: record.name,
     operationType: record.operationType,
@@ -351,4 +370,10 @@ export function operationRecordToResponse(record: SqlOperationRecord): Operation
     startTime: record.startTime,
     endTime: record.endTime,
   };
+
+  if (record.error != null) {
+    response.error = JSON.parse(record.error) as OperationErrors;
+  }
+
+  return response;
 }

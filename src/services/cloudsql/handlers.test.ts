@@ -89,6 +89,35 @@ describe('CloudSqlHandlers', () => {
     expect(serviceMock.createInstance).toHaveBeenCalledWith('p1', body);
   });
 
+  /**
+   * A failed operation is still a 200: the handler must pass the `error`
+   * envelope through untouched rather than mapping it to an HTTP failure.
+   */
+  test('instances.insert returns 200 and passes a failed operation through', async () => {
+    const failed = {
+      ...DONE_OP,
+      error: {
+        kind: 'sql#operationErrors',
+        errors: [{ kind: 'sql#operationError', code: 'INTERNAL_ERROR', message: 'no free ports' }],
+      },
+    };
+
+    serviceMock.createInstance.mockResolvedValueOnce(failed);
+
+    const route = handlers.getRoutes().find(r => r.id === 'cloudsql.instances.insert');
+    const response = await route?.handler(
+      makeRequest({
+        method: 'POST',
+        body: { name: 'db-a', databaseVersion: 'POSTGRES_16' },
+        params: { project: 'p1' },
+      }),
+      makeContext()
+    );
+
+    expect(response?.status).toBe(200);
+    expect((response?.body as Record<string, unknown>).error).toEqual(failed.error);
+  });
+
   test('instances.list forwards maxResults and pageToken and shapes the response', async () => {
     const route = handlers.getRoutes().find(r => r.id === 'cloudsql.instances.list');
 

@@ -55,15 +55,29 @@ describe('SqlAdminService', () => {
       expect(dataPlane.calls).toContain('dropDatabase:p1/db-a/app');
     });
 
-    test('leaves no instance behind when the data plane fails to start', async () => {
+    /**
+     * Real Cloud SQL reports a provisioning failure on the operation, not on the
+     * insert call — so this resolves, and the failure is the operation's `error`.
+     */
+    test('reports a data plane that fails to start on the operation and leaves no instance behind', async () => {
       dataPlane.startFailure = new Error('no free ports');
 
-      const create = service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      const operation = await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+      });
 
-      await expect(create).rejects.toBeInstanceOf(SqlAdminError);
-      await expect(create).rejects.toHaveProperty('code', 'INTERNAL');
-      await expect(create).rejects.toThrow('no free ports');
-
+      expect(operation.status).toBe('DONE');
+      expect(operation.error).toEqual({
+        kind: 'sql#operationErrors',
+        errors: [
+          {
+            kind: 'sql#operationError',
+            code: 'INTERNAL_ERROR',
+            message: expect.stringContaining('no free ports'),
+          },
+        ],
+      });
       expect(await repo.getInstance('p1', 'db-a')).toBeNull();
       expect(await repo.listDatabases('p1', 'db-a')).toEqual([]);
       expect(await repo.listUsers('p1', 'db-a')).toEqual([]);
