@@ -280,7 +280,7 @@ describe('StorageManager', () => {
       await manager.close();
     });
 
-    test('should initialize hybrid storage (SQLite + cache features)', async () => {
+    test('should initialize hybrid storage with an LRU cache in front of SQLite', async () => {
       const healthCheck = await manager.healthCheck();
 
       expect(healthCheck).toBe(true);
@@ -288,23 +288,40 @@ describe('StorageManager', () => {
       const stats = await manager.getStats();
 
       expect(stats.provider).toBe('hybrid');
+
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
     });
 
-    test('should provide cache-aware operations', async () => {
-      const data = {
+    test('should cache reads and invalidate on update and delete', async () => {
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
         name: 'Hybrid Test',
         email: 'hybrid@example.com',
         age: 28,
         active: true,
-      };
+      });
 
-      const created = await manager.create<TestRecord>('test_records', data);
-
-      // Multiple accesses should be efficient with caching
+      // First findById populates the cache; the second should be a hit.
       const found1 = await manager.findById<TestRecord>('test_records', created.id);
       const found2 = await manager.findById<TestRecord>('test_records', created.id);
 
       expect(found1).toEqual(found2);
+      expect(await cache.get(`test_records:${created.id}`)).not.toBeNull();
+
+      await manager.updateById<TestRecord>('test_records', created.id, { age: 29 });
+      expect(await cache.get(`test_records:${created.id}`)).toBeNull();
+
+      await manager.findById<TestRecord>('test_records', created.id);
+      expect(await cache.get(`test_records:${created.id}`)).not.toBeNull();
+
+      await manager.deleteById('test_records', created.id);
+      expect(await cache.get(`test_records:${created.id}`)).toBeNull();
     });
   });
 

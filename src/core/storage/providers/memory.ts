@@ -138,7 +138,7 @@ export class MemoryStorageProvider implements StorageProvider {
       id,
       createdAt: now,
       updatedAt: now,
-      ...data,
+      ...this.serializeJsonFields(memoryTable, data),
     } as T;
 
     memoryTable.records.set(id, record);
@@ -165,7 +165,7 @@ export class MemoryStorageProvider implements StorageProvider {
         id,
         createdAt: now,
         updatedAt: now,
-        ...item,
+        ...this.serializeJsonFields(memoryTable, item),
       } as T;
 
       memoryTable.records.set(id, record);
@@ -313,7 +313,7 @@ export class MemoryStorageProvider implements StorageProvider {
 
     const updatedRecord: T = {
       ...existingRecord,
-      ...data,
+      ...this.serializeJsonFields(memoryTable, data),
       updatedAt: new Date(),
     };
 
@@ -334,12 +334,13 @@ export class MemoryStorageProvider implements StorageProvider {
   ): Promise<number> {
     const memoryTable = this.getTable(table);
     let updatedCount = 0;
+    const serialized = this.serializeJsonFields(memoryTable, data);
 
     for (const [id, record] of memoryTable.records.entries()) {
       if (this.matchesFilter(record, filter)) {
         const updatedRecord = {
           ...record,
-          ...data,
+          ...serialized,
           updatedAt: new Date(),
         };
 
@@ -478,6 +479,38 @@ export class MemoryStorageProvider implements StorageProvider {
     }
 
     return table;
+  }
+
+  /**
+   * Stringify object values in `json` columns so memory matches SQLite.
+   *
+   * <p>SQLite stores JSON as TEXT via {@code JSON.stringify}; memory used to
+   * keep the live object. Services already stringify on write and parse on
+   * read, so both paths agreed when callers did the right thing — but a raw
+   * object write diverged across providers. Aligning on strings closes that
+   * gap without forcing a call-site migration.
+   */
+  private serializeJsonFields<T extends Record<string, unknown>>(
+    table: MemoryTable,
+    data: T
+  ): T {
+    const jsonColumns = table.schema.columns.filter(column => column.type === 'json');
+
+    if (jsonColumns.length === 0) {
+      return data;
+    }
+
+    const result: Record<string, unknown> = { ...data };
+
+    for (const column of jsonColumns) {
+      const value = result[column.name];
+
+      if (value !== null && value !== undefined && typeof value === 'object') {
+        result[column.name] = JSON.stringify(value);
+      }
+    }
+
+    return result as T;
   }
 
   private matchesFilter(record: BaseRecord, filter: QueryFilter): boolean {

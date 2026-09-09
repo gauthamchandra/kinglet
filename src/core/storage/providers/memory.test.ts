@@ -513,4 +513,48 @@ describe('MemoryStorageProvider', () => {
       expect(result.data[0]?.name).toBe('Alice Johnson');
     });
   });
+
+  describe('json columns', () => {
+    interface JsonRecord extends BaseRecord {
+      name: string;
+      settings: string;
+    }
+
+    beforeEach(async () => {
+      await provider.createTable('json_records', {
+        name: 'json_records',
+        columns: [
+          { name: 'id', type: 'string', primaryKey: true },
+          { name: 'name', type: 'string' },
+          { name: 'settings', type: 'json' },
+        ],
+        timestamps: true,
+      });
+    });
+
+    test('stringifies object values so reads match SQLite', async () => {
+      // Services normally stringify themselves; a raw object write used to leave
+      // memory holding an object while SQLite returned a string (#69).
+      const created = await provider.create('json_records', {
+        name: 'orders',
+        settings: { tier: 'small' },
+      });
+
+      expect(created.settings).toBe(JSON.stringify({ tier: 'small' }));
+
+      const found = await provider.findById<JsonRecord>('json_records', created.id);
+
+      expect(found?.settings).toBe(JSON.stringify({ tier: 'small' }));
+    });
+
+    test('leaves already-stringified JSON values alone', async () => {
+      const encoded = JSON.stringify({ tier: 'small' });
+      const created = await provider.create('json_records', {
+        name: 'orders',
+        settings: encoded,
+      });
+
+      expect(created.settings).toBe(encoded);
+    });
+  });
 });

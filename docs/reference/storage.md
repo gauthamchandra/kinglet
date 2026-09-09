@@ -4,9 +4,9 @@ The emulator supports three storage modes via the `STORAGE_TYPE` variable:
 
 - **`memory`** — Fast, ephemeral. Data is lost when the container stops. Good for CI and short-lived tests.
 - **`sqlite`** — Persistent. Data stored in a SQLite database at `SQLITE_PATH`. Survives restarts.
-- **`hybrid`** (default) — Persistent, backed by SQLite at `SQLITE_PATH`. Intended to add an LRU
-  memory cache in front of it; that cache is not wired up yet, so today `hybrid` behaves the same
-  as `sqlite`.
+- **`hybrid`** (default) — Persistent SQLite at `SQLITE_PATH` with an LRU memory cache in front.
+  Reads are served from cache when available; writes go to disk and invalidate the matching
+  cache entries. The cache budget is `CACHE_SIZE` (default 100 MB).
 
 `hybrid` is the default in every environment, including local development, so state written by
 one run is still there on the next. To start from a clean slate, delete the data directory
