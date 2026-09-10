@@ -455,6 +455,36 @@ describe('StorageManager', () => {
 
       expect(afterRollback?.age).toBe(50);
     });
+
+    test('should invalidate a phantom row cached during a rolled back transaction', async () => {
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      let phantomId = '';
+
+      const rolledBack = manager.withTransaction(async tx => {
+        const phantom = await tx.create<TestRecord>('test_records', {
+          name: 'Phantom',
+          email: 'phantom@example.com',
+          age: 60,
+          active: true,
+        });
+
+        phantomId = phantom.id;
+
+        const midTransaction = await manager.findById<TestRecord>('test_records', phantom.id);
+
+        expect(midTransaction?.name).toBe('Phantom');
+
+        throw new Error('forced rollback');
+      });
+
+      await expect(rolledBack).rejects.toThrow('forced rollback');
+
+      expect(await manager.findById<TestRecord>('test_records', phantomId)).toBeNull();
+    });
   });
 
   describe('Event system', () => {

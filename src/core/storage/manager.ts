@@ -666,14 +666,24 @@ class TransactionalStorageManager implements IStorageManager {
 
   // Delegate all operations to the provider
   async create<T extends BaseRecord>(table: string, data: Omit<T, keyof BaseRecord>): Promise<T> {
-    return await this.provider.create<T>(table, data);
+    const created = await this.provider.create<T>(table, data);
+
+    this.recordKey(`${table}:${created.id}`);
+
+    return created;
   }
 
   async createMany<T extends BaseRecord>(
     table: string,
     data: Array<Omit<T, keyof BaseRecord>>
   ): Promise<T[]> {
-    return await this.provider.createMany<T>(table, data);
+    const created = await this.provider.createMany<T>(table, data);
+
+    for (const record of created) {
+      this.recordKey(`${table}:${record.id}`);
+    }
+
+    return created;
   }
 
   async findById<T extends BaseRecord>(table: string, id: string): Promise<T | null> {
@@ -783,8 +793,12 @@ class TransactionalStorageManager implements IStorageManager {
    * transaction shares the provider's single connection, so a read that
    * interleaves with an open transaction sees — and caches — uncommitted rows;
    * clearing at both exits means such an entry cannot outlive the write it
-   * came from. Providers that manage their own cache (memory) invalidate as
-   * they go, so this is duplicated work rather than the only pass there.
+   * came from. Inserts are recorded for the same reason: a row read through
+   * the manager before a rollback leaves behind a cached record the database
+   * no longer has.
+   *
+   * Providers that manage their own cache (memory) invalidate as they go, so
+   * this is duplicated work rather than the only pass there.
    */
   async flushInvalidations(): Promise<void> {
     const cache = this.provider.getCache();
