@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/gauthamchandra/kinglet/compare/v2.3.0...v2.4.0) (2026-09-10)
+
+
+### Features
+
+* **compute:** Cloud Armor ASN, region, JA3/JA4, and SNI request headers ([#83](https://github.com/gauthamchandra/kinglet/issues/83)) ([4e08a64](https://github.com/gauthamchandra/kinglet/commit/4e08a6433841dd7ddf17976affb173f2897a7689))
+
 ## [2.3.0](https://github.com/gauthamchandra/kinglet/compare/v2.2.0...v2.3.0) (2026-09-08)
 
 
