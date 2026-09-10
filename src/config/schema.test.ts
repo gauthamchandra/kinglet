@@ -255,6 +255,55 @@ describe('Configuration Schema', () => {
     });
   });
 
+  describe('Network Security configuration', () => {
+    test('ConfigSchema enables networksecurity by default when the block is omitted', () => {
+      const config = ConfigSchema.parse({
+        server: {},
+        storage: {},
+        auth: {},
+        services: {
+          pubsub: {},
+          scheduler: {},
+          tasks: {},
+          secrets: {},
+          storage: {},
+          workflows: {},
+          kms: {},
+          cloudsql: {},
+        },
+        logging: {},
+      });
+
+      expect(config.services.networksecurity.enabled).toBe(true);
+    });
+
+    test('EnvConfigSchema parses ENABLE_NETWORKSECURITY', () => {
+      const env = EnvConfigSchema.parse({ ENABLE_NETWORKSECURITY: 'true' });
+
+      expect(env.ENABLE_NETWORKSECURITY).toBe(true);
+    });
+
+    test('mapEnvToConfig maps ENABLE_NETWORKSECURITY as an individual service flag', () => {
+      const config = mapEnvToConfig({ ENABLE_NETWORKSECURITY: true });
+
+      expect(config.services?.networksecurity?.enabled).toBe(true);
+    });
+
+    test('mapEnvToConfig maps SERVICES= so compute-only does not enable networksecurity', () => {
+      const config = mapEnvToConfig({ SERVICES: 'compute' });
+
+      expect(config.services?.compute?.enabled).toBe(true);
+      expect(config.services?.networksecurity?.enabled).toBe(false);
+    });
+
+    test('mapEnvToConfig maps SERVICES=networksecurity independently of compute', () => {
+      const config = mapEnvToConfig({ SERVICES: 'networksecurity' });
+
+      expect(config.services?.networksecurity?.enabled).toBe(true);
+      expect(config.services?.compute?.enabled).toBe(false);
+    });
+  });
+
   describe('Cloud SQL configuration', () => {
     test('ConfigSchema applies cloudsql data-plane defaults when the block is omitted', () => {
       const config = ConfigSchema.parse({

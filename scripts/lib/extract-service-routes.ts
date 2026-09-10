@@ -10,6 +10,7 @@ import { CloudSqlService } from '@/services/cloudsql/index.ts';
 import { ComputeService } from '@/services/compute/index.ts';
 import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
+import { NetworkSecurityService } from '@/services/networksecurity/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
@@ -43,6 +44,7 @@ const SERVICE_FACTORIES: Record<string, ServiceFactory> = {
   'cloud-storage': (storage, logger) => new CloudStorageService(storage, logger),
   'cloud-tasks': (storage, logger) => new CloudTasksService(storage, logger),
   memorystore: (storage, logger) => new MemorystoreService(storage, logger, { enabled: false }),
+  networksecurity: (storage, logger) => new NetworkSecurityService(storage, logger),
   pubsub: (storage, logger) => new PubSubService(storage, logger),
   workflows: (storage, logger) => new CloudWorkflowsService(storage, logger),
 };
@@ -57,6 +59,7 @@ const USES_SHARED_V1_LOCATIONS = new Set([
   'cloud-scheduler',
   'cloud-sql',
   'memorystore',
+  'networksecurity',
   'pubsub',
   'workflows',
 ]);

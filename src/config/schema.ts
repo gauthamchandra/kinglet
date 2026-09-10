@@ -135,6 +135,7 @@ const ServicesConfigSchema = z.object({
       defaultPolicy: z.string().optional(),
     })
     .prefault({}),
+  networksecurity: z.object({ enabled: z.boolean().default(true) }).prefault({}),
 });
 
 // Logging configuration schema
@@ -279,6 +280,10 @@ export const EnvConfigSchema = z.object({
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
+  ENABLE_NETWORKSECURITY: z
+    .string()
+    .transform(val => val.toLowerCase() === 'true')
+    .optional(),
   COMPUTE_LISTENER_PORT: z
     .string()
     .transform(Number)
@@ -372,7 +377,8 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.ENABLE_COMPUTE !== undefined ||
     env.COMPUTE_LISTENER_PORT !== undefined ||
     env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined ||
-    env.COMPUTE_LISTENER_BIND !== undefined;
+    env.COMPUTE_LISTENER_BIND !== undefined ||
+    env.ENABLE_NETWORKSECURITY !== undefined;
 
   if (hasServiceConfig) {
     config.services = {};
@@ -391,6 +397,9 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       config.services.alloydb = { enabled: enabledServices.includes('alloydb') };
       config.services.cloudsql = { enabled: enabledServices.includes('cloudsql') };
       config.services.compute = { enabled: enabledServices.includes('compute') };
+      config.services.networksecurity = {
+        enabled: enabledServices.includes('networksecurity'),
+      };
     }
 
     if (env.ENABLE_PUBSUB !== undefined) {
@@ -531,6 +540,11 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.COMPUTE_LISTENER_BIND !== undefined) {
       if (!config.services.compute) config.services.compute = {};
       config.services.compute.listenerBind = env.COMPUTE_LISTENER_BIND;
+    }
+
+    if (env.ENABLE_NETWORKSECURITY !== undefined) {
+      if (!config.services.networksecurity) config.services.networksecurity = {};
+      config.services.networksecurity.enabled = env.ENABLE_NETWORKSECURITY;
     }
   }
 

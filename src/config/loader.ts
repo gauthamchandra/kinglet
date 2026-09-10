@@ -131,6 +131,7 @@ export class ConfigLoader {
         alloydb: {},
         cloudsql: {},
         compute: {},
+        networksecurity: {},
         ...mergedConfig.services,
       },
     };
@@ -251,6 +252,7 @@ export async function loadConfigFromEnv(
       alloydb: {},
       cloudsql: {},
       compute: {},
+      networksecurity: {},
       ...partialConfig.services,
     },
   };

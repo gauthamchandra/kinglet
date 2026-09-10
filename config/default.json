@@ -25,7 +25,8 @@
     "secrets": { "enabled": true },
     "kms": { "enabled": true },
     "memorystore": { "enabled": true },
-    "cloudsql": { "enabled": true }
+    "cloudsql": { "enabled": true },
+    "networksecurity": { "enabled": true }
   },
   "logging": {
     "level": "info",

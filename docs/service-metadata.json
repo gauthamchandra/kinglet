@@ -54,6 +54,11 @@
       "status": "experimental",
       "dataPlane": "Emulated in-process",
       "summary": "Cloud Armor security policies and global operations with an in-process CEL evaluation listener."
+    },
+    "networksecurity": {
+      "status": "experimental",
+      "dataPlane": "Emulated in-process",
+      "summary": "Project-scoped address groups (CRUD + LROs). Organization collections, IAM, addItems/removeItems/cloneItems, and listReferences are unregistered. Cloud Armor evaluateAddressGroup() still always returns false."
     }
   }
 }

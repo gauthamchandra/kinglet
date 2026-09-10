@@ -62,6 +62,12 @@ export const TERRAFORM_VALIDATION_CASES = [
     services: ['compute'],
     targets: ['google_compute_security_policy.example'],
   },
+  {
+    id: 'address-group',
+    description: 'Network Security address group with CLOUD_ARMOR purpose',
+    services: ['networksecurity'],
+    targets: ['google_network_security_address_group.cloud_armor'],
+  },
 ] as const satisfies readonly TerraformValidationCase[];
 
 export type TerraformValidationCaseId = (typeof TERRAFORM_VALIDATION_CASES)[number]['id'];

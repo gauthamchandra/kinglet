@@ -21,6 +21,7 @@ import { CloudSqlService } from '@/services/cloudsql/index.ts';
 import { ComputeService } from '@/services/compute/index.ts';
 import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
+import { NetworkSecurityService } from '@/services/networksecurity/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
@@ -42,6 +43,7 @@ let alloydbService: AlloyDbService | null = null;
 let kmsService: CloudKmsService | null = null;
 let cloudSqlService: CloudSqlService | null = null;
 let computeService: ComputeService | null = null;
+let networkSecurityService: NetworkSecurityService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -216,7 +218,18 @@ async function main(): Promise<void> {
       logger.info('Compute (Cloud Armor) control plane enabled');
     }
 
-    // Workflows, Memorystore and AlloyDB all expose `/operations` routes of the same
+    if (config.services.networksecurity.enabled) {
+      networkSecurityService = new NetworkSecurityService(
+        storageManager,
+        new Logger('NetworkSecurity')
+      );
+      await networkSecurityService.initialize();
+
+      networkSecurityService.start();
+      logger.info('Network Security service enabled');
+    }
+
+    // Workflows, Memorystore, AlloyDB and Network Security all expose `/operations` routes of the same
     // shape (see docs/adrs/007-memorystore-valkey-data-plane.md). A composed route set
     // queries every store, so an LRO is retrievable regardless of which service
     // created it, and each service's own copy is then dropped below — one owner per
@@ -233,6 +246,10 @@ async function main(): Promise<void> {
 
     if (alloydbService) {
       composableOperationsStores.push(alloydbService.getComposableOperationsStore());
+    }
+
+    if (networkSecurityService) {
+      composableOperationsStores.push(networkSecurityService.getComposableOperationsStore());
     }
 
     const composedOperationsRegistered = composableOperationsStores.length > 1;
@@ -268,6 +285,10 @@ async function main(): Promise<void> {
 
     if (alloydbService) {
       registerServiceRoutes(alloydbService.getRoutes());
+    }
+
+    if (networkSecurityService) {
+      registerServiceRoutes(networkSecurityService.getRoutes());
     }
 
     server = Bun.serve({
@@ -315,6 +336,7 @@ async function main(): Promise<void> {
     await alloydbService?.stop();
     await cloudSqlService?.stop();
     await computeService?.stop();
+    await networkSecurityService?.stop();
     process.exit(1);
   }
 }
@@ -395,6 +417,11 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     if (computeService) {
       await computeService.stop();
       logger.info('Compute service stopped');
+    }
+
+    if (networkSecurityService) {
+      await networkSecurityService.stop();
+      logger.info('Network Security service stopped');
     }
 
     if (storageManager) {
