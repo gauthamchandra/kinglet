@@ -1,19 +1,20 @@
 /**
  * End-to-End Test: Network Security address groups
  *
- * Black-box HTTP against a running emulator. Address groups are
- * `google.longrunning.Operation` RPCs; terraform's waiter GETs the operation
- * name against the `/v1/` custom endpoint, so that poll is part of this suite.
+ * Two black-box paths against a running emulator:
+ *   1. Raw HTTP (create LRO, terraform-style operation GET, GET/list/patch/delete)
+ *   2. The official @google-cloud/network-security client over REST
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { protos, v1 } from '@google-cloud/network-security';
 import type { Server } from 'bun';
 import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { NetworkSecurityService } from '@/services/networksecurity/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
-import { buildProductionRouter } from './e2e-helpers.ts';
+import { buildProductionRouter, createFakeAuth } from './e2e-helpers.ts';
 
 let emulatorServer: Server;
 let emulatorPort: number;
@@ -161,6 +162,21 @@ describe('Network Security E2E: Raw HTTP API', () => {
     expect(error.message).toContain('addressGroupId');
   });
 
+  test('6b. create with an invalid CIDR prefix is 400', async () => {
+    const response = await postJson(`${collection}?addressGroupId=bad-cidr`, {
+      type: 'IPV4',
+      capacity: 10,
+      items: ['198.51.100.10/99'],
+    });
+
+    expect(response.status).toBe(400);
+
+    const { error } = await response.json();
+
+    expect(error.status).toBe('INVALID_ARGUMENT');
+    expect(error.message).toContain('198.51.100.10/99');
+  });
+
   test('7. PATCH items returns a done operation', async () => {
     const response = await patchJson(`${resource}?updateMask=items`, {
       items: ['203.0.113.0/24', '198.51.100.10'],
@@ -189,5 +205,116 @@ describe('Network Security E2E: Raw HTTP API', () => {
     const response = await fetch(url(resource));
 
     expect(response.status).toBe(404);
+  });
+});
+
+describe('Network Security E2E: Client Library', () => {
+  const project = 'client-project';
+  const location = 'global';
+  const groupId = 'armor-allowlist';
+  const parent = `projects/${project}/locations/${location}`;
+  const name = `${parent}/addressGroups/${groupId}`;
+
+  /**
+   * Enum decoding differs by response path, so the assertions below
+   * deliberately differ too:
+   *
+   * - A resource unwrapped from an LRO (`operation.promise()`) keeps proto
+   *   enum numbers — `type` is 1.
+   * - A resource returned directly from a unary call (`getAddressGroup`) is
+   *   decoded with string enums — `type` is `'IPV4'`.
+   *
+   * Both happen identically against real GCP: the emulator sends the enum name
+   * on the wire either way, which the raw-HTTP suite above asserts.
+   */
+  const nsProtos = protos.google.cloud.networksecurity.v1;
+
+  let client: InstanceType<typeof v1.AddressGroupServiceClient>;
+
+  beforeAll(() => {
+    client = new v1.AddressGroupServiceClient({
+      fallback: 'rest',
+      apiEndpoint: 'localhost',
+      port: emulatorPort,
+      protocol: 'http',
+      auth: createFakeAuth(project) as never,
+    });
+  });
+
+  test('1. Create an address group via the client library', async () => {
+    const [operation] = await client.createAddressGroup({
+      parent,
+      addressGroupId: groupId,
+      addressGroup: {
+        type: 'IPV4',
+        capacity: 100,
+        description: 'via google-cloud client',
+        items: ['198.51.100.0/24'],
+        purpose: ['CLOUD_ARMOR'],
+      },
+    });
+
+    const [group] = await operation.promise();
+
+    expect(group.name).toBe(name);
+    expect(group.type).toBe(nsProtos.AddressGroup.Type.IPV4);
+    expect(group.capacity).toBe(100);
+    expect(group.items).toEqual(['198.51.100.0/24']);
+    expect(group.purpose).toEqual([nsProtos.AddressGroup.Purpose.CLOUD_ARMOR]);
+    expect(group.description).toBe('via google-cloud client');
+  });
+
+  test('2. Get the address group via the client library', async () => {
+    const [group] = await client.getAddressGroup({ name });
+
+    expect(group.name).toBe(name);
+    expect(group.type).toBe('IPV4');
+    expect(group.items).toEqual(['198.51.100.0/24']);
+    expect(group.purpose).toEqual(['CLOUD_ARMOR']);
+  });
+
+  test('3. List address groups via the client library', async () => {
+    const [groups] = await client.listAddressGroups({ parent });
+
+    expect(groups.map(group => group.name)).toContain(name);
+  });
+
+  test('4. Patch items through updateMask via the client library', async () => {
+    const [operation] = await client.updateAddressGroup({
+      addressGroup: {
+        name,
+        items: ['198.51.100.0/24', '203.0.113.0/24'],
+        description: 'should not apply',
+      },
+      updateMask: { paths: ['items'] },
+    });
+
+    const [updated] = await operation.promise();
+
+    expect(updated.items).toEqual(['198.51.100.0/24', '203.0.113.0/24']);
+    expect(updated.description).toBe('via google-cloud client');
+  });
+
+  test('5. Create with an invalid CIDR prefix is rejected', async () => {
+    const promise = client.createAddressGroup({
+      parent,
+      addressGroupId: 'bad-cidr',
+      addressGroup: {
+        type: 'IPV4',
+        capacity: 10,
+        items: ['198.51.100.10/99'],
+      },
+    });
+
+    await expect(promise).rejects.toThrow();
+  });
+
+  test('6. Delete the address group via the client library', async () => {
+    const [operation] = await client.deleteAddressGroup({ name });
+    const [empty] = await operation.promise();
+
+    expect(empty).toEqual({});
+
+    await expect(client.getAddressGroup({ name })).rejects.toThrow();
   });
 });
