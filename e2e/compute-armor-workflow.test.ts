@@ -9,6 +9,15 @@
  *   5. Invalid X-Kinglet-Origin-IP → 400, no evaluate
  *   6. Kinglet origin header is stripped from CEL
  *   7. GCLB-style XFF append
+ *   8. ASN / region overrides match CEL attributes
+ *   9. Invalid X-Kinglet-Origin-ASN → 400
+ *  10. Kinglet ASN / region headers are stripped from CEL
+ *  11. JA3 override matches origin.tls_ja3_fingerprint
+ *  12. Invalid X-Kinglet-Origin-JA3 → 400
+ *  13. Kinglet JA3 header is stripped from CEL
+ *  14. SNI throttle is per X-Kinglet-Origin-SNI
+ *  15. Invalid X-Kinglet-Origin-SNI → 400
+ *  16. Kinglet SNI header is stripped from CEL
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -94,10 +103,72 @@ describe('Cloud Armor E2E: Security Policy CRUD', () => {
           description: 'Must never match: the listener strips this header before CEL',
         },
         {
+          priority: 51,
+          action: 'deny(403)',
+          match: {
+            expr: { expression: "has(request.headers['x-kinglet-origin-asn'])" },
+          },
+          description: 'Must never match: the listener strips this header before CEL',
+        },
+        {
+          priority: 52,
+          action: 'deny(403)',
+          match: {
+            expr: { expression: "has(request.headers['x-kinglet-origin-region-code'])" },
+          },
+          description: 'Must never match: the listener strips this header before CEL',
+        },
+        {
+          priority: 53,
+          action: 'deny(403)',
+          match: {
+            expr: { expression: "has(request.headers['x-kinglet-origin-ja3'])" },
+          },
+          description: 'Must never match: the listener strips this header before CEL',
+        },
+        {
+          priority: 54,
+          action: 'deny(403)',
+          match: {
+            expr: { expression: "has(request.headers['x-kinglet-origin-sni'])" },
+          },
+          description: 'Must never match: the listener strips this header before CEL',
+        },
+        {
           priority: 1000,
           action: 'deny(403)',
           match: { expr: { expression: "request.path.startsWith('/admin')" } },
           description: 'Block /admin',
+        },
+        {
+          priority: 2000,
+          action: 'deny(403)',
+          match: {
+            expr: { expression: "origin.asn == 15169 && origin.region_code == 'US'" },
+          },
+          description: 'Block advertised Google ASN from US',
+        },
+        {
+          priority: 2100,
+          action: 'deny(403)',
+          match: {
+            expr: {
+              expression: "origin.tls_ja3_fingerprint == 'e7d705a3286e19ea42f587a344ee6862'",
+            },
+          },
+          description: 'Block a known JA3 fingerprint',
+        },
+        {
+          priority: 2200,
+          action: 'throttle',
+          match: { expr: { expression: "request.path.startsWith('/sni-limited')" } },
+          description: 'Throttle /sni-limited per SNI',
+          rateLimitOptions: {
+            conformAction: 'allow',
+            exceedAction: 'deny(429)',
+            enforceOnKey: 'SNI',
+            rateLimitThreshold: { count: 1, intervalSec: 60 },
+          },
         },
       ],
     });
@@ -204,6 +275,134 @@ describe('Cloud Armor E2E: Listener evaluation', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+  });
+
+  test('8. ASN and region overrides match origin.asn / origin.region_code', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Origin-ASN': '15169',
+        'X-Kinglet-Origin-Region-Code': 'us',
+      },
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('deny(403)');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2000');
+  });
+
+  test('9. Invalid X-Kinglet-Origin-ASN → 400, no evaluate', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Origin-ASN': 'not-an-asn',
+      },
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('10. Kinglet ASN and region headers are stripped from CEL', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Origin-ASN': '1',
+        'X-Kinglet-Origin-Region-Code': 'AU',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2147483647');
+  });
+
+  test('11. JA3 override matches origin.tls_ja3_fingerprint', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Origin-JA3': 'e7d705a3286e19ea42f587a344ee6862',
+      },
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('deny(403)');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2100');
+  });
+
+  test('12. Invalid X-Kinglet-Origin-JA3 → 400, no evaluate', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Origin-JA3': 'not-a-ja3',
+      },
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('13. Kinglet JA3 header is stripped from CEL', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Origin-JA3': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2147483647');
+  });
+
+  test('14. SNI throttle is sequential and per X-Kinglet-Origin-SNI', async () => {
+    const first = await fetch(listenerUrl('/sni-limited'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.50',
+        'X-Kinglet-Origin-SNI': 'cdn.example.com',
+      },
+    });
+    const second = await fetch(listenerUrl('/sni-limited'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.50',
+        'X-Kinglet-Origin-SNI': 'cdn.example.com',
+      },
+    });
+    const other = await fetch(listenerUrl('/sni-limited'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.51',
+        'X-Kinglet-Origin-SNI': 'other.example.com',
+      },
+    });
+
+    expect(first.status).toBe(200);
+    expect(first.headers.get('x-kinglet-enforced-priority')).toBe('2200');
+    expect(second.status).toBe(429);
+    expect(second.headers.get('x-kinglet-enforced-action')).toBe('deny(429)');
+    expect(other.status).toBe(200);
+    expect(other.headers.get('x-kinglet-enforced-priority')).toBe('2200');
+  });
+
+  test('15. Invalid X-Kinglet-Origin-SNI → 400, no evaluate', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Origin-SNI': 'not a host',
+      },
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('16. Kinglet SNI header is stripped from CEL', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Origin-SNI': 'cdn.example.com',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2147483647');
   });
 });
 

@@ -20,6 +20,7 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [011](011-terraform-validation-harness.md) | Terraform Validation Harness | Accepted |
 | [012](012-cloud-armor-emulation.md) | Cloud Armor Security Policy Emulation | Proposed |
 | [013](013-cloudsql-pglite-data-plane.md) | Cloud SQL Data Plane on PGlite | Accepted |
+| [014](014-cloud-armor-asn-region-headers.md) | Cloud Armor ASN, Region, TLS Fingerprint, and SNI Request Headers (addendum to 012) | Proposed |
 
 ## A note on the project's former name
 

@@ -168,6 +168,67 @@ export const ARMOR_EVALUATION_CASES: readonly ArmorEvaluationCase[] = [
     expectAction: 'deny(502)',
     expectPriority: '1400',
   },
+  {
+    name: 'ASN and region deny',
+    path: '/public',
+    originIp: '203.0.113.10',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Origin-ASN': '15169',
+      'X-Kinglet-Origin-Region-Code': 'US',
+    },
+    expectStatus: 403,
+    expectAction: 'deny(403)',
+    expectPriority: '1500',
+  },
+  {
+    name: 'JA3 fingerprint deny',
+    path: '/public',
+    originIp: '203.0.113.10',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Origin-JA3': 'e7d705a3286e19ea42f587a344ee6862',
+    },
+    expectStatus: 403,
+    expectAction: 'deny(403)',
+    expectPriority: '1600',
+  },
+  {
+    name: 'SNI throttle first request conforms',
+    path: '/sni-limited',
+    originIp: '203.0.113.50',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Origin-SNI': 'cdn.example.com',
+    },
+    expectStatus: 200,
+    expectAction: 'allow',
+    expectPriority: '1700',
+  },
+  {
+    name: 'SNI throttle second request exceeds',
+    path: '/sni-limited',
+    originIp: '203.0.113.50',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Origin-SNI': 'cdn.example.com',
+    },
+    expectStatus: 429,
+    expectAction: 'deny(429)',
+    expectPriority: '1700',
+  },
+  {
+    name: 'SNI throttle other SNI does not share the bucket',
+    path: '/sni-limited',
+    originIp: '203.0.113.51',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Origin-SNI': 'other.example.com',
+    },
+    expectStatus: 200,
+    expectAction: 'allow',
+    expectPriority: '1700',
+  },
 ];
 
 export async function runArmorEvaluationCases(
