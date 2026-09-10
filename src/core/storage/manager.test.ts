@@ -391,6 +391,70 @@ describe('StorageManager', () => {
 
       expect(await manager.findById<TestRecord>('test_records', created.id)).toBeNull();
     });
+
+    test('should invalidate a bulk update that changes the field it filters on', async () => {
+      // Resolving the affected ids after the write finds nothing, because the
+      // rows no longer match the filter that selected them.
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
+        name: 'Self Filtering',
+        email: 'self-filtering@example.com',
+        age: 40,
+        active: true,
+      });
+      const filter: QueryFilter = {
+        conditions: [{ field: 'age', operator: 'eq', value: 40 }],
+      };
+
+      await manager.findById<TestRecord>('test_records', created.id);
+
+      await manager.withTransaction(async tx => {
+        await tx.updateMany<TestRecord>('test_records', filter, { age: 41 });
+      });
+
+      const afterUpdate = await manager.findById<TestRecord>('test_records', created.id);
+
+      expect(afterUpdate?.age).toBe(41);
+    });
+
+    test('should invalidate uncommitted values cached during a rolled back transaction', async () => {
+      // Transactions share the provider's single connection, so a read that
+      // interleaves with one sees — and caches — uncommitted rows. Clearing
+      // only on the way in leaves that entry behind once the write is undone.
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
+        name: 'Rollback',
+        email: 'rollback@example.com',
+        age: 50,
+        active: true,
+      });
+
+      const rolledBack = manager.withTransaction(async tx => {
+        await tx.updateById<TestRecord>('test_records', created.id, { age: 51 });
+
+        // Stands in for an unrelated caller reading through the manager while
+        // the transaction is open.
+        const midTransaction = await manager.findById<TestRecord>('test_records', created.id);
+
+        expect(midTransaction?.age).toBe(51);
+
+        throw new Error('forced rollback');
+      });
+
+      await expect(rolledBack).rejects.toThrow('forced rollback');
+
+      const afterRollback = await manager.findById<TestRecord>('test_records', created.id);
+
+      expect(afterRollback?.age).toBe(50);
+    });
   });
 
   describe('Event system', () => {
