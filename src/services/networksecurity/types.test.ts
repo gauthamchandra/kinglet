@@ -74,6 +74,12 @@ describe('itemMatchesType', () => {
     expect(itemMatchesType('2001:db8::/32', 'IPV6')).toBe(true);
     expect(itemMatchesType('198.51.100.10', 'IPV6')).toBe(false);
   });
+
+  test('rejects CIDRs with an invalid prefix', () => {
+    expect(itemMatchesType('198.51.100.10/99', 'IPV4')).toBe(false);
+    expect(itemMatchesType('10.0.0.0/abc', 'IPV4')).toBe(false);
+    expect(itemMatchesType('2001:db8::/129', 'IPV6')).toBe(false);
+  });
 });
 
 describe('addressGroupRequestToRecord', () => {
@@ -110,7 +116,7 @@ describe('addressGroupRequestToRecord', () => {
       addressGroupRequestToRecord('projects/p/locations/global/addressGroups/g', {
         type: 'IPV4',
         capacity: 10,
-        items: ['2001:db8::1'],
+        items: ['198.51.100.0/99'],
       })
     ).toThrow(/not a valid IPV4/);
   });

@@ -10,7 +10,7 @@
 import type { RouteResponse } from '@/core/gateway/request-router.ts';
 import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import type { BaseRecord, TableSchema } from '@/core/storage/types.ts';
-import { isValidCidr, isValidIp } from '@/services/compute/armor/request.ts';
+import { isValidCidr } from '@/services/compute/armor/request.ts';
 
 export const NETWORKSECURITY_ADDRESS_GROUPS_TABLE = 'networksecurity_address_groups';
 export const NETWORKSECURITY_OPERATIONS_TABLE = 'networksecurity_operations';
@@ -318,7 +318,7 @@ export function itemMatchesType(item: string, type: AddressGroupType): boolean {
   const address = slash === -1 ? item : item.substring(0, slash);
   const range = slash === -1 ? `${address}/${type === AddressGroupType.IPV4 ? 32 : 128}` : item;
 
-  if (!isValidIp(address) && !isValidCidr(range)) {
+  if (!isValidCidr(range)) {
     return false;
   }
 

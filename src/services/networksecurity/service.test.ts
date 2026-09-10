@@ -61,6 +61,30 @@ describe('AddressGroupService', () => {
     await expect(promise).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
   });
 
+  // Serialized on the group name: without the lock both creates pass the
+  // existence check and the loser trips the repository's plain-Error guard, which
+  // surfaces as 500 rather than a clean ALREADY_EXISTS.
+  test('create given concurrent same-id creates: one succeeds, one ALREADY_EXISTS', async () => {
+    const results = await Promise.allSettled([
+      service.createAddressGroup(PROJECT, LOCATION, 'g', { type: 'IPV4', capacity: 10 }),
+      service.createAddressGroup(PROJECT, LOCATION, 'g', { type: 'IPV4', capacity: 10 }),
+    ]);
+
+    const fulfilled = results.filter(result => result.status === 'fulfilled');
+    const rejected = results.filter(result => result.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+
+    const reason = (rejected[0] as PromiseRejectedResult).reason;
+
+    expect(reason).toHaveProperty('code', 'ALREADY_EXISTS');
+
+    const listed = await service.listAddressGroups(PROJECT, LOCATION);
+
+    expect(listed.addressGroups).toHaveLength(1);
+  });
+
   test('get, list, patch items, and delete round-trip', async () => {
     await service.createAddressGroup(PROJECT, LOCATION, 'g', {
       type: 'IPV4',
