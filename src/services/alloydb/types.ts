@@ -14,6 +14,7 @@
 import type { RouteResponse } from '@/core/gateway/request-router.ts';
 import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import type { BaseRecord, TableSchema } from '@/core/storage/types.ts';
+import { ADVERTISED_HOST } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 
 // ── Table Constants ──
 
@@ -168,14 +169,8 @@ export function normalizeEnum(value: unknown, byNumber: EnumNumberMap): unknown 
   return value;
 }
 
-/**
- * The address reported by `Instance.ipAddress` and `ConnectionInfo.ipAddress`.
- *
- * <p>Deliberately loopback rather than a plausible `10.x` private IP: this
- * release has no data plane, so nothing is listening. A realistic-looking
- * private address would invite someone to try connecting to it.
- */
-const PLACEHOLDER_IP_ADDRESS = '127.0.0.1';
+/** The only database an emulated instance has — AlloyDB has no databases API. */
+export const DEFAULT_DATABASE_NAME = 'postgres';
 
 // ── Error Class ──
 
@@ -184,7 +179,8 @@ export type AlloyDbErrorCode =
   | 'ALREADY_EXISTS'
   | 'INVALID_ARGUMENT'
   | 'FAILED_PRECONDITION'
-  | 'ABORTED';
+  | 'ABORTED'
+  | 'INTERNAL';
 
 export class AlloyDbError extends Error {
   readonly code: AlloyDbErrorCode;
@@ -234,6 +230,8 @@ export function handleAlloyDbError(
         return responseUtils.failedPrecondition(err.message);
       case 'ABORTED':
         return responseUtils.aborted(err.message);
+      case 'INTERNAL':
+        return responseUtils.internalError(err.message);
     }
   }
 
@@ -311,6 +309,16 @@ export function isValidInstanceId(instanceId: string): boolean {
   return INSTANCE_ID_PATTERN.test(instanceId);
 }
 
+/**
+ * The discovery document gives user ids no pattern — they become PostgreSQL role
+ * names, which are permissive — so validation is limited to what would genuinely
+ * break: an empty id, or one containing the separator that delimits resource
+ * names.
+ */
+export function isValidUserId(userId: string): boolean {
+  return userId.length > 0 && !userId.includes('/');
+}
+
 // ── Mutable Field Sets ──
 
 /**
@@ -371,16 +379,16 @@ export const MUTABLE_USER_FIELDS: ReadonlySet<string> = new Set([
 /**
  * Writable fields the emulator keeps in a real column, so they must not also be
  * mirrored into `spec` — two homes for one field is two chances to disagree.
- * `initialUser` is here because only its username is persisted, never the
- * password it carries.
+ * `initialUser` is here because only its username is persisted on the cluster
+ * row; the password is stored on the matching User row for data-plane auth.
  */
 const COLUMNED_CLUSTER_FIELDS: ReadonlySet<string> = new Set(['initialUser']);
 const COLUMNED_INSTANCE_FIELDS: ReadonlySet<string> = new Set(['instanceType']);
 
 /**
  * `password` and `keepExtraRoles` are input-only in the discovery document, so
- * they are dropped rather than stored — the emulator must never be able to
- * return a password it was handed.
+ * they must never appear in API responses. `password` is still persisted in its
+ * own column so the data plane can authenticate connections (ADR-013).
  */
 const COLUMNED_USER_FIELDS: ReadonlySet<string> = new Set([
   'userType',
@@ -418,6 +426,11 @@ export interface InstanceRecord extends BaseRecord {
 export interface UserRecord extends BaseRecord {
   name: string;
   userType: string;
+  /**
+   * Cleartext password for data-plane auth. Never serialized into API
+   * responses — `User.password` is input-only in the discovery document.
+   */
+  password: string;
   spec: string; // JSON-serialized writable fields without a column of their own
 }
 
@@ -497,6 +510,10 @@ export const userTableSchema: TableSchema = {
   columns: [
     { name: 'name', type: 'string', unique: true },
     { name: 'userType', type: 'string' },
+    // defaultValue is required for ADR-010 additive sync: existing AlloyDB
+    // installs already have user rows, and SQLite refuses ADD COLUMN … NOT NULL
+    // without a default. Empty string matches "no password required".
+    { name: 'password', type: 'string', defaultValue: '' },
     { name: 'spec', type: 'json' },
   ],
   indexes: [{ name: 'idx_alloydb_users_name', columns: ['name'], unique: true }],
@@ -564,18 +581,85 @@ export const INSTANCE_SPEC_ENUM_FIELDS = INSTANCE_ENUM_FIELDS;
 export const USER_SPEC_ENUM_FIELDS = USER_ENUM_FIELDS;
 
 /**
- * Read the username out of a `Cluster.initialUser`, ignoring the password it
- * carries. Shared with the PATCH path so the secret is dropped in exactly one
- * place.
+ * Read `Cluster.initialUser` into its username and password, or nulls when
+ * absent. Shared by create (which needs both) and the cluster-row PATCH path
+ * (which only persists the username).
  */
-export function readInitialUsername(body: Record<string, unknown>): string | null {
+export function readInitialUser(body: Record<string, unknown>): {
+  username: string | null;
+  password: string | null;
+} {
   const initialUser = body.initialUser;
 
-  if (initialUser === null || typeof initialUser !== 'object') return null;
+  if (initialUser === null || typeof initialUser !== 'object') {
+    return { username: null, password: null };
+  }
 
-  const user = (initialUser as Record<string, unknown>).user;
+  const record = initialUser as Record<string, unknown>;
+  const user = record.user;
+  const password = record.password;
 
-  return typeof user === 'string' && user.length > 0 ? user : null;
+  return {
+    username: typeof user === 'string' && user.length > 0 ? user : null,
+    password: typeof password === 'string' ? password : null,
+  };
+}
+
+/**
+ * Instance key the shared data plane uses for one AlloyDB instance.
+ *
+ * <p>AlloyDB nests location/cluster/instance under a project; the shared
+ * manager only takes `(project, instance)`, so the three nested segments are
+ * encoded into the instance string. Slashes are fine — the manager splits on
+ * the first slash only.
+ */
+export function buildDataPlaneInstanceKey(
+  location: string,
+  clusterId: string,
+  instanceId: string
+): string {
+  return `${location}/${clusterId}/${instanceId}`;
+}
+
+/**
+ * Inverse of {@link buildDataPlaneInstanceKey}, or null when the key does not
+ * have exactly the three segments that function produces.
+ */
+export function parseDataPlaneInstanceKey(
+  key: string
+): { location: string; clusterId: string; instanceId: string } | null {
+  const segments = key.split('/');
+
+  if (segments.length !== 3) return null;
+
+  const [location = '', clusterId = '', instanceId = ''] = segments;
+
+  return { location, clusterId, instanceId };
+}
+
+/**
+ * Parse an AlloyDB instance resource name into its path segments.
+ *
+ * <p>Returns null when the name does not match
+ * `projects/{p}/locations/{l}/clusters/{c}/instances/{i}`.
+ */
+export function parseInstanceName(name: string): {
+  project: string;
+  location: string;
+  clusterId: string;
+  instanceId: string;
+} | null {
+  const match =
+    /^projects\/([^/]+)\/locations\/([^/]+)\/clusters\/([^/]+)\/instances\/([^/]+)$/.exec(name);
+
+  if (!match) return null;
+
+  return {
+    project: match[1] ?? '',
+    location: match[2] ?? '',
+    clusterId: match[3] ?? '',
+    instanceId: match[4] ?? '',
+  };
 }
 
 export function clusterRequestToRecord(
@@ -599,7 +683,7 @@ export function clusterRequestToRecord(
     // CREATING — it is READY by the time the caller sees the Operation.
     state: ClusterState.READY,
     clusterType: ClusterType.PRIMARY,
-    initialUserName: readInitialUsername(body),
+    initialUserName: readInitialUser(body).username,
     reconciling: 0,
     createTime: now,
     updateTime: now,
@@ -655,7 +739,7 @@ export function instanceRecordToResponse(
     uid: record.uid,
     state: record.state,
     instanceType: record.instanceType,
-    ipAddress: PLACEHOLDER_IP_ADDRESS,
+    ipAddress: ADVERTISED_HOST,
     reconciling: record.reconciling === 1,
     createTime: record.createTime,
     updateTime: record.updateTime,
@@ -668,7 +752,7 @@ export function buildConnectionInfo(
 ): ConnectionInfo {
   return {
     name: `${record.name}${CONNECTION_INFO_SUFFIX}`,
-    ipAddress: PLACEHOLDER_IP_ADDRESS,
+    ipAddress: ADVERTISED_HOST,
     instanceUid: record.uid,
   };
 }
@@ -678,10 +762,12 @@ export function userRequestToRecord(
   body: Record<string, unknown>
 ): Omit<UserRecord, keyof BaseRecord> {
   const requestedType = normalizeEnum(body.userType, USER_TYPE_ENUM);
+  const password = typeof body.password === 'string' ? body.password : '';
 
   return {
     name,
     userType: typeof requestedType === 'string' ? requestedType : UserType.ALLOYDB_BUILT_IN,
+    password,
     spec: JSON.stringify(
       pickSpecFields(body, MUTABLE_USER_FIELDS, COLUMNED_USER_FIELDS, USER_ENUM_FIELDS)
     ),

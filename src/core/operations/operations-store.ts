@@ -38,6 +38,12 @@ export interface OperationResponse {
   error?: Record<string, unknown>;
 }
 
+/** `google.rpc.Status` as an LRO carries it — the error arm of its result oneof. */
+export interface OperationError {
+  code: number;
+  message: string;
+}
+
 export interface OperationRecord extends BaseRecord {
   name: string;
   metadata: string; // JSON-serialized OperationMetadata
@@ -150,6 +156,37 @@ export class OperationsStore {
   }
 
   /**
+   * Record a mutation that was accepted but then failed to complete.
+   *
+   * <p>Real GCP reports a provisioning failure on the operation, not on the call
+   * that started it: the call still returns 200 with an Operation, which ends
+   * `done` carrying `error` (google.rpc.Status) and no `response`. A client
+   * library's LRO therefore rejects, rather than its request seeing a transport
+   * error it was never written to expect.
+   */
+  async createFailedOperation(
+    project: string,
+    location: string,
+    target: string,
+    verb: string,
+    resourceType: string,
+    error: OperationError
+  ): Promise<OperationResponse> {
+    const data = this.buildOperationRow(
+      project,
+      location,
+      target,
+      verb,
+      resourceType,
+      undefined,
+      error
+    );
+    const record = await this.storage.create<OperationRecord>(this.config.tableName, data);
+
+    return operationRecordToResponse(record);
+  }
+
+  /**
    * Build the operation a mutation *would* have produced, without storing it.
    *
    * <p>For `validateOnly` requests. The method still has to answer with an
@@ -181,7 +218,8 @@ export class OperationsStore {
     target: string,
     verb: string,
     resourceType: string,
-    response?: Record<string, unknown>
+    response?: Record<string, unknown>,
+    error?: OperationError
   ): Omit<OperationRecord, keyof BaseRecord> {
     const now = new Date().toISOString();
 
@@ -198,14 +236,16 @@ export class OperationsStore {
       name: buildOperationName(project, location, crypto.randomUUID()),
       metadata: JSON.stringify(metadata),
       done: 1,
+      // `response` and `error` are the two arms of the LRO result oneof; a failed
+      // operation carries only the latter.
       response:
-        response === undefined
+        response === undefined || error !== undefined
           ? null
           : JSON.stringify({
               '@type': `type.googleapis.com/${this.config.apiTypePrefix}.${resourceType}`,
               ...response,
             }),
-      error: null,
+      error: error === undefined ? null : JSON.stringify(error),
     };
   }
 

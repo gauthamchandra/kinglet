@@ -26,6 +26,7 @@ function memoryManager(overrides?: { postgis?: boolean }): PGliteDatabaseManager
     storageType: 'memory',
     sqlitePath: './data/emulator.db',
     postgis: overrides?.postgis ?? false,
+    dataDirectoryName: 'cloudsql',
   });
 
   managers.push(manager);
@@ -42,6 +43,7 @@ async function fileManager(): Promise<{ manager: PGliteDatabaseManager; root: st
     storageType: 'sqlite',
     sqlitePath: join(root, 'emulator.db'),
     postgis: false,
+    dataDirectoryName: 'cloudsql',
   });
 
   managers.push(manager);
@@ -150,6 +152,7 @@ describe('PGliteDatabaseManager', () => {
       storageType: 'sqlite',
       sqlitePath: join(root, 'emulator.db'),
       postgis: false,
+      dataDirectoryName: 'cloudsql',
     });
 
     managers.push(restarted);

@@ -3,12 +3,13 @@
  */
 
 import type { BaseRecord } from '@/core/storage/types.ts';
-import type { CloudSqlDataPlane } from './data-plane/data-plane-manager.ts';
-import { DisabledDataPlane } from './data-plane/data-plane-manager.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import type { CloudSqlRepository } from './repository.ts';
 import type {
   DatabaseInstanceResponse,
   DatabaseResponse,
+  OperationError,
   OperationResponse,
   OperationTypeValue,
   SqlDatabaseRecord,
@@ -61,9 +62,9 @@ export interface ListOperationsResponse {
 
 export class SqlAdminService {
   private repo: CloudSqlRepository;
-  private dataPlane: CloudSqlDataPlane;
+  private dataPlane: PostgresDataPlane;
 
-  constructor(repo: CloudSqlRepository, dataPlane: CloudSqlDataPlane = new DisabledDataPlane()) {
+  constructor(repo: CloudSqlRepository, dataPlane: PostgresDataPlane = new DisabledDataPlane()) {
     this.repo = repo;
     this.dataPlane = dataPlane;
   }
@@ -152,12 +153,18 @@ export class SqlAdminService {
       await this.dataPlane.dropInstance(project, request.name);
       await this.repo.deleteInstance(project, request.name);
 
-      throw new SqlAdminError(
-        'INTERNAL',
-        `Failed to start the data plane for ${project}/${request.name}: ${
+      // Reported on the operation rather than thrown: real Cloud SQL answers
+      // insert with 200 and an Operation, and a provisioning failure surfaces
+      // as that operation's `error` (an OperationErrors list, DONE status).
+      // Throwing here would hand @googleapis/sqladmin a 500 it never expects
+      // from instances.insert.
+      return this.recordOperation(project, OperationType.CREATE, record.name, {
+        kind: 'sql#operationError',
+        code: 'INTERNAL_ERROR',
+        message: `Failed to start the data plane for ${project}/${request.name}: ${
           error instanceof Error ? error.message : String(error)
-        }`
-      );
+        }`,
+      });
     }
 
     return this.recordOperation(project, OperationType.CREATE, record.name);
@@ -578,10 +585,12 @@ export class SqlAdminService {
     return this.recordOperation(project, OperationType.UPDATE, name);
   }
 
+  /** Emulated operations are born DONE; `error` marks one that finished by failing. */
   private async recordOperation(
     project: string,
     operationType: OperationTypeValue,
-    targetId: string
+    targetId: string,
+    error?: OperationError
   ): Promise<OperationResponse> {
     const now = new Date().toISOString();
 
@@ -594,6 +603,10 @@ export class SqlAdminService {
       insertTime: now,
       startTime: now,
       endTime: now,
+      error:
+        error === undefined
+          ? null
+          : JSON.stringify({ kind: 'sql#operationErrors', errors: [error] }),
     });
 
     return operationRecordToResponse(record);

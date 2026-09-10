@@ -1,23 +1,21 @@
 /**
- * The extension set every emulated Cloud SQL database is built with.
+ * The extension set every emulated Postgres data-plane database is built with.
  *
- * <p>Cloud SQL lets a user `CREATE EXTENSION` any name on its supported list
- * at any time, but PGlite has to be handed its extensions at build time — the
- * wasm bundle for each one is linked when the database is created. Loading the
- * whole set up front is what makes `CREATE EXTENSION pg_trgm` work later
- * without the emulator having to rebuild the database underneath a live
- * connection.
+ * <p>Cloud SQL and AlloyDB both let a user `CREATE EXTENSION` any name on the
+ * supported list at any time, but PGlite has to be handed its extensions at
+ * build time — the wasm bundle for each one is linked when the database is
+ * created. Loading the whole set up front is what makes `CREATE EXTENSION
+ * pg_trgm` work later without the emulator having to rebuild the database
+ * underneath a live connection.
  *
  * <p>This is every contrib extension `@electric-sql/pglite` ships plus
  * pgvector, which is a separate package because of its size.
  *
- * <p>PostGIS is available behind the `CLOUDSQL_POSTGIS` opt-in flag. It is
+ * <p>PostGIS is available behind each service's `*_POSTGIS` opt-in flag. It is
  * not in the default set because it significantly increases boot time.
  *
  * <p>Every extension here is linked into every database, so anything added
  * to this set is a boot-time cost paid per database.
- *
- * <p>Nothing in this module is Cloud-SQL-specific, so AlloyDB can reuse it.
  */
 
 import { amcheck } from '@electric-sql/pglite/contrib/amcheck';

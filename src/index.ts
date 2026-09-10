@@ -170,19 +170,24 @@ async function main(): Promise<void> {
       logger.info('Memorystore for Valkey service enabled and started');
     }
 
+    // Both Postgres data planes — AlloyDB here, Cloud SQL just below — take their
+    // durability from kinglet's own store and keep their data beside it, so
+    // `STORAGE_TYPE=memory` really does mean nothing is written to disk.
     if (config.services.alloydb.enabled) {
-      alloydbService = new AlloyDbService(storageManager, new Logger('AlloyDB'));
+      alloydbService = new AlloyDbService(storageManager, new Logger('AlloyDB'), {
+        ...config.services.alloydb.dataPlane,
+        storageType: config.storage.type,
+        sqlitePath: config.storage.sqlitePath,
+      });
       await alloydbService.initialize();
 
-      logger.info('AlloyDB service enabled');
+      alloydbService.start();
+      logger.info('AlloyDB service enabled and started');
     }
 
     if (config.services.cloudsql.enabled) {
       cloudSqlService = new CloudSqlService(storageManager, new Logger('CloudSQL'), {
         ...config.services.cloudsql.dataPlane,
-        // The data plane keeps its Postgres data beside kinglet's own store
-        // and matches its durability, so `STORAGE_TYPE=memory` really does
-        // mean nothing is written to disk.
         storageType: config.storage.type,
         sqlitePath: config.storage.sqlitePath,
       });
@@ -307,6 +312,7 @@ async function main(): Promise<void> {
     // is in-process, but its listening sockets would likewise survive into a
     // retry and make its ports look occupied.
     await memorystoreService?.stop();
+    await alloydbService?.stop();
     await cloudSqlService?.stop();
     await computeService?.stop();
     process.exit(1);
@@ -369,6 +375,11 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     if (memorystoreService) {
       await memorystoreService.stop();
       logger.info('Memorystore service stopped');
+    }
+
+    if (alloydbService) {
+      await alloydbService.stop();
+      logger.info('AlloyDB service stopped');
     }
 
     if (kmsService) {

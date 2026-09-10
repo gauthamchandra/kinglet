@@ -4,54 +4,9 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
-import type { CloudSqlDataPlane } from './data-plane/data-plane-manager.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { CloudSqlRepository } from './repository.ts';
 import { SqlAdminError, SqlAdminService } from './service.ts';
-
-/**
- * Records what the admin service asks of the data plane, so the calls can be
- * asserted without booting wasm Postgres or binding ports.
- */
-class RecordingDataPlane implements CloudSqlDataPlane {
-  readonly calls: string[] = [];
-  startFailure: Error | null = null;
-
-  async startInstance(project: string, instance: string, databases: string[]): Promise<number> {
-    this.calls.push(`start:${project}/${instance}:${databases.join(',')}`);
-
-    if (this.startFailure) throw this.startFailure;
-
-    return 5432;
-  }
-
-  async stopInstance(project: string, instance: string): Promise<void> {
-    this.calls.push(`stop:${project}/${instance}`);
-  }
-
-  async dropInstance(project: string, instance: string): Promise<void> {
-    this.calls.push(`drop:${project}/${instance}`);
-  }
-
-  async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {
-    this.calls.push(`restart:${project}/${instance}:${databases.join(',')}`);
-  }
-
-  async openDatabase(project: string, instance: string, database: string): Promise<void> {
-    this.calls.push(`openDatabase:${project}/${instance}/${database}`);
-  }
-
-  async dropDatabase(project: string, instance: string, database: string): Promise<void> {
-    this.calls.push(`dropDatabase:${project}/${instance}/${database}`);
-  }
-
-  async stopAll(): Promise<void> {
-    this.calls.push('stopAll');
-  }
-
-  getPort(): number | null {
-    return 5432;
-  }
-}
 
 describe('SqlAdminService', () => {
   let repo: CloudSqlRepository;
@@ -100,15 +55,29 @@ describe('SqlAdminService', () => {
       expect(dataPlane.calls).toContain('dropDatabase:p1/db-a/app');
     });
 
-    test('leaves no instance behind when the data plane fails to start', async () => {
+    /**
+     * Real Cloud SQL reports a provisioning failure on the operation, not on the
+     * insert call — so this resolves, and the failure is the operation's `error`.
+     */
+    test('reports a data plane that fails to start on the operation and leaves no instance behind', async () => {
       dataPlane.startFailure = new Error('no free ports');
 
-      const create = service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      const operation = await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+      });
 
-      await expect(create).rejects.toBeInstanceOf(SqlAdminError);
-      await expect(create).rejects.toHaveProperty('code', 'INTERNAL');
-      await expect(create).rejects.toThrow('no free ports');
-
+      expect(operation.status).toBe('DONE');
+      expect(operation.error).toEqual({
+        kind: 'sql#operationErrors',
+        errors: [
+          {
+            kind: 'sql#operationError',
+            code: 'INTERNAL_ERROR',
+            message: expect.stringContaining('no free ports'),
+          },
+        ],
+      });
       expect(await repo.getInstance('p1', 'db-a')).toBeNull();
       expect(await repo.listDatabases('p1', 'db-a')).toEqual([]);
       expect(await repo.listUsers('p1', 'db-a')).toEqual([]);

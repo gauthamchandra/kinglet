@@ -2,12 +2,14 @@
  * Owns the PGlite instances behind emulated databases.
  *
  * <p>PGlite has no `CREATE DATABASE` — one PGlite is one database — so the
- * mapping is one PGlite per admin-API `Database` resource, keyed by
+ * mapping is one PGlite per admin-API database resource (or the product's
+ * default database when it has no databases API), keyed by
  * project/instance/database. The wire server routes to the right one using the
  * `database` parameter of the client's startup message, which is what makes a
  * single listening port able to serve every database on an instance.
  *
- * <p>Nothing here is Cloud-SQL-specific, so AlloyDB can reuse it.
+ * <p>Shared by Cloud SQL and AlloyDB. On-disk layout is namespaced per product
+ * via {@link PGliteDatabaseManagerOptions.dataDirectoryName}.
  */
 
 import { mkdir, rm } from 'node:fs/promises';
@@ -39,6 +41,11 @@ export interface PGliteDatabaseManagerOptions {
   sqlitePath: string;
   /** Link PostGIS into every database. Slower boot when enabled. */
   postgis: boolean;
+  /**
+   * Directory name beside the SQLite file for this product's Postgres data
+   * (`cloudsql`, `alloydb`, …).
+   */
+  dataDirectoryName: string;
 }
 
 export interface OpenDatabase {
@@ -69,12 +76,12 @@ export function buildDatabaseKey(key: DatabaseKey): string {
  *
  * <p>These names arrive from the API — the URL path for project and instance,
  * the request body for database — and the admin API deliberately does not
- * constrain a database name, since real Cloud SQL accepts far more than a
- * filesystem path segment does. Percent-encoding keeps that fidelity while
- * making traversal impossible: `..` becomes `%2E%2E`, `a/b` becomes `a%2Fb`,
- * and an ordinary name like `postgres` is left untouched and still readable
- * on disk. `encodeURIComponent` already escapes separators and handles UTF-8;
- * `.` is the one character it leaves through that matters here.
+ * constrain a database name as tightly as a filesystem path segment does.
+ * Percent-encoding keeps that fidelity while making traversal impossible: `..`
+ * becomes `%2E%2E`, `a/b` becomes `a%2Fb`, and an ordinary name like `postgres`
+ * is left untouched and still readable on disk. `encodeURIComponent` already
+ * escapes separators and handles UTF-8; `.` is the one character it leaves
+ * through that matters here.
  */
 export function encodePathSegment(segment: string): string {
   return encodeURIComponent(segment).replace(/\./g, '%2E');
@@ -256,20 +263,24 @@ export class PGliteDatabaseManager {
 
   /** The directory holding every database for one instance. */
   private resolveInstanceDirectory(project: string, instance: string): string {
-    const root = join(dirname(this.options.sqlitePath), 'cloudsql');
+    const root = this.dataRoot();
     const directory = resolve(root, encodePathSegment(project), encodePathSegment(instance));
 
     return this.requireContainedIn(root, directory);
   }
 
   private resolveDataDirectory(key: DatabaseKey): string {
-    const root = join(dirname(this.options.sqlitePath), 'cloudsql');
+    const root = this.dataRoot();
     const directory = resolve(
       this.resolveInstanceDirectory(key.project, key.instance),
       encodePathSegment(key.database)
     );
 
     return this.requireContainedIn(root, directory);
+  }
+
+  private dataRoot(): string {
+    return join(dirname(this.options.sqlitePath), this.options.dataDirectoryName);
   }
 
   /**
@@ -284,7 +295,7 @@ export class PGliteDatabaseManager {
     const resolvedRoot = resolve(root);
 
     if (directory !== resolvedRoot && !directory.startsWith(`${resolvedRoot}${sep}`)) {
-      throw new Error(`Refusing to use a Cloud SQL data directory outside ${resolvedRoot}`);
+      throw new Error(`Refusing to use a data directory outside ${resolvedRoot}`);
     }
 
     return directory;

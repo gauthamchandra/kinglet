@@ -40,4 +40,29 @@ export class InstanceRepository extends ResourceRepository<InstanceRecord> {
 
     return { instances: records, nextPageToken };
   }
+
+  /**
+   * Every instance under one cluster, for cascade deletes and placement checks
+   * that must see the full topology rather than a single page.
+   */
+  async listAllInstancesInCluster(
+    project: string,
+    location: string,
+    clusterId: string
+  ): Promise<InstanceRecord[]> {
+    return this.listAllByPrefix(buildInstanceListPrefix(project, location, clusterId));
+  }
+
+  /**
+   * Every instance in every project, for restoring the data plane on startup:
+   * the persisted rows are the only record of what was running before the
+   * emulator went down, and they are not scoped to one project.
+   */
+  async listAllInstances(): Promise<InstanceRecord[]> {
+    const result = await this.storage.find<InstanceRecord>(ALLOYDB_INSTANCES_TABLE, {
+      sort: [{ field: 'name', direction: 'asc' }],
+    });
+
+    return result.data;
+  }
 }

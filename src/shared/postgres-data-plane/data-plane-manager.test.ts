@@ -28,13 +28,15 @@ function makeManager(
   nextRangeStart += 10;
 
   const manager = new DataPlaneManager(
-    new Logger('CloudSqlDataPlaneTest', 'error'),
+    new Logger('PostgresDataPlaneTest', 'error'),
     {
       portRangeStart,
       portRangeEnd: portRangeStart + 4,
       storageType: 'memory',
       sqlitePath: './data/emulator.db',
       postgis: false,
+      productLabel: 'Cloud SQL',
+      dataDirectoryName: 'cloudsql',
       ...overrides,
     },
     lookupUser
@@ -103,6 +105,34 @@ describe('DataPlaneManager', () => {
     expect(manager.getPort('p1', 'a')).toBe(first);
   });
 
+  test('keeps slash-bearing instance keys distinct from flat ones', async () => {
+    const manager = makeManager();
+    const flat = await manager.startInstance('p1', 'i1', ['postgres']);
+    const nested = await manager.startInstance('p1', 'us-central1/c1/i1', ['postgres']);
+
+    expect(nested).toBe((flat ?? 0) + 1);
+    expect(manager.getPort('p1', 'i1')).toBe(flat);
+    expect(manager.getPort('p1', 'us-central1/c1/i1')).toBe(nested);
+  });
+
+  /**
+   * The connect path is what `splitInstanceKey` actually feeds: AlloyDB packs
+   * `location/cluster/instance` into the instance segment, so a split on every
+   * slash rather than the first one hands `resolveConnection` the wrong
+   * DatabaseKey and refuses every AlloyDB connection. `startInstance`/`getPort`
+   * above never reach that code — they key off plain concatenation.
+   */
+  test('serves queries on an instance whose key contains slashes', async () => {
+    const manager = makeManager();
+    const port = (await manager.startInstance('p1', 'us-central1/c1/i1', ['postgres'])) ?? 0;
+
+    await runQuery(port, 'postgres', 'postgres', '', 'CREATE TABLE nested (a int)');
+
+    expect(
+      await runQuery(port, 'postgres', 'postgres', '', 'SELECT count(*)::int AS n FROM nested')
+    ).toEqual([{ n: 0 }]);
+  });
+
   test('reports no port for an instance that was never started', () => {
     expect(makeManager().getPort('p1', 'ghost')).toBeNull();
   });
@@ -129,7 +159,7 @@ describe('DataPlaneManager', () => {
 
     await expect(
       runQuery(port, 'app', 'postgres', '', 'SELECT * FROM only_in_postgres')
-    ).rejects.toThrow();
+    ).rejects.toThrow(/relation "only_in_postgres" does not exist/);
   });
 
   test('requires the stored password when the user has one', async () => {
@@ -140,7 +170,9 @@ describe('DataPlaneManager', () => {
       { one: 1 },
     ]);
 
-    await expect(runQuery(port, 'postgres', 'postgres', 'wrong', 'SELECT 1')).rejects.toThrow();
+    await expect(runQuery(port, 'postgres', 'postgres', 'wrong', 'SELECT 1')).rejects.toThrow(
+      /password authentication failed for user "postgres"/
+    );
   });
 
   test('reads the password live so an updated user takes effect on the next connection', async () => {
@@ -152,7 +184,9 @@ describe('DataPlaneManager', () => {
 
     password = 'second';
 
-    await expect(runQuery(port, 'postgres', 'postgres', 'first', 'SELECT 1')).rejects.toThrow();
+    await expect(runQuery(port, 'postgres', 'postgres', 'first', 'SELECT 1')).rejects.toThrow(
+      /password authentication failed for user "postgres"/
+    );
     expect(await runQuery(port, 'postgres', 'postgres', 'second', 'SELECT 1 AS one')).toEqual([
       { one: 1 },
     ]);
@@ -162,14 +196,18 @@ describe('DataPlaneManager', () => {
     const manager = makeManager();
     const port = (await manager.startInstance('p1', 'a', ['postgres'])) ?? 0;
 
-    await expect(runQuery(port, 'nope', 'postgres', '', 'SELECT 1')).rejects.toThrow();
+    await expect(runQuery(port, 'nope', 'postgres', '', 'SELECT 1')).rejects.toThrow(
+      /database "nope" does not exist/
+    );
   });
 
   test('refuses a connection from a user the instance does not have', async () => {
     const manager = makeManager({}, async () => null);
     const port = (await manager.startInstance('p1', 'a', ['postgres'])) ?? 0;
 
-    await expect(runQuery(port, 'postgres', 'ghost', '', 'SELECT 1')).rejects.toThrow();
+    await expect(runQuery(port, 'postgres', 'ghost', '', 'SELECT 1')).rejects.toThrow(
+      /role "ghost" does not exist/
+    );
   });
 
   test('a dropped database stops accepting connections', async () => {
@@ -180,7 +218,9 @@ describe('DataPlaneManager', () => {
 
     await manager.dropDatabase('p1', 'a', 'app');
 
-    await expect(runQuery(port, 'app', 'postgres', '', 'SELECT 1')).rejects.toThrow();
+    await expect(runQuery(port, 'app', 'postgres', '', 'SELECT 1')).rejects.toThrow(
+      /database "app" does not exist/
+    );
   });
 
   test('opening a database on an instance that is not running is a no-op', async () => {
@@ -188,6 +228,25 @@ describe('DataPlaneManager', () => {
 
     await expect(manager.openDatabase('p1', 'ghost', 'app')).resolves.toBeUndefined();
   });
+
+  /**
+   * The allocator hands out the lowest free port, so this only proves the
+   * preference is honoured when a lower port has come free in the meantime —
+   * otherwise a restart that silently rescanned from the bottom would land on
+   * the same port by coincidence and pass.
+   */
+  test('restart keeps its port even when a lower one has become free', async () => {
+    const manager = makeManager();
+    const first = await manager.startInstance('p1', 'a', ['postgres']);
+    const second = await manager.startInstance('p1', 'b', ['postgres']);
+
+    await manager.stopInstance('p1', 'a');
+    await manager.restartInstance('p1', 'b', ['postgres']);
+
+    expect(second).not.toBe(first);
+    expect(manager.getPort('p1', 'b')).toBe(second);
+    // Three wasm Postgres boots; the two-boot tests here already run ~3.8s on CI.
+  }, 30_000);
 
   test('restart rebinds the instance and gives its previous port back', async () => {
     const manager = makeManager();
@@ -306,7 +365,7 @@ describe('DataPlaneManager', () => {
 
     await expect(
       runQuery(restarted, 'postgres', 'postgres', '', 'SELECT * FROM secrets')
-    ).rejects.toThrow();
+    ).rejects.toThrow(/relation "secrets" does not exist/);
   });
 
   test('a delete racing a start never leaves a listener for deleted databases', async () => {
@@ -329,17 +388,18 @@ describe('DataPlaneManager', () => {
 
     const port = manager.getPort('p1', 'a');
 
-    // Whichever ran second decides the outcome; what must never happen is a
-    // published endpoint whose databases are gone.
-    if (port == null) {
-      expect(manager.getPort('p1', 'a')).toBeNull();
+    // Whichever ran second decides the outcome, so two results are legitimate;
+    // the one that must never happen is a published endpoint whose databases
+    // are gone.
+    const outcome =
+      port == null
+        ? 'torn down'
+        : await runQuery(port, 'postgres', 'postgres', '', 'SELECT 1 AS one').then(
+            () => 'serving',
+            () => 'published but dead'
+          );
 
-      return;
-    }
-
-    expect(await runQuery(port, 'postgres', 'postgres', '', 'SELECT 1 AS one')).toEqual([
-      { one: 1 },
-    ]);
+    expect(['torn down', 'serving']).toContain(outcome);
   });
 
   test('stopAll tears every instance down', async () => {
@@ -351,6 +411,20 @@ describe('DataPlaneManager', () => {
 
     expect(manager.getPort('p1', 'a')).toBeNull();
     expect(manager.getPort('p1', 'b')).toBeNull();
+  });
+
+  /**
+   * `stopAll` recovers each project/instance pair by splitting the key it stored,
+   * so a slash-bearing AlloyDB key that round-trips wrong leaves the listener
+   * bound with nothing tracking it.
+   */
+  test('stopAll tears down an instance whose key contains slashes', async () => {
+    const manager = makeManager();
+
+    await manager.startInstance('p1', 'us-central1/c1/i1', ['postgres']);
+    await manager.stopAll();
+
+    expect(manager.getPort('p1', 'us-central1/c1/i1')).toBeNull();
   });
 });
 

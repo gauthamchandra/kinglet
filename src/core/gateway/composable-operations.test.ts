@@ -417,7 +417,9 @@ describe('composed operations routing (AlloyDB + Memorystore on one RequestRoute
     const memorystoreService = new MemorystoreService(storage, new Logger('test', 'error'), {
       enabled: false,
     });
-    const alloydbService = new AlloyDbService(storage, new Logger('test', 'error'));
+    const alloydbService = new AlloyDbService(storage, new Logger('test', 'error'), {
+      enabled: false,
+    });
 
     await memorystoreService.initialize();
     await alloydbService.initialize();

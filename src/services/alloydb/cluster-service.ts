@@ -4,6 +4,9 @@
 
 import type { OperationResponse, OperationsStore } from '@/core/operations/operations-store.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
 import { buildInstanceListPrefix, type InstanceRepository } from './instance-repository.ts';
@@ -11,14 +14,20 @@ import type { ClusterRecord, ClusterResponse } from './types.ts';
 import {
   AlloyDbError,
   buildClusterName,
+  buildDataPlaneInstanceKey,
+  buildUserName,
   CLUSTER_SPEC_ENUM_FIELDS,
   clusterRecordToResponse,
   clusterRequestToRecord,
   isValidClusterId,
+  isValidUserId,
   MUTABLE_CLUSTER_FIELDS,
   normalizeSpecFieldValue,
+  parseInstanceName,
   parseSpecJson,
-  readInitialUsername,
+  readInitialUser,
+  UserType,
+  userRequestToRecord,
 } from './types.ts';
 import { resolveMaskedFields } from './update-mask.ts';
 import { buildUserListPrefix, type UserRepository } from './user-repository.ts';
@@ -49,19 +58,25 @@ export class ClusterService {
   private readonly users: UserRepository;
   private readonly operations: OperationsStore;
   private readonly clusterMutex: ResourceMutex;
+  private readonly logger: Logger;
+  private readonly dataPlane: PostgresDataPlane;
 
   constructor(
     clusters: ClusterRepository,
     instances: InstanceRepository,
     users: UserRepository,
     operations: OperationsStore,
-    clusterMutex: ResourceMutex
+    clusterMutex: ResourceMutex,
+    logger: Logger,
+    dataPlane: PostgresDataPlane = new DisabledDataPlane()
   ) {
     this.clusters = clusters;
     this.instances = instances;
     this.users = users;
     this.operations = operations;
     this.clusterMutex = clusterMutex;
+    this.logger = logger;
+    this.dataPlane = dataPlane;
   }
 
   /**
@@ -101,9 +116,16 @@ export class ClusterService {
 
     const record = clusterRequestToRecord(name, body);
 
-    return this.completeMutation(project, location, name, 'create', options, record, () =>
-      this.clusters.create(record)
-    );
+    return this.completeMutation(project, location, name, 'create', options, record, async () => {
+      const created = await this.clusters.create(record);
+
+      // The initial user is the cluster's first connectable role. Persist it as a
+      // User row (with password) so the data plane can authenticate connections
+      // the same way a later users.create would.
+      await this.createInitialUser(project, location, clusterId, body);
+
+      return created;
+    });
   }
 
   async getCluster(project: string, location: string, clusterId: string): Promise<ClusterResponse> {
@@ -216,7 +238,42 @@ export class ClusterService {
     }
 
     // Children first: a failure partway through must not leave a deleted cluster
-    // with instances still addressable beneath its name.
+    // with instances still addressable beneath its name. Drop each instance's
+    // data plane before deleting the rows, or a later cluster of the same name
+    // would inherit half-built Postgres directories.
+    const childInstances = await this.instances.listAllInstancesInCluster(
+      project,
+      location,
+      clusterId
+    );
+
+    for (const instance of childInstances) {
+      const parsed = parseInstanceName(instance.name);
+
+      if (!parsed) {
+        this.logger.warn(
+          `Skipping data-plane drop for AlloyDB instance with unparseable name ${instance.name}`
+        );
+        continue;
+      }
+
+      // One instance's drop failing must not abort the cascade: stopping mid-loop
+      // would leave the instances already dropped holding rows that still report
+      // READY with nothing listening, and every retry would fail on the same
+      // instance, so the cluster could never be deleted. The rows always go.
+      try {
+        await this.dataPlane.dropInstance(
+          project,
+          buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId)
+        );
+      } catch (error) {
+        this.logger.error(
+          `Failed to drop the data plane for AlloyDB instance ${instance.name} while deleting ${name}; its Postgres data may remain on disk`,
+          error
+        );
+      }
+    }
+
     await this.instances.deleteByPrefix(buildInstanceListPrefix(project, location, clusterId));
     await this.users.deleteByPrefix(buildUserListPrefix(project, location, clusterId));
     await this.clusters.delete(name);
@@ -262,6 +319,40 @@ export class ClusterService {
       verb,
       RESOURCE_TYPE,
       clusterRecordToResponse(applied)
+    );
+  }
+
+  /**
+   * Persist the cluster's initial user (username + password) as a User row so
+   * the data plane can authenticate it. Create-only: rotating the password
+   * afterwards goes through users.patch, so a rename-only cluster PATCH cannot
+   * blank the stored secret.
+   */
+  private async createInitialUser(
+    project: string,
+    location: string,
+    clusterId: string,
+    body: Record<string, unknown>
+  ): Promise<void> {
+    const { username, password } = readInitialUser(body);
+
+    // validateInitialUser has already required both, so neither is null here.
+    // Guarded rather than defaulted: an empty stored password is what tells the
+    // wire server to accept the user with no password at all, so it must never
+    // be the fallback. (ALLOYDB_IAM_USER is accepted as user metadata, but the
+    // wire server offers cleartext only — there is no IAM token login path.)
+    if (username === null || password === null) {
+      throw new AlloyDbError(
+        'INTERNAL',
+        `Cluster ${buildClusterName(project, location, clusterId)} reached user creation without a validated initialUser`
+      );
+    }
+
+    await this.users.create(
+      userRequestToRecord(buildUserName(project, location, clusterId, username), {
+        password,
+        userType: UserType.ALLOYDB_BUILT_IN,
+      })
     );
   }
 
@@ -357,23 +448,34 @@ function validateInitialUser(body: Record<string, unknown>): void {
   const username = initialUser?.user;
   const password = initialUser?.password;
 
-  // Real AlloyDB requires both on create — the username and the password for the
-  // postgres role — even though the password is discarded here (no data plane to
-  // create the role in). Accepting a body without a password would let a request
-  // pass locally and then fail against production.
+  // Both are required on create — the username and the password for the initial
+  // postgres role. Inferred rather than stated outright: the discovery document
+  // marks `Cluster.initialUser` itself Required but puts no required flag on
+  // `UserPassword.user`/`.password`, and a cluster with neither has no way in.
+  // Flagged in the PR. The password is stored on the matching User row for
+  // data-plane auth and never returned on the cluster resource.
   if (
-    typeof username === 'string' &&
-    username.length > 0 &&
-    typeof password === 'string' &&
-    password.length > 0
+    typeof username !== 'string' ||
+    username.length === 0 ||
+    typeof password !== 'string' ||
+    password.length === 0
   ) {
-    return;
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      'Cluster.initialUser is required and must carry both a "user" username and a "password"'
+    );
   }
 
-  throw new AlloyDbError(
-    'INVALID_ARGUMENT',
-    'Cluster.initialUser is required and must carry both a "user" username and a "password"'
-  );
+  // The username becomes a User row of its own, so it has to satisfy the same id
+  // rule users.create enforces. Without this, cluster create mints a user whose
+  // name breaks the discovery document's `users/[^/]+` shape and which no client
+  // can then GET, PATCH or DELETE.
+  if (!isValidUserId(username)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `Cluster.initialUser.user "${username}" must not contain "/"`
+    );
+  }
 }
 
 /**
@@ -394,9 +496,11 @@ function buildClusterUpdates(
   };
 
   for (const field of maskedFields) {
-    // `initialUser` carries a password, so only its username is ever stored.
+    // `initialUser` carries a password: only the username lands on the cluster
+    // row. On create the password is persisted on the matching User row; a PATCH
+    // deliberately does not rotate it (see createInitialUser).
     if (field === 'initialUser') {
-      updates.initialUserName = readInitialUsername(body);
+      updates.initialUserName = readInitialUser(body).username;
       continue;
     }
 

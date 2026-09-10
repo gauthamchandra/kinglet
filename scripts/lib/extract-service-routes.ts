@@ -30,12 +30,16 @@ interface EmulatedService {
 
 type ServiceFactory = (storage: StorageManager, logger: Logger) => EmulatedService;
 
+// `{ enabled: false }` goes to every service that owns a process-level data
+// plane — Memorystore spawns valkey-server, Cloud SQL and AlloyDB boot a wasm
+// Postgres — so that enumerating routes never starts one. The other services
+// boot nothing on construction and take no such option.
 const SERVICE_FACTORIES: Record<string, ServiceFactory> = {
-  alloydb: (storage, logger) => new AlloyDbService(storage, logger),
+  alloydb: (storage, logger) => new AlloyDbService(storage, logger, { enabled: false }),
   compute: (storage, logger) => new ComputeService(storage, logger),
   'cloud-kms': (storage, logger) => new CloudKmsService(storage, logger),
   'cloud-scheduler': (storage, logger) => new SchedulerService(storage, logger),
-  'cloud-sql': (storage, logger) => new CloudSqlService(storage, logger),
+  'cloud-sql': (storage, logger) => new CloudSqlService(storage, logger, { enabled: false }),
   'cloud-storage': (storage, logger) => new CloudStorageService(storage, logger),
   'cloud-tasks': (storage, logger) => new CloudTasksService(storage, logger),
   memorystore: (storage, logger) => new MemorystoreService(storage, logger, { enabled: false }),

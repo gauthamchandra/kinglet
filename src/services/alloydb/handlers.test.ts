@@ -14,6 +14,7 @@ import { OperationsStore } from '@/core/operations/operations-store.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { ClusterHandlers } from './cluster-handlers.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import { ClusterService } from './cluster-service.ts';
@@ -31,6 +32,7 @@ const LOCATION = 'us-central1';
 
 let clusterHandlers: ClusterHandlers;
 let instanceHandlers: InstanceHandlers;
+let instanceDataPlane: RecordingDataPlane;
 let userHandlers: UserHandlers;
 let locationHandlers: LocationHandlers;
 
@@ -102,18 +104,17 @@ beforeEach(async () => {
     operations.initialize(),
   ]);
 
-  const responseUtils = new ResponseUtils(
-    new StandardResponseFormatter(new Logger('test', 'error'))
-  );
-
+  const logger = new Logger('test', 'error');
+  const responseUtils = new ResponseUtils(new StandardResponseFormatter(logger));
   const clusterMutex = new ResourceMutex();
 
   clusterHandlers = new ClusterHandlers(
-    new ClusterService(clusters, instances, users, operations, clusterMutex),
+    new ClusterService(clusters, instances, users, operations, clusterMutex, logger),
     responseUtils
   );
+  instanceDataPlane = new RecordingDataPlane({ port: 5540 });
   instanceHandlers = new InstanceHandlers(
-    new InstanceService(instances, clusters, operations, clusterMutex),
+    new InstanceService(instances, clusters, operations, clusterMutex, logger, instanceDataPlane),
     responseUtils
   );
   userHandlers = new UserHandlers(new UserService(users, clusters, clusterMutex), responseUtils);
@@ -395,6 +396,24 @@ describe('instance handlers', () => {
 
     expect(response.status).toBe(200);
     expect(body(response).done).toBe(true);
+  });
+
+  /**
+   * The HTTP shape real AlloyDB gives a provisioning failure: still 200 with an
+   * Operation, done, carrying `error` and no `response`.
+   */
+  test('create_whenTheDataPlaneFailsToStart_returns200WithAFailedOperation', async () => {
+    instanceDataPlane.startFailure = new Error('no free ports');
+
+    const response = await createInstance();
+
+    expect(response.status).toBe(200);
+    expect(body(response).done).toBe(true);
+    expect(body(response).error).toEqual({
+      code: 13,
+      message: expect.stringContaining('no free ports'),
+    });
+    expect(body(response)).not.toHaveProperty('response');
   });
 
   test('create_withoutTheInstanceIdQueryParameter_returns400', async () => {

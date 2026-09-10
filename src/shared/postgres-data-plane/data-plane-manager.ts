@@ -2,19 +2,20 @@
  * The data plane's facade: one listening Postgres endpoint per emulated
  * instance, backed by one PGlite per database on it.
  *
- * <p>The admin service talks only to the {@link CloudSqlDataPlane} interface,
+ * <p>The admin service talks only to the {@link PostgresDataPlane} interface,
  * so the control plane can run without a data plane at all
  * ({@link DisabledDataPlane}) and so tests can substitute a double instead of
  * booting wasm Postgres.
  *
- * <p>Nothing here is Cloud-SQL-specific beyond the name, so AlloyDB can reuse
- * it.
+ * <p>Shared by Cloud SQL and AlloyDB. Product-specific labelling and on-disk
+ * namespacing come from {@link DataPlaneManagerOptions}.
  */
 
 import type { StorageType } from '@/core/storage/types.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { PortAllocator } from '@/shared/utils/port-allocator.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import type { PostgresDataPlaneDirectoryName, PostgresDataPlaneProductLabel } from './host.ts';
 import type { DatabaseKey } from './pglite-database-manager.ts';
 import { PGliteDatabaseManager } from './pglite-database-manager.ts';
 
@@ -28,9 +29,9 @@ import {
 /** The address handed to clients, matching Memorystore's reasoning: loopback
  * is correct both for kinglet run directly on the developer's machine and for
  * kinglet in Docker with the data-plane range published. */
-const ADVERTISED_HOST = '127.0.0.1';
+export const ADVERTISED_HOST = '127.0.0.1';
 
-export interface CloudSqlDataPlane {
+export interface PostgresDataPlane {
   /**
    * Bring up an instance's endpoint with the given databases open, returning
    * the port it listens on, or null when no data plane is running.
@@ -64,6 +65,14 @@ export interface DataPlaneManagerOptions {
   storageType: StorageType;
   sqlitePath: string;
   postgis: boolean;
+  /** Human-readable product name used in log lines. */
+  productLabel: PostgresDataPlaneProductLabel;
+  /**
+   * Directory name beside kinglet's SQLite file that holds this product's
+   * Postgres data. This, not the instance key, is what keeps the two products
+   * from sharing or colliding on disk — see {@link buildInstanceKey}.
+   */
+  dataDirectoryName: PostgresDataPlaneDirectoryName;
 }
 
 interface RunningInstance {
@@ -72,17 +81,35 @@ interface RunningInstance {
   databases: Set<string>;
 }
 
+/**
+ * Key for one instance within this manager's registry.
+ *
+ * <p>Unique only within one product, and that is enough: Cloud SQL and AlloyDB
+ * each construct their own manager (own registry, own port allocator), and on
+ * disk `dataDirectoryName` namespaces them. Two products can therefore hold the
+ * same project/instance string without touching each other — the isolation is
+ * per manager, not encoded in this key.
+ */
 function buildInstanceKey(project: string, instance: string): string {
   return `${project}/${instance}`;
 }
 
+/**
+ * Split a key produced by {@link buildInstanceKey}.
+ *
+ * <p>The instance segment may itself contain `/` (AlloyDB encodes
+ * location/cluster/instance that way), so only the first slash separates
+ * project from instance.
+ */
 function splitInstanceKey(key: string): { project: string; instance: string } {
-  const [project = '', instance = ''] = key.split('/');
+  const separator = key.indexOf('/');
 
-  return { project, instance };
+  if (separator < 0) return { project: key, instance: '' };
+
+  return { project: key.slice(0, separator), instance: key.slice(separator + 1) };
 }
 
-export class DataPlaneManager implements CloudSqlDataPlane {
+export class DataPlaneManager implements PostgresDataPlane {
   private logger: Logger;
   private options: DataPlaneManagerOptions;
   private lookupUser: LookupUser;
@@ -106,6 +133,7 @@ export class DataPlaneManager implements CloudSqlDataPlane {
       storageType: options.storageType,
       sqlitePath: options.sqlitePath,
       postgis: options.postgis,
+      dataDirectoryName: options.dataDirectoryName,
     });
     this.portAllocator = new PortAllocator({
       portRangeStart: options.portRangeStart,
@@ -153,25 +181,44 @@ export class DataPlaneManager implements CloudSqlDataPlane {
       throw error;
     }
 
-    const { port, wireServer } = await this.bindListener(key);
+    let bound: { port: number; wireServer: PostgresWireServer };
+
+    try {
+      bound = await this.bindListener(key, previousPort);
+    } catch (error) {
+      // Mirror of the open-failure path above: a bind that fails must not leave
+      // wasm Postgres running with no listener in front of it until shutdown.
+      for (const database of opened) {
+        await this.databaseManager.close({ project, instance, database });
+      }
+
+      throw error;
+    }
+
+    const { port, wireServer } = bound;
     const running: RunningInstance = { port, wireServer, databases: opened };
 
     this.instances.set(key, running);
 
     // The port is the one thing a developer cannot discover from the API
-    // response, which stays byte-faithful to sqladmin and so has nowhere to
-    // put a kinglet-only field. Logging it at start is how they find it.
-    this.logger.info(`Cloud SQL instance ${key} listening on ${ADVERTISED_HOST}:${port}`);
+    // response, which stays byte-faithful to the product's admin API and so has
+    // nowhere to put a kinglet-only field. Logging it at start is how they find it.
+    this.logger.info(
+      `${this.options.productLabel} instance ${key} listening on ${ADVERTISED_HOST}:${port}`
+    );
 
     return port;
   }
 
   /**
-   * Bind this instance's listener, keeping the port it was already on when
-   * there was one so a restart does not move an address clients hold.
+   * Bind this instance's listener, preferring the port it was on before a
+   * restart so the address clients hold does not move. The caller passes that
+   * port in: by the time this runs the old listener has been stopped and its
+   * entry removed, so it cannot be read back from `instances`.
    */
   private async bindListener(
-    instanceKey: string
+    instanceKey: string,
+    previousPort?: number
   ): Promise<{ port: number; wireServer: PostgresWireServer }> {
     const allocated = await this.portAllocator.allocateBound(
       port => {
@@ -186,7 +233,7 @@ export class DataPlaneManager implements CloudSqlDataPlane {
         return wireServer;
       },
       {
-        preferredPort: this.instances.get(instanceKey)?.port,
+        preferredPort: previousPort,
         onBindFailure: (port, error) =>
           this.logger.debug(
             `Port ${port} looked free but could not be bound for ${instanceKey}, trying the next`,
@@ -197,7 +244,7 @@ export class DataPlaneManager implements CloudSqlDataPlane {
 
     if (!allocated) {
       throw new Error(
-        `Cannot start a Cloud SQL data plane for ${instanceKey}: every port in ` +
+        `Cannot start a ${this.options.productLabel} data plane for ${instanceKey}: every port in ` +
           `${this.options.portRangeStart}-${this.options.portRangeEnd} is already in use`
       );
     }
@@ -315,7 +362,7 @@ export class DataPlaneManager implements CloudSqlDataPlane {
       // developer who mistyped a database name has nothing on the emulator
       // side tying the refusal to the instance it was aimed at.
       this.logger.debug(
-        `Rejected a Cloud SQL connection to ${instanceKey}: no database "${database}"`
+        `Rejected a ${this.options.productLabel} connection to ${instanceKey}: no database "${database}"`
       );
 
       return {
@@ -330,7 +377,9 @@ export class DataPlaneManager implements CloudSqlDataPlane {
     const record = await this.lookupUser(project, instance, user);
 
     if (!record) {
-      this.logger.debug(`Rejected a Cloud SQL connection to ${instanceKey}: no user "${user}"`);
+      this.logger.debug(
+        `Rejected a ${this.options.productLabel} connection to ${instanceKey}: no user "${user}"`
+      );
 
       return {
         allowed: false,
@@ -346,10 +395,10 @@ export class DataPlaneManager implements CloudSqlDataPlane {
 }
 
 /**
- * The no-op data plane used when `CLOUDSQL_DATA_PLANE=false`, so the control
- * plane keeps working on its own and no wasm Postgres is ever built.
+ * The no-op data plane used when a service's `*_DATA_PLANE=false`, so the
+ * control plane keeps working on its own and no wasm Postgres is ever built.
  */
-export class DisabledDataPlane implements CloudSqlDataPlane {
+export class DisabledDataPlane implements PostgresDataPlane {
   async startInstance(): Promise<number | null> {
     return null;
   }

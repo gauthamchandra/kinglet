@@ -4,6 +4,9 @@
 
 import type { OperationResponse, OperationsStore } from '@/core/operations/operations-store.ts';
 import type { BaseRecord } from '@/core/storage/types.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
 import type { InstanceRepository } from './instance-repository.ts';
@@ -12,7 +15,9 @@ import {
   AlloyDbError,
   buildClusterName,
   buildConnectionInfo,
+  buildDataPlaneInstanceKey,
   buildInstanceName,
+  DEFAULT_DATABASE_NAME,
   INSTANCE_SPEC_ENUM_FIELDS,
   INSTANCE_TYPE_ENUM,
   InstanceType,
@@ -30,9 +35,8 @@ const RESOURCE_TYPE = 'Instance';
 
 const INSTANCE_TYPES: ReadonlySet<string> = new Set(Object.values(InstanceType));
 
-// A cluster holds one primary plus a bounded set of read pools, so listing every
-// instance in a single page to check placement never approaches this ceiling.
-const ALL_INSTANCES_IN_CLUSTER = 1_000_000;
+/** google.rpc.Code.INTERNAL, as carried on a failed operation's `error`. */
+const RPC_CODE_INTERNAL = 13;
 
 export interface ValidatableOptions {
   validateOnly?: boolean | undefined;
@@ -60,17 +64,23 @@ export class InstanceService {
   private readonly clusters: ClusterRepository;
   private readonly operations: OperationsStore;
   private readonly clusterMutex: ResourceMutex;
+  private readonly logger: Logger;
+  private readonly dataPlane: PostgresDataPlane;
 
   constructor(
     instances: InstanceRepository,
     clusters: ClusterRepository,
     operations: OperationsStore,
-    clusterMutex: ResourceMutex
+    clusterMutex: ResourceMutex,
+    logger: Logger,
+    dataPlane: PostgresDataPlane = new DisabledDataPlane()
   ) {
     this.instances = instances;
     this.clusters = clusters;
     this.operations = operations;
     this.clusterMutex = clusterMutex;
+    this.logger = logger;
+    this.dataPlane = dataPlane;
   }
 
   async createInstance(
@@ -117,8 +127,59 @@ export class InstanceService {
 
     const record = instanceRequestToRecord(name, body);
 
-    return this.completeMutation(project, location, name, 'create', options, record, () =>
-      this.instances.create(record)
+    if (options.validateOnly === true) {
+      return this.operations.buildUnpersistedOperation(
+        project,
+        location,
+        name,
+        'create',
+        RESOURCE_TYPE,
+        instanceRecordToResponse(record)
+      );
+    }
+
+    const created = await this.instances.create(record);
+    const dataPlaneKey = buildDataPlaneInstanceKey(location, clusterId, instanceId);
+
+    // Started eagerly, before the DONE operation is returned, so a caller that
+    // has seen the create succeed can connect immediately — the same contract
+    // Cloud SQL's data plane gives (see ADR-013).
+    try {
+      await this.dataPlane.startInstance(project, dataPlaneKey, [DEFAULT_DATABASE_NAME]);
+    } catch (error) {
+      // An instance whose rows exist but whose endpoint never came up would
+      // advertise an address nothing answers on. Undoing the rows keeps create
+      // atomic. Drop the data plane rather than merely stop it so a failed
+      // start cannot leave half-built files for the next create of this name.
+      await this.rollbackFailedCreate(project, dataPlaneKey, name);
+
+      // Reported on the operation rather than thrown: real AlloyDB answers the
+      // create with 200 and an Operation, and a provisioning failure surfaces as
+      // that operation's `error` — which is what the client library's LRO
+      // rejects on. Throwing here would hand the client a 500 it never expects
+      // from instances.create.
+      return this.operations.createFailedOperation(
+        project,
+        location,
+        name,
+        'create',
+        RESOURCE_TYPE,
+        {
+          code: RPC_CODE_INTERNAL,
+          message: `Failed to start the data plane for ${name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }
+      );
+    }
+
+    return this.operations.createOperation(
+      project,
+      location,
+      name,
+      'create',
+      RESOURCE_TYPE,
+      instanceRecordToResponse(created)
     );
   }
 
@@ -160,6 +221,34 @@ export class InstanceService {
       instances: result.instances.map(instanceRecordToResponse),
       nextPageToken: result.nextPageToken,
     };
+  }
+
+  /**
+   * Undo a create whose data plane never came up.
+   *
+   * <p>Each step is guarded so the error the caller sees is the one that explains
+   * the failure, and the row is deleted even when the drop is what failed —
+   * unguarded, it would survive as exactly the orphan this exists to prevent.
+   */
+  private async rollbackFailedCreate(
+    project: string,
+    dataPlaneKey: string,
+    name: string
+  ): Promise<void> {
+    try {
+      await this.dataPlane.dropInstance(project, dataPlaneKey);
+    } catch (error) {
+      this.logger.error(
+        `Failed to drop the data plane while rolling back ${name}; its Postgres data may remain on disk`,
+        error
+      );
+    }
+
+    try {
+      await this.instances.delete(name);
+    } catch (error) {
+      this.logger.error(`Failed to delete the row while rolling back ${name}`, error);
+    }
   }
 
   async updateInstance(
@@ -239,12 +328,10 @@ export class InstanceService {
     instanceId: string,
     options: ValidatableOptions
   ): Promise<OperationResponse> {
-    const name = buildInstanceName(project, location, clusterId, instanceId);
-
     // Serialized with create/update: deleting a cluster's primary while a read
     // pool is mid-placement-check would otherwise leave the pool without one.
     return this.clusterMutex.runExclusively(buildClusterName(project, location, clusterId), () =>
-      this.deleteInstanceExclusively(project, location, clusterId, name, options)
+      this.deleteInstanceExclusively(project, location, clusterId, instanceId, options)
     );
   }
 
@@ -252,9 +339,10 @@ export class InstanceService {
     project: string,
     location: string,
     clusterId: string,
-    name: string,
+    instanceId: string,
     options: ValidatableOptions
   ): Promise<OperationResponse> {
+    const name = buildInstanceName(project, location, clusterId, instanceId);
     const instance = await this.getInstanceOrThrow(name);
 
     await this.validatePrimaryHasNoDependentReadPools(project, location, clusterId, instance);
@@ -268,6 +356,11 @@ export class InstanceService {
         RESOURCE_TYPE
       );
     }
+
+    await this.dataPlane.dropInstance(
+      project,
+      buildDataPlaneInstanceKey(location, clusterId, instanceId)
+    );
 
     await this.instances.delete(name);
 
@@ -374,12 +467,7 @@ export class InstanceService {
     }
 
     const clusterName = buildClusterName(project, location, clusterId);
-    const { instances } = await this.instances.listInstances(
-      project,
-      location,
-      clusterId,
-      ALL_INSTANCES_IN_CLUSTER
-    );
+    const instances = await this.instances.listAllInstancesInCluster(project, location, clusterId);
     const anotherIsPrimary = instances.some(
       instance => instance.name !== instanceName && instance.instanceType === InstanceType.PRIMARY
     );
@@ -415,12 +503,7 @@ export class InstanceService {
   ): Promise<void> {
     if (instance.instanceType !== InstanceType.PRIMARY) return;
 
-    const { instances } = await this.instances.listInstances(
-      project,
-      location,
-      clusterId,
-      ALL_INSTANCES_IN_CLUSTER
-    );
+    const instances = await this.instances.listAllInstancesInCluster(project, location, clusterId);
     const dependentReadPools = instances.filter(
       other => other.name !== instance.name && other.instanceType === InstanceType.READ_POOL
     );

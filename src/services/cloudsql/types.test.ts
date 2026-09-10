@@ -125,6 +125,7 @@ describe('operationRecordToResponse', () => {
       insertTime: '2026-08-18T00:00:00.000Z',
       startTime: '2026-08-18T00:00:00.000Z',
       endTime: '2026-08-18T00:00:01.000Z',
+      error: null,
     };
 
     const response = operationRecordToResponse(record);

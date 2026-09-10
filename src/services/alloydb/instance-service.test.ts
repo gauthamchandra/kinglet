@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { OperationsStore } from '@/core/operations/operations-store.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import { createMockLogger } from '../../../test-utils/mock-logger.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import { InstanceRepository } from './instance-repository.ts';
 import { InstanceService } from './instance-service.ts';
@@ -9,6 +12,7 @@ import {
   ALLOYDB_OPERATIONS_TABLE,
   AlloyDbError,
   buildClusterName,
+  buildDataPlaneInstanceKey,
   buildInstanceName,
   clusterRequestToRecord,
   InstanceState,
@@ -25,6 +29,8 @@ let storage: StorageManager;
 let clusters: ClusterRepository;
 let instances: InstanceRepository;
 let service: InstanceService;
+let logger: Logger;
+let dataPlane: RecordingDataPlane;
 
 function instanceFromOperation(operation: { response?: Record<string, unknown> }) {
   return operation.response as Record<string, unknown>;
@@ -44,7 +50,16 @@ beforeEach(async () => {
 
   await Promise.all([clusters.initialize(), instances.initialize(), operations.initialize()]);
 
-  service = new InstanceService(instances, clusters, operations, new ResourceMutex());
+  dataPlane = new RecordingDataPlane({ port: 5540 });
+  logger = createMockLogger();
+  service = new InstanceService(
+    instances,
+    clusters,
+    operations,
+    new ResourceMutex(),
+    logger,
+    dataPlane
+  );
 
   await clusters.create(
     clusterRequestToRecord(buildClusterName(PROJECT, LOCATION, CLUSTER_ID), {
@@ -54,6 +69,49 @@ beforeEach(async () => {
 });
 
 describe('createInstance', () => {
+  test('createInstance_startsTheDataPlaneWithThePostgresDatabase', async () => {
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      {}
+    );
+
+    expect(dataPlane.calls).toEqual([
+      `start:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}:postgres`,
+    ]);
+  });
+
+  /**
+   * Real AlloyDB reports a provisioning failure on the operation, not on the
+   * create call — so this resolves, and the failure is the operation's `error`.
+   */
+  test('createInstance_whenTheDataPlaneFailsToStart_returnsAFailedOperationAndRollsBack', async () => {
+    dataPlane.startFailure = new Error('no free ports');
+
+    const operation = await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      {}
+    );
+
+    expect(operation.done).toBe(true);
+    expect(operation.error).toEqual({
+      code: 13,
+      message: expect.stringContaining('no free ports'),
+    });
+    expect(operation).not.toHaveProperty('response');
+    expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
+    expect(dataPlane.calls).toContain(
+      `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}`
+    );
+  });
+
   test('createInstance_returnsACompletedOperationCarryingTheNewInstance', async () => {
     const operation = await service.createInstance(
       PROJECT,
@@ -75,7 +133,7 @@ describe('createInstance', () => {
     expect(instance['@type']).toBe('type.googleapis.com/google.cloud.alloydb.v1.Instance');
   });
 
-  test('createInstance_reportsTheLoopbackAddressPlaceholder', async () => {
+  test('createInstance_reportsTheLoopbackAdvertisedAddress', async () => {
     const operation = await service.createInstance(
       PROJECT,
       LOCATION,
@@ -317,6 +375,54 @@ describe('createInstance', () => {
       service.getInstance(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID)
     ).rejects.toHaveProperty('code', 'NOT_FOUND');
     expect(await storage.count(ALLOYDB_OPERATIONS_TABLE)).toBe(0);
+  });
+
+  /**
+   * The row check above would still pass if the eager start ran before the
+   * `validateOnly` return — a dry run would boot a wasm Postgres and bind a port.
+   */
+  test('createInstance_withValidateOnly_startsNoDataPlane', async () => {
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      { validateOnly: true }
+    );
+
+    expect(dataPlane.calls).toEqual([]);
+  });
+
+  /**
+   * An unguarded rollback replaces the error that explains the failure with its
+   * own and skips the row deletion, leaving exactly the orphaned row it exists
+   * to prevent.
+   */
+  /**
+   * An unguarded rollback would replace the cause that explains the failure with
+   * its own and skip the row deletion, leaving exactly the orphan it exists to
+   * prevent.
+   */
+  test('createInstance_whenTheRollbackAlsoFails_keepsTheOriginalCauseAndStillDeletesTheRow', async () => {
+    dataPlane.startFailure = new Error('no free ports');
+    dataPlane.dropFailure = new Error('EACCES');
+
+    const operation = await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      {}
+    );
+
+    expect(operation.error).toEqual({
+      code: 13,
+      message: expect.stringContaining('no free ports'),
+    });
+    expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
+    expect(logger.error).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -665,6 +771,9 @@ describe('deleteInstance', () => {
     await expect(
       service.getInstance(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID)
     ).rejects.toHaveProperty('code', 'NOT_FOUND');
+    expect(dataPlane.calls).toContain(
+      `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}`
+    );
   });
 
   test('deleteInstance_givenAnUnknownInstance_reportsNotFound', async () => {
@@ -681,6 +790,19 @@ describe('deleteInstance', () => {
     expect((await service.getInstance(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID)).name).toBe(
       INSTANCE_NAME
     );
+  });
+
+  /**
+   * The row check above would still pass if `dropInstance` ran before the
+   * `validateOnly` return — the row would survive and its Postgres data would
+   * be gone.
+   */
+  test('deleteInstance_withValidateOnly_dropsNoDataPlane', async () => {
+    await service.deleteInstance(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID, {
+      validateOnly: true,
+    });
+
+    expect(dataPlane.calls.filter(call => call.startsWith('drop:'))).toEqual([]);
   });
 
   // The delete counterpart of the create/update rule that a read pool needs a

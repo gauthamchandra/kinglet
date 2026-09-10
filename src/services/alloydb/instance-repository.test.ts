@@ -75,3 +75,36 @@ describe('listInstances', () => {
     expect((await repository.listInstances('p', 'us-central1', 'c1')).instances).toEqual([]);
   });
 });
+
+describe('listAllInstancesInCluster', () => {
+  test('listAllInstancesInCluster_returnsEveryInstanceUnderTheCluster', async () => {
+    await repository.create(instanceData('c1', 'i1'));
+    await repository.create(instanceData('c1', 'i2'));
+    await repository.create(instanceData('c2', 'other'));
+
+    const all = await repository.listAllInstancesInCluster('p', 'us-central1', 'c1');
+
+    expect(all.map(instance => instance.name)).toEqual([
+      buildInstanceName('p', 'us-central1', 'c1', 'i1'),
+      buildInstanceName('p', 'us-central1', 'c1', 'i2'),
+    ]);
+  });
+});
+
+describe('listAllInstances', () => {
+  test('listAllInstances_spansEveryClusterAndProject', async () => {
+    await repository.create(instanceData('c1', 'i1'));
+    await repository.create(
+      instanceRequestToRecord(buildInstanceName('other', 'europe-west1', 'c9', 'i9'), {
+        instanceType: 'PRIMARY',
+      })
+    );
+
+    const all = await repository.listAllInstances();
+
+    expect(all.map(instance => instance.name).sort()).toEqual([
+      buildInstanceName('other', 'europe-west1', 'c9', 'i9'),
+      buildInstanceName('p', 'us-central1', 'c1', 'i1'),
+    ]);
+  });
+});

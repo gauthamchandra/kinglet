@@ -46,6 +46,11 @@ services:
       # a trusted local/CI machine. The first instance lands on 5432, so a
       # local Postgres already using it will push the emulator to 5433.
       - "5432-5531:5432-5531"
+      # AlloyDB data plane (on by default; omit if ALLOYDB_DATA_PLANE=false).
+      # Same trust caveats as Cloud SQL. Defaults start after Cloud SQL's range
+      # so both services can run together; the first AlloyDB instance lands on
+      # 5540.
+      - "5540-5639:5540-5639"
     volumes:
       - kinglet-data:/app/data  # persist state across restarts
     environment:

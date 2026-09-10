@@ -26,6 +26,10 @@ See [Storage modes](storage.md) for details on each storage type.
 | --- | --- | --- |
 | `SERVICES` | — | Comma-separated list to enable (e.g., `scheduler,tasks`) |
 | `ENABLE_ALLOYDB` | `true` | Enable AlloyDB for PostgreSQL service |
+| `ALLOYDB_DATA_PLANE` | `true` | Serve a real Postgres endpoint per instance (PGlite); `false` for a control plane only |
+| `ALLOYDB_PORT_RANGE_START` | `5540` | First port available for AlloyDB instance endpoints (after Cloud SQL's default range) |
+| `ALLOYDB_PORT_RANGE_END` | `5639` | Last port available for AlloyDB instance endpoints |
+| `ALLOYDB_POSTGIS` | `false` | Link PostGIS into every AlloyDB database (slower instance creation) |
 | `ENABLE_PUBSUB` | `true` | Enable Pub/Sub service |
 | `ENABLE_SCHEDULER` | `true` | Enable Cloud Scheduler service |
 | `ENABLE_TASKS` | `true` | Enable Cloud Tasks service |

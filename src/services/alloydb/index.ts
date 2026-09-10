@@ -4,17 +4,15 @@
  * <p>Specification: `https://alloydb.googleapis.com/$discovery/rest?version=v1`
  * (revision 20260805).
  *
- * <p><b>NOTE:</b> this release emulates the control plane only — 23 of the API's
- * 40 methods. Nothing listens on a PostgreSQL port, so `Instance.ipAddress` and
- * `ConnectionInfo.ipAddress` report a loopback placeholder to keep the response
- * shape right. Backups and every replication/maintenance custom verb
- * (`promote`, `failover`, `restore`, `switchover`, `upgrade`, `injectFault`,
- * `restart`, `createsecondary`, `export`, `import`, `restoreFromCloudSQL`) are
- * deliberately absent rather than stubbed; see the README for the full list.
+ * <p>Wires together repositories, HTTP handlers, and the PGlite-backed data
+ * plane that makes an emulated instance something a Postgres client can
+ * actually connect to (see docs/adrs/013-cloudsql-pglite-data-plane.md — the
+ * shared data plane lives under `@/shared/postgres-data-plane`).
  *
- * <p>There is intentionally no `start()` or `stop()`: the service owns no
- * background work and no OS resources, and `StorageManager` is closed centrally.
- * The data plane change that introduces both is tracked separately.
+ * <p>Backups and every replication/maintenance custom verb (`promote`,
+ * `failover`, `restore`, `switchover`, `upgrade`, `injectFault`, `restart`,
+ * `createsecondary`, `export`, `import`, `restoreFromCloudSQL`) are
+ * deliberately absent rather than stubbed; see the README for the full list.
  */
 
 import type { ComposableOperationsStore } from '@/core/gateway/composable-operations.ts';
@@ -27,6 +25,17 @@ import type {
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import { buildOperationName, OperationsStore } from '@/core/operations/operations-store.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type {
+  PersistedInstance,
+  ServiceDataPlaneOptions,
+} from '@/shared/postgres-data-plane/host.ts';
+import {
+  ALLOYDB_DATA_PLANE_PRODUCT,
+  createPostgresDataPlane,
+  restartPersistedInstances,
+} from '@/shared/postgres-data-plane/host.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { parsePageSize } from '@/shared/utils/pagination.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
@@ -38,7 +47,15 @@ import { InstanceHandlers } from './instance-handlers.ts';
 import { InstanceRepository } from './instance-repository.ts';
 import { InstanceService } from './instance-service.ts';
 import { LocationHandlers } from './location-handlers.ts';
-import { ALLOYDB_OPERATIONS_TABLE, AlloyDbError } from './types.ts';
+import {
+  ALLOYDB_OPERATIONS_TABLE,
+  AlloyDbError,
+  buildDataPlaneInstanceKey,
+  buildUserName,
+  DEFAULT_DATABASE_NAME,
+  parseDataPlaneInstanceKey,
+  parseInstanceName,
+} from './types.ts';
 import { UserHandlers } from './user-handlers.ts';
 import { UserRepository } from './user-repository.ts';
 import { UserService } from './user-service.ts';
@@ -49,22 +66,43 @@ const ALLOYDB_API_TYPE_PREFIX = 'google.cloud.alloydb.v1';
 const OPERATIONS_COLLECTION_PATH = '/v1/projects/:project/locations/:location/operations';
 const OPERATION_PATH = `${OPERATIONS_COLLECTION_PATH}/:operationId`;
 
+// Mirrors the config schema's defaults (see src/config/schema.ts). Tests that
+// only exercise the control plane pass `{ enabled: false }` to avoid building
+// wasm Postgres instances they never connect to.
+export const DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOptions> = {
+  enabled: true,
+  portRangeStart: 5540,
+  portRangeEnd: 5639,
+  storageType: 'hybrid',
+  sqlitePath: './data/emulator.db',
+  postgis: false,
+};
+
 export class AlloyDbService {
   private readonly storage: StorageManager;
+  private readonly logger: Logger;
   private readonly responseUtils: ResponseUtils;
+  private readonly dataPlaneOptions: Required<ServiceDataPlaneOptions>;
 
+  private dataPlane: PostgresDataPlane = new DisabledDataPlane();
   private operationsStore: OperationsStore | null = null;
   private clusterHandlers: ClusterHandlers | null = null;
   private instanceHandlers: InstanceHandlers | null = null;
   private userHandlers: UserHandlers | null = null;
   private locationHandlers: LocationHandlers | null = null;
 
-  constructor(storage: StorageManager, logger: Logger) {
+  constructor(storage: StorageManager, logger: Logger, dataPlaneOptions?: ServiceDataPlaneOptions) {
     this.storage = storage;
+    this.logger = logger;
     this.responseUtils = new ResponseUtils(new StandardResponseFormatter(logger));
+    this.dataPlaneOptions = { ...DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS, ...dataPlaneOptions };
   }
 
   async initialize(): Promise<void> {
+    // Idempotent: a second call would build a second data plane and orphan the
+    // first's listeners and PGlites, since stop() only reaches the one held.
+    if (this.operationsStore) return;
+
     const clusters = new ClusterRepository(this.storage);
     const instances = new InstanceRepository(this.storage);
     const users = new UserRepository(this.storage);
@@ -82,6 +120,24 @@ export class AlloyDbService {
 
     this.operationsStore = operations;
 
+    this.dataPlane = createPostgresDataPlane(
+      this.logger,
+      ALLOYDB_DATA_PLANE_PRODUCT,
+      this.dataPlaneOptions,
+      async (project, instanceKey, user) => {
+        const parsed = parseDataPlaneInstanceKey(instanceKey);
+
+        if (!parsed) return null;
+
+        // Users are cluster-scoped, so the instance segment plays no part.
+        const record = await users.getByName(
+          buildUserName(project, parsed.location, parsed.clusterId, user)
+        );
+
+        return record ? { password: record.password } : null;
+      }
+    );
+
     // One mutex shared by every service that mutates a cluster's subtree, all
     // keyed on the cluster name: instance placement, user creation, and cluster
     // deletion (which cascades both) must exclude each other, or a create can
@@ -89,11 +145,26 @@ export class AlloyDbService {
     const clusterMutex = new ResourceMutex();
 
     this.clusterHandlers = new ClusterHandlers(
-      new ClusterService(clusters, instances, users, operations, clusterMutex),
+      new ClusterService(
+        clusters,
+        instances,
+        users,
+        operations,
+        clusterMutex,
+        this.logger,
+        this.dataPlane
+      ),
       this.responseUtils
     );
     this.instanceHandlers = new InstanceHandlers(
-      new InstanceService(instances, clusters, operations, clusterMutex),
+      new InstanceService(
+        instances,
+        clusters,
+        operations,
+        clusterMutex,
+        this.logger,
+        this.dataPlane
+      ),
       this.responseUtils
     );
     this.userHandlers = new UserHandlers(
@@ -101,6 +172,12 @@ export class AlloyDbService {
       this.responseUtils
     );
     this.locationHandlers = new LocationHandlers(this.responseUtils);
+
+    if (this.dataPlaneOptions.enabled) {
+      await this.rehydrateDataPlane(instances);
+    }
+
+    this.logger.info('AlloyDB service initialized');
   }
 
   /**
@@ -155,6 +232,69 @@ export class AlloyDbService {
       deleteOperation: name => store.deleteOperation(name),
       cancelOperation: name => store.cancelOperation(name),
     };
+  }
+
+  start(): void {
+    this.logger.info('AlloyDB service started');
+  }
+
+  /**
+   * The port an instance's Postgres endpoint listens on, or null when the
+   * instance is not running a data plane.
+   *
+   * <p>Not derivable from the AlloyDB API, which stays byte-faithful and so has
+   * nowhere to report a kinglet-only port. Callers that hold the service — the
+   * emulator process itself, and tests — can ask here instead of assuming the
+   * port allocator's first choice was free.
+   */
+  getDataPlanePort(
+    project: string,
+    location: string,
+    clusterId: string,
+    instanceId: string
+  ): number | null {
+    return this.dataPlane.getPort(
+      project,
+      buildDataPlaneInstanceKey(location, clusterId, instanceId)
+    );
+  }
+
+  async stop(): Promise<void> {
+    await this.dataPlane.stopAll();
+    this.logger.info('AlloyDB service stopped');
+  }
+
+  /**
+   * Rows that outlived the last run, keyed the way the data plane knows them.
+   * Rehydration itself — and why it matters — is {@link restartPersistedInstances}.
+   */
+  private async rehydrateDataPlane(instances: InstanceRepository): Promise<void> {
+    const persisted: PersistedInstance[] = [];
+
+    for (const instance of await instances.listAllInstances()) {
+      const parsed = parseInstanceName(instance.name);
+
+      if (!parsed) {
+        this.logger.warn(
+          `Skipping data-plane restart for AlloyDB instance with unparseable name ${instance.name}`
+        );
+        continue;
+      }
+
+      persisted.push({
+        name: instance.name,
+        project: parsed.project,
+        instance: buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId),
+        databases: [DEFAULT_DATABASE_NAME],
+      });
+    }
+
+    await restartPersistedInstances(
+      this.logger,
+      ALLOYDB_DATA_PLANE_PRODUCT,
+      this.dataPlane,
+      persisted
+    );
   }
 
   private buildOperationsRoutes(): RouteDefinition[] {

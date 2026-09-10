@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { OperationsStore } from '@/core/operations/operations-store.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { Logger } from '@/shared/utils/logger.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import { createMockLogger } from '../../../test-utils/mock-logger.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import { ClusterService } from './cluster-service.ts';
 import { InstanceRepository } from './instance-repository.ts';
@@ -10,6 +13,7 @@ import {
   ALLOYDB_OPERATIONS_TABLE,
   AlloyDbError,
   buildClusterName,
+  buildDataPlaneInstanceKey,
   buildInstanceName,
   buildUserName,
   ClusterState,
@@ -36,6 +40,8 @@ let instances: InstanceRepository;
 let users: UserRepository;
 let clusterMutex: ResourceMutex;
 let operations: OperationsStore;
+let logger: Logger;
+let dataPlane: RecordingDataPlane;
 let service: ClusterService;
 
 function clusterFromOperation(operation: { response?: Record<string, unknown> }) {
@@ -63,7 +69,17 @@ beforeEach(async () => {
   ]);
 
   clusterMutex = new ResourceMutex();
-  service = new ClusterService(clusters, instances, users, operations, clusterMutex);
+  dataPlane = new RecordingDataPlane({ port: 5540, reportedPort: null });
+  logger = createMockLogger();
+  service = new ClusterService(
+    clusters,
+    instances,
+    users,
+    operations,
+    clusterMutex,
+    logger,
+    dataPlane
+  );
 });
 
 describe('createCluster', () => {
@@ -86,6 +102,17 @@ describe('createCluster', () => {
     await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, {});
 
     expect((await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).name).toBe(CLUSTER_NAME);
+  });
+
+  test('createCluster_createsTheInitialUserWithItsPasswordForDataPlaneAuth', async () => {
+    await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, {});
+
+    const user = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres'));
+
+    expect(user?.password).toBe('hunter2');
+    expect(JSON.stringify(await service.getCluster(PROJECT, LOCATION, CLUSTER_ID))).not.toContain(
+      'hunter2'
+    );
   });
 
   /**
@@ -119,6 +146,26 @@ describe('createCluster', () => {
     );
 
     await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+  });
+
+  /**
+   * The initial username becomes a User row, so it has to satisfy the same id
+   * rule users.create enforces. Accepted, it would mint `users/a/b` — a name
+   * outside the discovery document's `users/[^/]+` shape that no client could
+   * then address, and which real AlloyDB rejects at create.
+   */
+  test('createCluster_withAnInitialUsernameContainingASlash_reportsInvalidArgument', async () => {
+    const promise = service.createCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { ...VALID_BODY, initialUser: { user: 'a/b', password: 'hunter2' } },
+      {}
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
+    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+    expect(await clusters.getByName(CLUSTER_NAME)).toBeNull();
   });
 
   // Real AlloyDB requires the initial postgres password on create, so a body
@@ -210,6 +257,14 @@ describe('createCluster', () => {
     await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, { validateOnly: true });
 
     expect(await storage.count(ALLOYDB_OPERATIONS_TABLE)).toBe(0);
+  });
+
+  test('createCluster_withValidateOnly_doesNotPersistTheInitialUser', async () => {
+    await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, { validateOnly: true });
+
+    expect(
+      await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres'))
+    ).toBeNull();
   });
 
   test('createCluster_neverEchoesTheInitialUserPassword', async () => {
@@ -484,6 +539,9 @@ describe('deleteCluster', () => {
 
     expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
     expect((await users.listUsers(PROJECT, LOCATION, CLUSTER_ID)).users).toEqual([]);
+    expect(dataPlane.calls).toContain(
+      `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, 'i1')}`
+    );
   });
 
   /**
@@ -515,6 +573,64 @@ describe('deleteCluster', () => {
     await service.deleteCluster(PROJECT, LOCATION, CLUSTER_ID, { validateOnly: true });
 
     expect((await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).name).toBe(CLUSTER_NAME);
+  });
+
+  /**
+   * The row check above would still pass if the cascade drop ran before the
+   * `validateOnly` return — and the instance's Postgres data would be gone.
+   */
+  test('deleteCluster_withValidateOnly_dropsNoDataPlane', async () => {
+    await instances.create(
+      instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'i1'), {})
+    );
+
+    await service.deleteCluster(PROJECT, LOCATION, CLUSTER_ID, {
+      force: true,
+      validateOnly: true,
+    });
+
+    expect(dataPlane.calls).toEqual([]);
+  });
+
+  /**
+   * A drop that fails must not strand the cluster: the rows still go, so the
+   * cluster is deletable and no instance is left reporting READY with its data
+   * already gone, and the error names what may survive on disk.
+   */
+  test('deleteCluster_whenOneInstanceDropFails_stillDeletesEveryRowAndLogsAnError', async () => {
+    await instances.create(
+      instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'i1'), {})
+    );
+    await instances.create(
+      instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'i2'), {})
+    );
+
+    dataPlane.dropFailure = new Error('EBUSY');
+
+    const operation = await service.deleteCluster(PROJECT, LOCATION, CLUSTER_ID, { force: true });
+
+    expect(operation.done).toBe(true);
+    expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
+    expect(await clusters.getByName(CLUSTER_NAME)).toBeNull();
+    expect(logger.error).toHaveBeenCalledTimes(2);
+  });
+
+  test('deleteCluster_whenOneInstanceDropFails_stillAttemptsEveryOtherInstance', async () => {
+    await instances.create(
+      instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'i1'), {})
+    );
+    await instances.create(
+      instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'i2'), {})
+    );
+
+    dataPlane.dropFailure = new Error('EBUSY');
+
+    await service.deleteCluster(PROJECT, LOCATION, CLUSTER_ID, { force: true });
+
+    expect(dataPlane.calls).toEqual([
+      `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, 'i1')}`,
+      `drop:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, 'i2')}`,
+    ]);
   });
 
   test('deleteCluster_withValidateOnlyAndChildInstances_stillReportsFailedPrecondition', async () => {
@@ -555,6 +671,39 @@ describe('rotating the initial user', () => {
 
     expect(cluster).not.toHaveProperty('initialUser');
     expect(JSON.stringify(cluster)).not.toContain('brand-new-secret');
+  });
+
+  test('updateCluster_patchingInitialUser_doesNotBlankTheStoredUserPassword', async () => {
+    await service.updateCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { initialUser: { user: 'postgres' } },
+      { updateMask: 'initialUser' }
+    );
+
+    const user = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres'));
+
+    expect(user?.password).toBe('hunter2');
+  });
+
+  test('updateCluster_renamingInitialUser_leavesTheOriginalUserPasswordIntact', async () => {
+    await service.updateCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { initialUser: { user: 'rotated', password: 'brand-new-secret' } },
+      { updateMask: 'initialUser' }
+    );
+
+    const original = await users.getByName(
+      buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres')
+    );
+    const renamed = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'rotated'));
+
+    expect(original?.password).toBe('hunter2');
+    expect(renamed).toBeNull();
+    expect((await clusters.getByName(CLUSTER_NAME))?.initialUserName).toBe('rotated');
   });
 
   test('updateCluster_patchingInitialUserWithoutAUsername_clearsTheStoredUsername', async () => {
@@ -680,7 +829,13 @@ describe('concurrent cluster deletion', () => {
   // inside the lock and fail rather than persist an instance beneath a cluster
   // that no longer exists.
   test('deleteCluster_racingAnInstanceCreate_neverOrphansTheInstance', async () => {
-    const instanceService = new InstanceService(instances, clusters, operations, clusterMutex);
+    const instanceService = new InstanceService(
+      instances,
+      clusters,
+      operations,
+      clusterMutex,
+      logger
+    );
 
     await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, {});
 

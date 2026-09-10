@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { ConfigSchema } from '@/config/schema.ts';
 import type { HttpMethod, RouteDefinition, RouteRequest } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
-import { AlloyDbService } from './index.ts';
+import { AlloyDbService, DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS } from './index.ts';
 
 /**
  * The full route table, transcribed from the discovery document's `flatPath` for
@@ -178,19 +179,48 @@ beforeEach(async () => {
   storage = new StorageManager();
   await storage.initialize({ type: 'memory' });
 
-  service = new AlloyDbService(storage, new Logger('test', 'error'));
+  service = new AlloyDbService(storage, new Logger('test', 'error'), { enabled: false });
   await service.initialize();
 });
 
 describe('initialize', () => {
+  test('service data-plane defaults match the config schema defaults', () => {
+    const schemaDefaults = ConfigSchema.parse({
+      server: {},
+      storage: {},
+      auth: {},
+      services: {
+        pubsub: {},
+        scheduler: {},
+        tasks: {},
+        secrets: {},
+        storage: {},
+        workflows: {},
+        kms: {},
+      },
+      logging: {},
+    }).services.alloydb.dataPlane;
+
+    expect(DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS).toMatchObject({
+      enabled: schemaDefaults.enabled,
+      portRangeStart: schemaDefaults.portRangeStart,
+      portRangeEnd: schemaDefaults.portRangeEnd,
+      postgis: schemaDefaults.postgis,
+    });
+  });
+
   test('getRoutes_calledBeforeInitialize_throws', () => {
-    const uninitialized = new AlloyDbService(storage, new Logger('test', 'error'));
+    const uninitialized = new AlloyDbService(storage, new Logger('test', 'error'), {
+      enabled: false,
+    });
 
     expect(() => uninitialized.getRoutes()).toThrow(/initialize/);
   });
 
   test('getComposableOperationsStore_calledBeforeInitialize_throws', () => {
-    const uninitialized = new AlloyDbService(storage, new Logger('test', 'error'));
+    const uninitialized = new AlloyDbService(storage, new Logger('test', 'error'), {
+      enabled: false,
+    });
 
     expect(() => uninitialized.getComposableOperationsStore()).toThrow(/initialize/);
   });
@@ -422,5 +452,182 @@ describe('getComposableOperationsStore', () => {
 
     expect(firstPage.operations).toHaveLength(1);
     expect(firstPage.nextPageToken).toBe('1');
+  });
+});
+
+/**
+ * The data plane is off in every other test here, so none of the wiring below —
+ * the user lookup the wire server authenticates against, the port accessor,
+ * stop(), or the restart-time rehydration — is otherwise exercised. Mirrors
+ * src/services/cloudsql/index.test.ts, which covers the same shared stack.
+ */
+describe('data plane', () => {
+  const PORT_RANGE_START = 46800;
+  const PROJECT = 'p1';
+  const LOCATION = 'us-central1';
+  const CLUSTER = 'c1';
+  const INSTANCE = 'i1';
+  const PASSWORD = 's3cret';
+
+  async function startService(): Promise<AlloyDbService> {
+    const dataPlaneService = new AlloyDbService(storage, new Logger('AlloyDbTest', 'error'), {
+      enabled: true,
+      portRangeStart: PORT_RANGE_START,
+      portRangeEnd: PORT_RANGE_START + 4,
+      storageType: 'memory',
+      sqlitePath: './data/emulator.db',
+      postgis: false,
+    });
+
+    await dataPlaneService.initialize();
+
+    return dataPlaneService;
+  }
+
+  async function callRoute(
+    target: AlloyDbService,
+    routeId: string,
+    overrides: Partial<RouteRequest>
+  ) {
+    const route = target.getRoutes().find((candidate: RouteDefinition) => candidate.id === routeId);
+
+    if (!route) throw new Error(`No route registered with id "${routeId}"`);
+
+    return route.handler(request(overrides), {
+      routeId,
+      startTime: 0,
+      metadata: {},
+      logger: new Logger('test', 'error'),
+    });
+  }
+
+  async function createClusterAndInstance(target: AlloyDbService): Promise<void> {
+    const cluster = await callRoute(target, 'alloydb.clusters.create', {
+      method: 'POST',
+      params: { project: PROJECT, location: LOCATION },
+      query: { clusterId: CLUSTER },
+      body: {
+        initialUser: { user: 'postgres', password: PASSWORD },
+        networkConfig: { network: 'projects/p1/global/networks/default' },
+      },
+    });
+
+    expect(cluster.status).toBe(200);
+
+    const instance = await callRoute(target, 'alloydb.clusters.instances.create', {
+      method: 'POST',
+      params: { project: PROJECT, location: LOCATION, cluster: CLUSTER },
+      query: { instanceId: INSTANCE },
+      body: { instanceType: 'PRIMARY' },
+    });
+
+    expect(instance.status).toBe(200);
+  }
+
+  async function queryOne(port: number): Promise<Record<string, unknown>[]> {
+    const client = new Bun.SQL({
+      url: `postgres://postgres:${PASSWORD}@127.0.0.1:${port}/postgres`,
+      tls: false,
+      max: 1,
+    });
+
+    try {
+      const rows: Record<string, unknown>[] = await client.unsafe('SELECT 1 AS one');
+
+      return rows.map(row => ({ ...row }));
+    } finally {
+      await client.end();
+    }
+  }
+
+  /**
+   * Exercises the lookupUser callback: the cluster's initialUser password is
+   * what the wire server has to authenticate this connection against.
+   */
+  test('a created instance is reachable with the initial user password', async () => {
+    const dataPlaneService = await startService();
+
+    await createClusterAndInstance(dataPlaneService);
+
+    // Read the port back rather than assuming the allocator handed out the
+    // first in the range.
+    const port = dataPlaneService.getDataPlanePort(PROJECT, LOCATION, CLUSTER, INSTANCE);
+
+    expect(port).not.toBeNull();
+    expect(await queryOne(port ?? 0)).toEqual([{ one: 1 }]);
+
+    await dataPlaneService.stop();
+  });
+
+  test('stop closes the endpoint so its port can be bound again', async () => {
+    const dataPlaneService = await startService();
+
+    await createClusterAndInstance(dataPlaneService);
+    await dataPlaneService.stop();
+
+    // The wire server binds 0.0.0.0, so this check has to as well: on macOS a
+    // 127.0.0.1 bind succeeds beside a live wildcard listener, which would let
+    // this pass with the endpoint still open.
+    const rebound = Bun.listen({
+      hostname: '0.0.0.0',
+      port: PORT_RANGE_START,
+      socket: { data() {}, open() {}, close() {}, error() {} },
+    });
+
+    expect(rebound.port).toBe(PORT_RANGE_START);
+
+    rebound.stop(true);
+  });
+
+  /**
+   * Without rehydration a persisted instance keeps being listed and described
+   * while nothing listens on its endpoint, and no admin call short of a
+   * recreate brings it back.
+   */
+  test('brings persisted instances back up on a fresh service over the same storage', async () => {
+    const first = await startService();
+
+    await createClusterAndInstance(first);
+    await first.stop();
+
+    const revived = await startService();
+
+    expect(await queryOne(PORT_RANGE_START)).toEqual([{ one: 1 }]);
+
+    await revived.stop();
+  });
+
+  /**
+   * initialize_calledTwice_doesNotThrow above runs with the data plane off. On, a
+   * second call used to build a second manager and re-run rehydration, so the
+   * first manager's listener stayed bound with nothing left holding it.
+   */
+  test('a second initialize keeps the first data plane rather than orphaning it', async () => {
+    const dataPlaneService = await startService();
+
+    await createClusterAndInstance(dataPlaneService);
+    await dataPlaneService.initialize();
+    await dataPlaneService.stop();
+
+    // The wire server binds 0.0.0.0, so this check has to as well: on macOS a
+    // 127.0.0.1 bind succeeds beside a live wildcard listener, which would let
+    // this pass with the endpoint still open.
+    const rebound = Bun.listen({
+      hostname: '0.0.0.0',
+      port: PORT_RANGE_START,
+      socket: { data() {}, open() {}, close() {}, error() {} },
+    });
+
+    expect(rebound.port).toBe(PORT_RANGE_START);
+
+    rebound.stop(true);
+  });
+
+  test('reports no port for an instance that was never created', async () => {
+    const dataPlaneService = await startService();
+
+    expect(dataPlaneService.getDataPlanePort(PROJECT, LOCATION, CLUSTER, 'ghost')).toBeNull();
+
+    await dataPlaneService.stop();
   });
 });

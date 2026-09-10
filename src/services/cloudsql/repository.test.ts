@@ -366,6 +366,7 @@ describe('CloudSqlRepository', () => {
           insertTime: '2026-08-18T00:00:00.000Z',
           startTime: '2026-08-18T00:00:00.000Z',
           endTime: '2026-08-18T00:00:00.000Z',
+          error: null,
         });
       }
 
@@ -389,6 +390,7 @@ describe('CloudSqlRepository', () => {
         insertTime: '2026-08-18T00:00:00.000Z',
         startTime: '2026-08-18T00:00:00.000Z',
         endTime: '2026-08-18T00:00:00.000Z',
+        error: null,
       });
 
       const found = await repo.getOperation('test-project', 'op-test');

@@ -305,3 +305,42 @@ describe('multi-tenancy', () => {
     );
   });
 });
+
+describe('createFailedOperation', () => {
+  const failure = { code: 13, message: 'the data plane never came up' };
+
+  /**
+   * The result oneof: a failed operation is done, carries `error`, and has no
+   * `response` — the shape a client library's LRO turns into a rejection.
+   */
+  test('createFailedOperation_isDoneWithTheErrorAndNoResponse', async () => {
+    const operation = await store.createFailedOperation(
+      'p',
+      'us-central1',
+      TARGET,
+      'create',
+      'Widget',
+      failure
+    );
+
+    expect(operation.done).toBe(true);
+    expect(operation.error).toEqual(failure);
+    expect(operation).not.toHaveProperty('response');
+  });
+
+  test('createFailedOperation_persistsTheErrorForALaterGet', async () => {
+    const created = await store.createFailedOperation(
+      'p',
+      'us-central1',
+      TARGET,
+      'create',
+      'Widget',
+      failure
+    );
+
+    const fetched = await store.getOperation(created.name);
+
+    expect(fetched?.error).toEqual(failure);
+    expect(fetched).not.toHaveProperty('response');
+  });
+});

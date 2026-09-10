@@ -5,8 +5,8 @@
  * the same core lifecycle again through the official @google-cloud/alloydb client,
  * which is the real consumer this emulation has to satisfy.
  *
- * There is no data-plane test: this release emulates the control plane only, so
- * nothing listens on a PostgreSQL port.
+ * The connectable Postgres endpoint is covered separately by
+ * alloydb-data-plane.test.ts.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -42,7 +42,8 @@ beforeAll(async () => {
   await storage.initialize({ type: 'memory' });
 
   const logger = new Logger('e2e-alloydb', 'error');
-  alloydbService = new AlloyDbService(storage, logger);
+  // Control-plane suite: skip booting wasm Postgres for every instance create.
+  alloydbService = new AlloyDbService(storage, logger, { enabled: false });
   await alloydbService.initialize();
 
   emulatorServer = Bun.serve({
@@ -51,8 +52,9 @@ beforeAll(async () => {
   });
 });
 
-afterAll(() => {
+afterAll(async () => {
   emulatorServer.stop();
+  await alloydbService.stop();
 });
 
 describe('AlloyDB E2E: Raw HTTP API', () => {
@@ -201,7 +203,8 @@ describe('AlloyDB E2E: Raw HTTP API', () => {
     expect(instance.state).toBe('READY');
     expect(instance.instanceType).toBe('PRIMARY');
     expect(instance.machineConfig).toEqual({ cpuCount: 2 });
-    // No data plane yet, so the address is loopback rather than connectable.
+    // The kinglet-only listen port is not in the API response; ipAddress stays
+    // loopback (see ADR-013).
     expect(instance.ipAddress).toBe('127.0.0.1');
   });
 
