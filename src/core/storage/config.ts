@@ -49,8 +49,10 @@ export function toStorageConfig(settings: EmulatorStorageSettings): StorageConfi
 
   // `hybrid` is SQLite plus an LRU cache. `cacheSize` is bytes on the
   // emulator surface and megabytes on the provider surface — convert here so
-  // callers never have to know both units. A zero budget means "no cache",
-  // which makes hybrid behave like sqlite.
+  // callers never have to know both units. The division is left exact, since
+  // rounding to whole megabytes would hand the cache a different budget than
+  // the one configured. A zero budget means "no cache", which makes hybrid
+  // behave like sqlite.
   if (settings.type === 'hybrid') {
     const cacheSizeBytes = settings.cacheSize ?? DEFAULT_CACHE_SIZE_BYTES;
 
@@ -59,7 +61,7 @@ export function toStorageConfig(settings: EmulatorStorageSettings): StorageConfi
         ...config,
         cache: {
           maxSize: DEFAULT_CACHE_MAX_ENTRIES,
-          maxMemoryMb: Math.max(1, Math.round(cacheSizeBytes / (1024 * 1024))),
+          maxMemoryMb: cacheSizeBytes / (1024 * 1024),
         },
       };
     }

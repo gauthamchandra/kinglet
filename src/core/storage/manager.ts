@@ -685,7 +685,13 @@ class TransactionalStorageManager implements IStorageManager {
     id: string,
     data: Partial<Omit<T, keyof BaseRecord>>
   ): Promise<T | null> {
-    return await this.provider.updateById<T>(table, id, data);
+    const updated = await this.provider.updateById<T>(table, id, data);
+
+    if (updated) {
+      await this.invalidate(`${table}:${id}`);
+    }
+
+    return updated;
   }
 
   async updateMany<T extends BaseRecord>(
@@ -693,15 +699,36 @@ class TransactionalStorageManager implements IStorageManager {
     filter: QueryFilter,
     data: Partial<Omit<T, keyof BaseRecord>>
   ): Promise<number> {
-    return await this.provider.updateMany<T>(table, filter, data);
+    const count = await this.provider.updateMany<T>(table, filter, data);
+
+    if (count > 0) {
+      await this.invalidateMatching(table, filter);
+    }
+
+    return count;
   }
 
   async deleteById(table: string, id: string): Promise<boolean> {
-    return await this.provider.deleteById(table, id);
+    const deleted = await this.provider.deleteById(table, id);
+
+    if (deleted) {
+      await this.invalidate(`${table}:${id}`);
+    }
+
+    return deleted;
   }
 
   async deleteMany(table: string, filter: QueryFilter): Promise<number> {
-    return await this.provider.deleteMany(table, filter);
+    // The matching ids have to be read before the rows go away, so unlike the
+    // update paths this resolves them up front.
+    const affectedIds = await this.findMatchingIds(table, filter);
+    const count = await this.provider.deleteMany(table, filter);
+
+    if (count > 0) {
+      await this.invalidateIds(table, affectedIds);
+    }
+
+    return count;
   }
 
   async exists(table: string, id: string): Promise<boolean> {
@@ -730,6 +757,66 @@ class TransactionalStorageManager implements IStorageManager {
 
   async getStats(): Promise<StorageStats> {
     return await this.parentManager.getStats();
+  }
+
+  /**
+   * Cache invalidation for the transaction's own writes.
+   *
+   * Reads go through `StorageManager.findById`, which caches, while these
+   * mutations run straight against the provider — and the SQLite provider
+   * leaves its cache entirely to the manager. Without this, a committed
+   * transactional write left the pre-transaction record in the cache to be
+   * served by the next read.
+   *
+   * Invalidation happens as each mutation runs rather than after the commit:
+   * on rollback the cost is a cache miss, whereas deferring risks a stale
+   * read. Providers that manage their own cache (memory) invalidate too, so
+   * these calls are a no-op there.
+   */
+  private async invalidate(key: string): Promise<void> {
+    await this.provider.getCache()?.delete(key);
+  }
+
+  private async invalidateIds(table: string, ids: string[] | null): Promise<void> {
+    const cache = this.provider.getCache();
+
+    if (!cache) {
+      return;
+    }
+
+    // A null id list means the lookup failed, so the affected rows are unknown
+    // and the whole table has to go.
+    if (ids === null) {
+      await cache.deleteByPrefix(`${table}:`);
+
+      return;
+    }
+
+    for (const id of ids) {
+      await cache.delete(`${table}:${id}`);
+    }
+  }
+
+  private async invalidateMatching(table: string, filter: QueryFilter): Promise<void> {
+    if (!this.provider.getCache()) {
+      return;
+    }
+
+    await this.invalidateIds(table, await this.findMatchingIds(table, filter));
+  }
+
+  private async findMatchingIds(table: string, filter: QueryFilter): Promise<string[] | null> {
+    if (!this.provider.getCache()) {
+      return [];
+    }
+
+    try {
+      const matching = await this.provider.find<BaseRecord>(table, { filter });
+
+      return matching.data.map(record => record.id);
+    } catch {
+      return null;
+    }
   }
 
   async close(): Promise<void> {

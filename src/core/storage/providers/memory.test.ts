@@ -517,7 +517,9 @@ describe('MemoryStorageProvider', () => {
   describe('json columns', () => {
     interface JsonRecord extends BaseRecord {
       name: string;
-      settings: string;
+      // The storage boundary accepts either a raw object or an already-encoded
+      // string on a `json` column, and always hands back the encoded string.
+      settings: unknown;
     }
 
     beforeEach(async () => {
@@ -535,7 +537,7 @@ describe('MemoryStorageProvider', () => {
     test('stringifies object values so reads match SQLite', async () => {
       // Services normally stringify themselves; a raw object write used to leave
       // memory holding an object while SQLite returned a string (#69).
-      const created = await provider.create('json_records', {
+      const created = await provider.create<JsonRecord>('json_records', {
         name: 'orders',
         settings: { tier: 'small' },
       });
@@ -549,7 +551,7 @@ describe('MemoryStorageProvider', () => {
 
     test('leaves already-stringified JSON values alone', async () => {
       const encoded = JSON.stringify({ tier: 'small' });
-      const created = await provider.create('json_records', {
+      const created = await provider.create<JsonRecord>('json_records', {
         name: 'orders',
         settings: encoded,
       });

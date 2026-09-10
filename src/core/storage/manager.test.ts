@@ -323,6 +323,74 @@ describe('StorageManager', () => {
       await manager.deleteById('test_records', created.id);
       expect(await cache.get(`test_records:${created.id}`)).toBeNull();
     });
+
+    test('should invalidate on mutations made inside a transaction', async () => {
+      // The SQLite provider never touches the cache itself, so invalidation
+      // lives in the manager. The transactional wrapper delegates straight to
+      // the provider, which left committed writes serving the pre-transaction
+      // record on the next read.
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
+        name: 'Tx Test',
+        email: 'tx@example.com',
+        age: 28,
+        active: true,
+      });
+
+      await manager.findById<TestRecord>('test_records', created.id);
+      expect(await cache.get(`test_records:${created.id}`)).not.toBeNull();
+
+      await manager.withTransaction(async tx => {
+        await tx.updateById<TestRecord>('test_records', created.id, { age: 29 });
+      });
+
+      const afterUpdate = await manager.findById<TestRecord>('test_records', created.id);
+
+      expect(afterUpdate?.age).toBe(29);
+
+      await manager.withTransaction(async tx => {
+        await tx.deleteById('test_records', created.id);
+      });
+
+      expect(await manager.findById<TestRecord>('test_records', created.id)).toBeNull();
+    });
+
+    test('should invalidate on bulk mutations made inside a transaction', async () => {
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
+        name: 'Bulk Tx Test',
+        email: 'bulk-tx@example.com',
+        age: 40,
+        active: true,
+      });
+      const filter: QueryFilter = {
+        conditions: [{ field: 'email', operator: 'eq', value: 'bulk-tx@example.com' }],
+      };
+
+      await manager.findById<TestRecord>('test_records', created.id);
+
+      await manager.withTransaction(async tx => {
+        await tx.updateMany<TestRecord>('test_records', filter, { age: 41 });
+      });
+
+      const afterUpdate = await manager.findById<TestRecord>('test_records', created.id);
+
+      expect(afterUpdate?.age).toBe(41);
+
+      await manager.withTransaction(async tx => {
+        await tx.deleteMany('test_records', filter);
+      });
+
+      expect(await manager.findById<TestRecord>('test_records', created.id)).toBeNull();
+    });
   });
 
   describe('Event system', () => {

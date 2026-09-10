@@ -38,6 +38,36 @@ describe('toStorageConfig', () => {
     });
   });
 
+  test('keeps a cacheSize that is not a whole number of megabytes exact', () => {
+    // `cacheSize` is a byte budget, so rounding it to whole megabytes would
+    // hand the cache a different limit than the operator asked for.
+    expect(
+      toStorageConfig({
+        type: 'hybrid',
+        sqlitePath: './data/emulator.db',
+        cacheSize: 1.5 * 1024 * 1024,
+      })
+    ).toEqual({
+      type: 'hybrid',
+      database: { path: './data/emulator.db' },
+      cache: { maxSize: 10_000, maxMemoryMb: 1.5 },
+    });
+  });
+
+  test('keeps a sub-megabyte cacheSize below one megabyte', () => {
+    expect(
+      toStorageConfig({
+        type: 'hybrid',
+        sqlitePath: './data/emulator.db',
+        cacheSize: 512 * 1024,
+      })
+    ).toEqual({
+      type: 'hybrid',
+      database: { path: './data/emulator.db' },
+      cache: { maxSize: 10_000, maxMemoryMb: 0.5 },
+    });
+  });
+
   test('omits the cache when hybrid is given a zero cacheSize', () => {
     expect(
       toStorageConfig({ type: 'hybrid', sqlitePath: './data/emulator.db', cacheSize: 0 })

@@ -490,10 +490,7 @@ export class MemoryStorageProvider implements StorageProvider {
    * object write diverged across providers. Aligning on strings closes that
    * gap without forcing a call-site migration.
    */
-  private serializeJsonFields<T extends Record<string, unknown>>(
-    table: MemoryTable,
-    data: T
-  ): T {
+  private serializeJsonFields<T extends Record<string, unknown>>(table: MemoryTable, data: T): T {
     const jsonColumns = table.schema.columns.filter(column => column.type === 'json');
 
     if (jsonColumns.length === 0) {
