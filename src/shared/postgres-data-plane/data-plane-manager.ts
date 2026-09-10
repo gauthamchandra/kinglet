@@ -15,6 +15,7 @@ import type { StorageType } from '@/core/storage/types.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { PortAllocator } from '@/shared/utils/port-allocator.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import type { PostgresDataPlaneDirectoryName, PostgresDataPlaneProductLabel } from './host.ts';
 import type { DatabaseKey } from './pglite-database-manager.ts';
 import { PGliteDatabaseManager } from './pglite-database-manager.ts';
 
@@ -64,17 +65,14 @@ export interface DataPlaneManagerOptions {
   storageType: StorageType;
   sqlitePath: string;
   postgis: boolean;
-  /**
-   * Human-readable product name used in log lines
-   * (e.g. `"Cloud SQL"`, `"AlloyDB"`).
-   */
-  productLabel: string;
+  /** Human-readable product name used in log lines. */
+  productLabel: PostgresDataPlaneProductLabel;
   /**
    * Directory name beside kinglet's SQLite file that holds this product's
-   * Postgres data (e.g. `"cloudsql"`, `"alloydb"`). Keeps the two products
-   * from sharing or colliding on disk.
+   * Postgres data. This, not the instance key, is what keeps the two products
+   * from sharing or colliding on disk — see {@link buildInstanceKey}.
    */
-  dataDirectoryName: string;
+  dataDirectoryName: PostgresDataPlaneDirectoryName;
 }
 
 interface RunningInstance {
@@ -83,6 +81,15 @@ interface RunningInstance {
   databases: Set<string>;
 }
 
+/**
+ * Key for one instance within this manager's registry.
+ *
+ * <p>Unique only within one product, and that is enough: Cloud SQL and AlloyDB
+ * each construct their own manager (own registry, own port allocator), and on
+ * disk `dataDirectoryName` namespaces them. Two products can therefore hold the
+ * same project/instance string without touching each other — the isolation is
+ * per manager, not encoded in this key.
+ */
 function buildInstanceKey(project: string, instance: string): string {
   return `${project}/${instance}`;
 }

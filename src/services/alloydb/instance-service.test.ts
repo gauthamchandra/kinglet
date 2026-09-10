@@ -422,7 +422,7 @@ describe('createInstance', () => {
       message: expect.stringContaining('no free ports'),
     });
     expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
-    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledTimes(1);
   });
 });
 

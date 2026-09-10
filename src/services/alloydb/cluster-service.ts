@@ -267,7 +267,7 @@ export class ClusterService {
           buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId)
         );
       } catch (error) {
-        this.logger.warn(
+        this.logger.error(
           `Failed to drop the data plane for AlloyDB instance ${instance.name} while deleting ${name}; its Postgres data may remain on disk`,
           error
         );
@@ -336,11 +336,21 @@ export class ClusterService {
   ): Promise<void> {
     const { username, password } = readInitialUser(body);
 
-    if (!username) return;
+    // validateInitialUser has already required both, so neither is null here.
+    // Guarded rather than defaulted: an empty stored password is what tells the
+    // wire server to accept the user with no password at all, so it must never
+    // be the fallback. (ALLOYDB_IAM_USER is accepted as user metadata, but the
+    // wire server offers cleartext only — there is no IAM token login path.)
+    if (username === null || password === null) {
+      throw new AlloyDbError(
+        'INTERNAL',
+        `Cluster ${buildClusterName(project, location, clusterId)} reached user creation without a validated initialUser`
+      );
+    }
 
     await this.users.create(
       userRequestToRecord(buildUserName(project, location, clusterId, username), {
-        password: password ?? '',
+        password,
         userType: UserType.ALLOYDB_BUILT_IN,
       })
     );

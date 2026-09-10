@@ -597,7 +597,7 @@ describe('deleteCluster', () => {
    * cluster is deletable and no instance is left reporting READY with its data
    * already gone, and the error names what may survive on disk.
    */
-  test('deleteCluster_whenOneInstanceDropFails_stillDeletesEveryRowAndWarns', async () => {
+  test('deleteCluster_whenOneInstanceDropFails_stillDeletesEveryRowAndLogsAnError', async () => {
     await instances.create(
       instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'i1'), {})
     );
@@ -612,7 +612,7 @@ describe('deleteCluster', () => {
     expect(operation.done).toBe(true);
     expect((await instances.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toEqual([]);
     expect(await clusters.getByName(CLUSTER_NAME)).toBeNull();
-    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledTimes(2);
   });
 
   test('deleteCluster_whenOneInstanceDropFails_stillAttemptsEveryOtherInstance', async () => {

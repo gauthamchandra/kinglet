@@ -28,9 +28,13 @@ export interface ServiceDataPlaneOptions extends Partial<ProductDataPlaneOptions
   enabled?: boolean;
 }
 
+/** The two products that share this data plane. Adding a third means adding it here. */
+export type PostgresDataPlaneProductLabel = 'Cloud SQL' | 'AlloyDB';
+export type PostgresDataPlaneDirectoryName = 'cloudsql' | 'alloydb';
+
 export interface PostgresDataPlaneProduct {
-  productLabel: string;
-  dataDirectoryName: string;
+  productLabel: PostgresDataPlaneProductLabel;
+  dataDirectoryName: PostgresDataPlaneDirectoryName;
 }
 
 export const CLOUDSQL_DATA_PLANE_PRODUCT: PostgresDataPlaneProduct = {

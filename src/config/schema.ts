@@ -44,7 +44,9 @@ const ServicesConfigSchema = z.object({
           // On by default, for the same reason Cloud SQL's is: an AlloyDB
           // instance no Postgres client can connect to is metadata, not
           // emulation. Set ALLOYDB_DATA_PLANE=false for the metadata-only
-          // control plane.
+          // control plane. This is the runtime default; the `{ enabled: false }`
+          // seen in tests and scripts/lib/extract-service-routes.ts is an
+          // explicit per-call override (see DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS).
           enabled: z.boolean().default(true),
           // Starts after Cloud SQL's default range (5432-5531) so both
           // services can run together without fighting over the same ports.

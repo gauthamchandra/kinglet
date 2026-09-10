@@ -97,6 +97,51 @@ describe('createPostgresDataPlane', () => {
     expect(existsSync(cloudsqlInstance)).toBe(true);
   });
 
+  /**
+   * The isolation between products is per manager plus on-disk namespace, not
+   * something encoded in the instance key. So the same project/instance string
+   * handed to both products must resolve to two different trees — otherwise a
+   * Cloud SQL drop could take an AlloyDB instance's data with it.
+   */
+  test('identicalInstanceKeysInBothProductsNeverShareADirectory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-host-'));
+
+    temporaryDirectories.push(root);
+
+    const options = {
+      enabled: true,
+      storageType: 'sqlite',
+      sqlitePath: join(root, 'emulator.db'),
+      postgis: false,
+    } as const;
+    const cloudsql = createPostgresDataPlane(
+      logger,
+      CLOUDSQL_DATA_PLANE_PRODUCT,
+      { ...options, portRangeStart: 46410, portRangeEnd: 46414 },
+      anyUser
+    );
+    const alloydb = createPostgresDataPlane(
+      logger,
+      ALLOYDB_DATA_PLANE_PRODUCT,
+      { ...options, portRangeStart: 46415, portRangeEnd: 46419 },
+      anyUser
+    );
+    const cloudsqlTree = join(root, 'cloudsql/p1/us-central1%2Fc1%2Fi1');
+    const alloydbTree = join(root, 'alloydb/p1/us-central1%2Fc1%2Fi1');
+
+    await mkdir(cloudsqlTree, { recursive: true });
+    await mkdir(alloydbTree, { recursive: true });
+
+    await cloudsql.dropInstance('p1', 'us-central1/c1/i1');
+
+    expect(existsSync(cloudsqlTree)).toBe(false);
+    expect(existsSync(alloydbTree)).toBe(true);
+
+    await alloydb.dropInstance('p1', 'us-central1/c1/i1');
+
+    expect(existsSync(alloydbTree)).toBe(false);
+  });
+
   test('stampsCloudSqlWithItsOwnDirectoryTree', async () => {
     const { plane, root } = await planeForProduct(CLOUDSQL_DATA_PLANE_PRODUCT, 46405);
     const cloudsqlInstance = join(root, 'cloudsql/p1/inst');

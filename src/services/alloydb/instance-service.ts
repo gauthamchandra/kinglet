@@ -238,7 +238,7 @@ export class InstanceService {
     try {
       await this.dataPlane.dropInstance(project, dataPlaneKey);
     } catch (error) {
-      this.logger.warn(
+      this.logger.error(
         `Failed to drop the data plane while rolling back ${name}; its Postgres data may remain on disk`,
         error
       );
@@ -247,7 +247,7 @@ export class InstanceService {
     try {
       await this.instances.delete(name);
     } catch (error) {
-      this.logger.warn(`Failed to delete the row while rolling back ${name}`, error);
+      this.logger.error(`Failed to delete the row while rolling back ${name}`, error);
     }
   }
 
