@@ -15,4 +15,8 @@ describe('resolveMaskedFields', () => {
   test('with a mask, returns the named writable fields', () => {
     expect(resolveMaskedFields({}, 'items,description')).toEqual(['items', 'description']);
   });
+
+  test('rejects a wildcard mask', () => {
+    expect(() => resolveMaskedFields({}, '*')).toThrow(NetworkSecurityError);
+  });
 });
