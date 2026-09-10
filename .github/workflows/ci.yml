@@ -73,8 +73,8 @@ jobs:
       # workflows live in this repo and are sanctioned by merge review instead.
       #
       # A sign-off certifies a HUMAN read and stands behind the change, so a coding agent's
-      # own identity is banned from Signed-off-by. Co-authored-by is deliberately left alone —
-      # agent assistance is expected here and crediting it is welcome.
+      # own identity is banned from Signed-off-by. Cloud agents keep their own git author
+      # so GitHub can verify the signature; the human is Co-authored-by and Signed-off-by.
       - name: Verify every commit is signed off
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -83,12 +83,17 @@ jobs:
           missing=0
           agent_signoff=0
 
-          # Emails of coding agents that must never appear in a Signed-off-by line. Each entry is
-          # a whole address and is matched between the trailer's angle brackets — a substring match
-          # would reject the humans behind jules@gmail.com or someone@openai.com. Matched against
-          # sign-off trailers only, so an agent can still be a Co-authored-by. Extend this list as
-          # new agents appear.
-          AGENT_SIGNOFF_EMAILS='cursoragent@cursor\.com|noreply@anthropic\.com|codex@openai\.com|devin@cognition\.ai|([^<>]*\+)?(copilot|devin-ai-integration\[bot\]|google-labs-jules\[bot\])@users\.noreply\.github\.com'
+          # Emails of coding agents that must never appear in a Signed-off-by line, and that
+          # take the agent-authored path even when the display name contains [bot]. A substring
+          # match would reject the humans behind jules@gmail.com or someone@openai.com. Extend
+          # this list as new agents appear.
+          #
+          # Copilot's GitHub App uses copilot[bot]@users.noreply.github.com; older / VS Code
+          # trailers use copilot@... without [bot]. [bot] is optional so both match. Do not drop
+          # the unbracketed form — that is still a real Copilot address.
+          AGENT_SIGNOFF_EMAILS='cursoragent@cursor\.com|noreply@anthropic\.com|codex@openai\.com|devin@cognition\.ai|([^<>]*\+)?(copilot(\[bot\])?|copilot-swe-agent\[bot\]|devin-ai-integration\[bot\]|google-labs-jules\[bot\])@users\.noreply\.github\.com'
+          # git -s / GitHub Co-authored-by form. A bare "Signed-off-by: anonymous" is not a DCO sign-off.
+          HUMAN_IDENTITY='.+ <[^[:space:]>]+@[^>]+>'
 
           while read -r sha; do
             body="$(git show -s --format='%B' "$sha")"
@@ -96,37 +101,52 @@ jobs:
             # Both checks below read these same lines, so an indented "Signed-off-by:" cannot
             # satisfy the author check while escaping the agent check.
             signoffs="$(printf '%s\n' "$body" | grep -iE '^Signed-off-by:' || true)"
+            coauthors="$(printf '%s\n' "$body" | grep -iE '^Co-authored-by:' || true)"
 
             # Run before the bot skip: release-please commits carry no sign-off and match
             # nothing, and this also catches an agent that authors as a GitHub App.
             if printf '%s\n' "$signoffs" | grep -qiE "<($AGENT_SIGNOFF_EMAILS)>"; then
-              echo "::error::$(git show -s --format='%h %s' "$sha") is signed off by a coding agent. The DCO sign-off must be the human who read and stands behind the change — ask your human owner to review, then sign off as them. Agents may still be credited with a Co-authored-by trailer."
+              echo "::error::$(git show -s --format='%h %s' "$sha") is signed off by a coding agent. The DCO sign-off must be the human who read and stands behind the change — ask your human owner to review, then sign off as them."
               agent_signoff=1
             fi
 
             author="$(git show -s --format='%an <%ae>' "$sha")"
+            author_email="$(git show -s --format='%ae' "$sha")"
 
-            case "$author" in
-              *"[bot]"*) continue ;;
-            esac
+            # Known coding-agent emails are checked before the [bot] skip. Copilot/Devin/Jules
+            # often author as copilot[bot]; skipping those would accept a commit with no human
+            # trailer. kinglet-releaser[bot] / release-please do not match AGENT_SIGNOFF_EMAILS
+            # and still skip below.
+            if printf '%s\n' "$author_email" | grep -qiE "^($AGENT_SIGNOFF_EMAILS)$"; then
+              human_signoffs="$(printf '%s\n' "$signoffs" | grep -viE "<($AGENT_SIGNOFF_EMAILS)>" | grep -iE "^Signed-off-by: $HUMAN_IDENTITY" || true)"
+              human_coauthors="$(printf '%s\n' "$coauthors" | grep -viE "<($AGENT_SIGNOFF_EMAILS)>" | grep -iE "^Co-authored-by: $HUMAN_IDENTITY" || true)"
 
-            if ! printf '%s\n' "$signoffs" | grep -qiF "Signed-off-by: $author"; then
+              if [ -z "$human_signoffs" ]; then
+                echo "::error::$(git show -s --format='%h %s' "$sha") is agent-authored and missing a human Signed-off-by"
+                missing=1
+              fi
+
+              if [ -z "$human_coauthors" ]; then
+                echo "::error::$(git show -s --format='%h %s' "$sha") is agent-authored and missing a human Co-authored-by"
+                missing=1
+              fi
+            elif [[ "$author" == *"[bot]"* ]]; then
+              continue
+            elif ! printf '%s\n' "$signoffs" | grep -qiF "Signed-off-by: $author"; then
               echo "::error::$(git show -s --format='%h %s' "$sha") is missing \"Signed-off-by: $author\""
               missing=1
             fi
           done < <(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA")
 
           if [ "$missing" -ne 0 ]; then
-            echo "Fix the last commit with:  git commit --amend -s --no-edit"
-            echo "Fix the whole branch with: git rebase --signoff main"
+            echo "Human-authored commits: git commit --amend -s --no-edit"
+            echo "Agent-authored commits: keep user.name as the agent, and put the human on"
+            echo "Co-authored-by plus Signed-off-by. Do not git commit -s as the agent."
           fi
 
           if [ "$agent_signoff" -ne 0 ]; then
-            echo "Set git user.name/user.email to the human who owns the change, then re-author and sign"
-            echo "off as them. -s only appends a trailer, so delete the agent's Signed-off-by line in the"
-            echo "editor that opens — leaving it there fails this job again:"
-            echo "  git commit --amend --reset-author -s                            (last commit)"
-            echo "  git rebase main --exec 'git commit --amend --reset-author -s'   (whole branch)"
+            echo "Delete the agent's Signed-off-by line. The human who reviewed the change"
+            echo "belongs on Signed-off-by (and, for agent-authored commits, Co-authored-by)."
           fi
 
           if [ "$missing" -ne 0 ] || [ "$agent_signoff" -ne 0 ]; then
