@@ -229,6 +229,42 @@ export const ARMOR_EVALUATION_CASES: readonly ArmorEvaluationCase[] = [
     expectAction: 'allow',
     expectPriority: '1700',
   },
+  {
+    name: 'WAF opted-out signature does not match',
+    path: '/public',
+    originIp: '203.0.113.10',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Waf-Match': 'protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack',
+    },
+    expectStatus: 200,
+    expectAction: 'allow',
+    expectPriority: '2147483647',
+  },
+  {
+    name: 'WAF other signature in the same set denies',
+    path: '/public',
+    originIp: '203.0.113.10',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Waf-Match': 'protocolattack-v33-stable/owasp-crs-v030301-id921150-protocolattack',
+    },
+    expectStatus: 403,
+    expectAction: 'deny(403)',
+    expectPriority: '1800',
+  },
+  {
+    name: 'Adaptive Protection declared hit denies',
+    path: '/public',
+    originIp: '203.0.113.10',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Adaptive-Protection': 'true',
+    },
+    expectStatus: 403,
+    expectAction: 'deny(403)',
+    expectPriority: '1900',
+  },
 ];
 
 export async function runArmorEvaluationCases(

@@ -21,6 +21,7 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [012](012-cloud-armor-emulation.md) | Cloud Armor Security Policy Emulation | Proposed |
 | [013](013-cloudsql-pglite-data-plane.md) | Cloud SQL Data Plane on PGlite | Accepted |
 | [014](014-cloud-armor-asn-region-headers.md) | Cloud Armor ASN, Region, TLS Fingerprint, and SNI Request Headers (addendum to 012) | Proposed |
+| [015](015-cloud-armor-waf-adaptive-headers.md) | Cloud Armor Preconfigured WAF and Adaptive Protection Request Headers (addendum to 012) | Proposed |
 
 ## A note on the project's former name
 

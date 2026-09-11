@@ -498,6 +498,147 @@ describe('buildRequestAttributesFromListenerRequest: SNI', () => {
   });
 });
 
+describe('buildRequestAttributesFromListenerRequest: WAF and Adaptive Protection', () => {
+  function input(headers: Record<string, string>) {
+    return {
+      method: 'GET',
+      path: '/path',
+      query: '',
+      headers,
+      tcpPeer: '127.0.0.1',
+      body: '',
+      scheme: 'http',
+      userIpRequestHeaders: [],
+    };
+  }
+
+  const exampleMatch = 'protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack';
+
+  test('parses X-Kinglet-Waf-Match into wafMatches', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': exampleMatch })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.wafMatches).toEqual([
+      {
+        ruleSet: 'protocolattack-v33-stable',
+        signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+      },
+    ]);
+  });
+
+  test('splits comma-joined WAF matches and strips the kinglet header', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-waf-match':
+          'protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack, sqli-v33-stable/owasp-crs-v030301-id942100-sqli',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.wafMatches).toEqual([
+      {
+        ruleSet: 'protocolattack-v33-stable',
+        signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+      },
+      { ruleSet: 'sqli-v33-stable', signatureId: 'owasp-crs-v030301-id942100-sqli' },
+    ]);
+    expect(result.attributes.request.headers['x-kinglet-waf-match']).toBeUndefined();
+  });
+
+  test('empty WAF header is no matches', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': '  ' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.wafMatches).toEqual([]);
+  });
+
+  test('returns error for a rule-set-only WAF header', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': 'protocolattack-v33-stable' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Waf-Match value: protocolattack-v33-stable',
+    });
+  });
+
+  test('returns error for a WAF header with a sensitivity segment', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': `${exampleMatch}/1` })
+    );
+
+    expect(result).toEqual({
+      error: `Invalid X-Kinglet-Waf-Match value: ${exampleMatch}/1`,
+    });
+  });
+
+  test('returns error for an empty WAF piece', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': `${exampleMatch},` })
+    );
+
+    expect(result).toEqual({
+      error: `Invalid X-Kinglet-Waf-Match value: ${exampleMatch},`,
+    });
+  });
+
+  test('parses Adaptive Protection true/false and strips the header', () => {
+    const enabled = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-adaptive-protection': 'TRUE' })
+    );
+    const disabled = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-adaptive-protection': 'false' })
+    );
+
+    if ('error' in enabled) {
+      throw new Error(`Expected success, got error: ${enabled.error}`);
+    }
+
+    if ('error' in disabled) {
+      throw new Error(`Expected success, got error: ${disabled.error}`);
+    }
+
+    expect(enabled.attributes.adaptiveProtectionMatch).toBe(true);
+    expect(disabled.attributes.adaptiveProtectionMatch).toBe(false);
+    expect(enabled.attributes.request.headers['x-kinglet-adaptive-protection']).toBeUndefined();
+  });
+
+  test('empty Adaptive Protection header is unset', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-adaptive-protection': '' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.adaptiveProtectionMatch).toBe(false);
+  });
+
+  test('returns error for a non-boolean Adaptive Protection value', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-adaptive-protection': 'yes' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Adaptive-Protection value: yes',
+    });
+  });
+});
+
 describe('buildRequestAttributesFromListenerRequest: XFF rewriting', () => {
   test('appends peer to existing X-Forwarded-For', () => {
     const result = buildRequestAttributesFromListenerRequest({

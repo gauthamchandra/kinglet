@@ -45,13 +45,10 @@ const KNOWN_FUNCTIONS = new Set([
 ]);
 
 const ALWAYS_FALSE_FUNCTIONS = new Set([
-  'evaluatePreconfiguredWaf',
   'evaluatePreconfiguredExpr',
   'evaluateAddressGroup',
   'evaluateOrganizationAddressGroup',
   'evaluateThreatIntelligence',
-  'evaluateAdaptiveProtection',
-  'evaluateAdaptiveProtectionAutoDeploy',
 ]);
 
 const CEL_MACROS = new Set(['exists', 'exists_one', 'all', 'filter', 'map']);
@@ -126,6 +123,22 @@ class EvalRuntimeError extends Error {
   }
 }
 
+const EVAL_ATTRIBUTES = new WeakMap<Record<string, unknown>, RequestAttributes>();
+
+function bindEvalAttributes(env: Record<string, unknown>, attributes: RequestAttributes): void {
+  EVAL_ATTRIBUTES.set(env, attributes);
+}
+
+function evalAttributesOf(env: Record<string, unknown>): RequestAttributes {
+  const attributes = EVAL_ATTRIBUTES.get(env);
+
+  if (attributes == null) {
+    throw new EvalRuntimeError('evaluation context is missing');
+  }
+
+  return attributes;
+}
+
 export function validateExpression(expression: string): void {
   if (expression.length > MAX_EXPRESSION_CHARS) {
     throw new ArmorError(`Expression exceeds maximum of ${MAX_EXPRESSION_CHARS} characters`);
@@ -142,7 +155,9 @@ export function evaluateExpression(
 ): ExpressionEvaluation {
   try {
     const ast = parseExpressionAst(expression);
-    const value = evalAst(ast, toEnv(attributes));
+    const env = toEnv(attributes);
+    bindEvalAttributes(env, attributes);
+    const value = evalAst(ast, env);
 
     if (typeof value !== 'boolean') {
       return { ok: false, error: 'expression did not evaluate to a boolean' };
@@ -1177,6 +1192,96 @@ function lookup(object: unknown, key: unknown): unknown {
   throw new EvalRuntimeError(`cannot index '${typeof object}'`);
 }
 
+function evalPreconfiguredWaf(
+  node: Extract<Ast, { kind: 'call' }>,
+  env: Record<string, unknown>
+): boolean {
+  const ruleSet = asString(evalAst(requiredArg(node, 0), env));
+  let sensitivity = 4;
+  let optOut: readonly string[] | undefined;
+  let optIn: readonly string[] | undefined;
+
+  if (node.args[1] != null) {
+    const opts = evalAst(node.args[1], env);
+
+    if (opts == null || typeof opts !== 'object' || Array.isArray(opts)) {
+      return false;
+    }
+
+    const map = opts as Record<string, unknown>;
+
+    if (Object.hasOwn(map, 'sensitivity')) {
+      const value = map.sensitivity;
+
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 4) {
+        return false;
+      }
+
+      sensitivity = value;
+    }
+
+    if (Object.hasOwn(map, 'opt_out_rule_ids')) {
+      const list = stringListOf(map.opt_out_rule_ids);
+
+      if (list == null) {
+        return false;
+      }
+
+      optOut = list;
+    }
+
+    if (Object.hasOwn(map, 'opt_in_rule_ids')) {
+      const list = stringListOf(map.opt_in_rule_ids);
+
+      if (list == null) {
+        return false;
+      }
+
+      optIn = list;
+    }
+  }
+
+  if (optOut != null && optIn != null) {
+    return false;
+  }
+
+  const matches = evalAttributesOf(env).wafMatches.filter(match => match.ruleSet === ruleSet);
+
+  if (sensitivity === 0) {
+    if (optIn == null) {
+      return false;
+    }
+
+    return matches.some(match => optIn.includes(match.signatureId));
+  }
+
+  if (optIn != null) {
+    return false;
+  }
+
+  const excluded = new Set(optOut ?? []);
+
+  return matches.some(match => !excluded.has(match.signatureId));
+}
+
+function stringListOf(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const out: string[] = [];
+
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      return null;
+    }
+
+    out.push(item);
+  }
+
+  return out;
+}
+
 function evalCall(node: Extract<Ast, { kind: 'call' }>, env: Record<string, unknown>): unknown {
   const name = callName(node);
 
@@ -1188,6 +1293,18 @@ function evalCall(node: Extract<Ast, { kind: 'call' }>, env: Record<string, unkn
     }
 
     return evalHas(arg, env);
+  }
+
+  if (name === 'evaluatePreconfiguredWaf') {
+    return evalPreconfiguredWaf(node, env);
+  }
+
+  if (name === 'evaluateAdaptiveProtection' || name === 'evaluateAdaptiveProtectionAutoDeploy') {
+    for (const arg of node.args) {
+      evalAst(arg, env);
+    }
+
+    return evalAttributesOf(env).adaptiveProtectionMatch;
   }
 
   if (name != null && ALWAYS_FALSE_FUNCTIONS.has(name)) {
