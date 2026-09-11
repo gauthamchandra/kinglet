@@ -90,7 +90,7 @@ These function calls are accepted so Terraform WAF / Enterprise rules
 apply, and they evaluate to `false` until those features exist:
 
 `evaluatePreconfiguredWaf`, `evaluatePreconfiguredExpr`,
-`evaluateOrganizationAddressGroup`,
+`evaluateAddressGroup`, `evaluateOrganizationAddressGroup`,
 `evaluateThreatIntelligence`, `evaluateAdaptiveProtection`,
 `evaluateAdaptiveProtectionAutoDeploy`.
 
@@ -479,8 +479,8 @@ not have to run an origin to check a deny rule. Allow is 200 empty.
 ### Out of scope
 
 Proxying allow to an origin. Backend services and URL maps. Regional, edge, and org policies.
-Preconfigured WAF sets, Adaptive Protection,
-reCAPTCHA. Organization address groups. `aggregatedList`, `setLabels`,
+Preconfigured WAF sets, address groups, Adaptive Protection,
+reCAPTCHA. `aggregatedList`, `setLabels`,
 `listPreconfiguredExpressionSets`. TLS termination. Curl injection
 of ASN / region / JA3. JSON evaluate URL. Verbose match-field
 response headers.
@@ -490,21 +490,6 @@ response headers.
 `COMPUTE_LISTENER_BIND` selects `127.0.0.1` (default, `bun run`) or
 `0.0.0.0` (Docker image). Origin proxying remains rejected. `/health`
 reports `kingletCloudArmorEvaluationServer` when Compute is enabled.
-See [Testing Cloud Armor policies](../getting-started/cloud-armor.md).
-
-## Amendment: project-scoped evaluateAddressGroup
-
-`evaluateAddressGroup(group, ip [, exclusions])` matches when the
-request IP is in a project-scoped Network Security address group
-loaded from the same `StorageManager` as Compute. Groups are resolved
-as `projects/{policyProject}/locations/global/addressGroups/{name}`
-(short name or that full resource name). A missing group, Network
-Security disabled (empty table), or an IP that is also in the optional
-exclusion list is not a match. Organization groups stay always-false.
-
-The CEL engine does not I/O. The evaluation server loads groups once
-per request before `evaluate()`.
-
 See [Testing Cloud Armor policies](../getting-started/cloud-armor.md).
 
 ## References

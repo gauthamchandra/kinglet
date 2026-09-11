@@ -75,7 +75,8 @@ so Terraform can create the group and the evaluation server can see it.
 not a match. Organization groups (`evaluateOrganizationAddressGroup`)
 stay always-false. An optional third argument is an exclusion list
 (CEL list of CIDR strings, or a comma-separated string): a group hit
-that is also excluded is not a match.
+that is also excluded is not a match. See
+[ADR-015](../adrs/015-cloud-armor-evaluate-address-group.md).
 
 ## 2. Apply your policies
 
