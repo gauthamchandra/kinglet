@@ -18,6 +18,7 @@ import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { CloudKmsService } from '@/services/kms/index.ts';
 import { MemorystoreService } from '@/services/memorystore/index.ts';
+import { NetworkSecurityService } from '@/services/networksecurity/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
@@ -43,6 +44,7 @@ async function registerEveryService(): Promise<RequestRouter> {
 
   const workflowsService = new CloudWorkflowsService(storage, logger);
   const memorystoreService = new MemorystoreService(storage, logger, { enabled: false });
+  const networkSecurityService = new NetworkSecurityService(storage, logger);
 
   const services: EmulatedService[] = [
     new SchedulerService(storage, logger),
@@ -52,6 +54,7 @@ async function registerEveryService(): Promise<RequestRouter> {
     new CloudKmsService(storage, logger),
     workflowsService,
     memorystoreService,
+    networkSecurityService,
   ];
 
   for (const service of services) {
@@ -63,6 +66,7 @@ async function registerEveryService(): Promise<RequestRouter> {
   const stores: ComposableOperationsStore[] = [
     memorystoreService.getComposableOperationsStore(),
     workflowsService.getComposableOperationsStore(),
+    networkSecurityService.getComposableOperationsStore(),
   ];
 
   for (const route of buildComposedOperationsRoutes(stores, logger)) {

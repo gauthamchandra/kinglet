@@ -48,6 +48,7 @@ See [Storage modes](storage.md) for details on each storage type.
 | `CLOUDSQL_PORT_RANGE_END` | `5531` | Last port available for Cloud SQL instance endpoints |
 | `CLOUDSQL_POSTGIS` | `false` | Link PostGIS into every Cloud SQL database (slower instance creation) |
 | `ENABLE_COMPUTE` | `true` | Enable Compute Engine (Cloud Armor) service |
+| `ENABLE_NETWORKSECURITY` | `true` | Enable Network Security (project-scoped address groups) |
 | `COMPUTE_LISTENER_PORT` | `8787` | Cloud Armor evaluation server port |
 | `COMPUTE_LISTENER_BIND` | `127.0.0.1` | Evaluation server bind (`127.0.0.1` or `0.0.0.0`). The Docker image sets `0.0.0.0` |
 | `COMPUTE_ARMOR_DEFAULT_POLICY` | — | Policy to evaluate when more than one security policy exists |
