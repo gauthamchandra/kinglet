@@ -7,7 +7,9 @@
 import type { Server } from 'bun';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
+import { AddressGroupRepository } from '@/services/networksecurity/repository.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { loadAddressGroupLookup } from './address-group-lookup.ts';
 import { ComputeHandlers } from './handlers.ts';
 import { startArmorListener } from './listener.ts';
 import { SecurityPolicyService } from './service.ts';
@@ -29,6 +31,7 @@ export class ComputeService {
   private logger: Logger;
   private options: ComputeServiceOptions;
   private policyService: SecurityPolicyService | null = null;
+  private addressGroups: AddressGroupRepository | null = null;
   private handlers: ComputeHandlers | null = null;
   private listenerServer: Server | null = null;
 
@@ -40,7 +43,8 @@ export class ComputeService {
 
   async initialize(): Promise<void> {
     this.policyService = new SecurityPolicyService(this.storage, this.logger);
-    await this.policyService.initialize();
+    this.addressGroups = new AddressGroupRepository(this.storage);
+    await Promise.all([this.policyService.initialize(), this.addressGroups.initialize()]);
 
     this.handlers = new ComputeHandlers(this.policyService, this.logger);
 
@@ -56,7 +60,7 @@ export class ComputeService {
   }
 
   start(reservedHttpPort?: number): ComputeStartResult {
-    if (this.policyService == null) {
+    if (this.policyService == null || this.addressGroups == null) {
       throw new Error('ComputeService not initialized. Call initialize() first.');
     }
 
@@ -64,6 +68,7 @@ export class ComputeService {
     const listenerBind = this.options.listenerBind ?? '127.0.0.1';
     const defaultPolicyName = this.options.defaultPolicyName;
     const policyService = this.policyService;
+    const addressGroups = this.addressGroups;
 
     if (reservedHttpPort != null && listenerPort === reservedHttpPort) {
       this.logger.warn(
@@ -79,6 +84,7 @@ export class ComputeService {
         hostname: listenerBind,
         defaultPolicyName,
         getPolicies: () => policyService.listAll(),
+        loadAddressGroups: project => loadAddressGroupLookup(addressGroups, project),
         logger: this.logger,
       });
     } catch (error) {

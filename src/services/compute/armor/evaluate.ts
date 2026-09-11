@@ -3,6 +3,7 @@
  * preview, and rate-limit actions.
  */
 
+import type { ExpressionEvalOptions } from './expression.ts';
 import { evaluateExpression, expressionUsesBodyPhase, matchSrcIpRanges } from './expression.ts';
 import { applyRateLimit } from './rate-limit.ts';
 import { withInspectedBody } from './request.ts';
@@ -15,7 +16,11 @@ import type {
 } from './types.ts';
 import { REQUEST_BODY_INSPECTION_BYTES } from './types.ts';
 
-export function evaluate(policy: SecurityPolicy, attributes: RequestAttributes): EvaluationResult {
+export function evaluate(
+  policy: SecurityPolicy,
+  attributes: RequestAttributes,
+  options?: ExpressionEvalOptions
+): EvaluationResult {
   const rules = [...(policy.rules ?? [])].sort((a, b) => a.priority - b.priority);
   const policyName = policy.name ?? '';
   let preview: MatchedRule | undefined;
@@ -34,7 +39,7 @@ export function evaluate(policy: SecurityPolicy, attributes: RequestAttributes):
       bodyInspected = true;
     }
 
-    if (!ruleMatches(rule, current)) {
+    if (!ruleMatches(rule, current, options)) {
       continue;
     }
 
@@ -73,7 +78,11 @@ function finish(
   return result;
 }
 
-function ruleMatches(rule: SecurityPolicyRule, attributes: RequestAttributes): boolean {
+function ruleMatches(
+  rule: SecurityPolicyRule,
+  attributes: RequestAttributes,
+  options?: ExpressionEvalOptions
+): boolean {
   const versioned = rule.match?.versionedExpr;
 
   if (versioned === 'SRC_IPS_V1') {
@@ -86,7 +95,7 @@ function ruleMatches(rule: SecurityPolicyRule, attributes: RequestAttributes): b
     return false;
   }
 
-  const result = evaluateExpression(expression, attributes);
+  const result = evaluateExpression(expression, attributes, options);
 
   if (!result.ok) {
     return false;

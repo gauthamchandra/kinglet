@@ -7,7 +7,9 @@
 
 import type { Server } from 'bun';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { projectFromSecurityPolicySelfLink } from './address-group-lookup.ts';
 import { evaluate } from './armor/evaluate.ts';
+import type { AddressGroupLookup } from './armor/expression.ts';
 import { buildRequestAttributes, isValidIp } from './armor/request.ts';
 import type {
   EvaluationResult,
@@ -477,11 +479,12 @@ export interface ArmorListenerOptions {
   hostname?: string | undefined;
   defaultPolicyName?: string | undefined;
   getPolicies: () => Promise<SecurityPolicyResponse[]>;
+  loadAddressGroups?: (project: string) => Promise<AddressGroupLookup>;
   logger?: Logger;
 }
 
 export function startArmorListener(options: ArmorListenerOptions): Server {
-  const { port, defaultPolicyName, getPolicies, logger } = options;
+  const { port, defaultPolicyName, getPolicies, loadAddressGroups, logger } = options;
   const hostname = options.hostname ?? '127.0.0.1';
 
   const server = Bun.serve({
@@ -548,7 +551,14 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
       }
 
       const policy = policyOrError as SecurityPolicy;
-      const result = evaluate(policy, adapterResult.attributes);
+      const project = projectFromSecurityPolicySelfLink(policyOrError.selfLink);
+      const lookupAddressGroup =
+        project != null && loadAddressGroups != null ? await loadAddressGroups(project) : undefined;
+      const result = evaluate(
+        policy,
+        adapterResult.attributes,
+        lookupAddressGroup == null ? undefined : { lookupAddressGroup }
+      );
       const decision = handleArmorDecision(
         result,
         policyOrError.name,

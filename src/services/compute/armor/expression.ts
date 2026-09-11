@@ -4,7 +4,7 @@
  */
 
 import { RE2JS } from 're2js';
-import { ipInCidr, isValidCidr } from './request.ts';
+import { ipInCidr, isValidCidr, isValidIp, parseFirstValidIp } from './request.ts';
 import type { ExpressionEvaluation, RequestAttributes } from './types.ts';
 import {
   ArmorError,
@@ -47,7 +47,6 @@ const KNOWN_FUNCTIONS = new Set([
 const ALWAYS_FALSE_FUNCTIONS = new Set([
   'evaluatePreconfiguredWaf',
   'evaluatePreconfiguredExpr',
-  'evaluateAddressGroup',
   'evaluateOrganizationAddressGroup',
   'evaluateThreatIntelligence',
   'evaluateAdaptiveProtection',
@@ -66,6 +65,12 @@ const ORIGIN_FIELDS = new Set([
 ]);
 
 const REQUEST_FIELDS = new Set(['headers', 'method', 'path', 'query', 'scheme', 'body', 'params']);
+
+export type AddressGroupLookup = (groupName: string) => readonly string[] | undefined;
+
+export interface ExpressionEvalOptions {
+  lookupAddressGroup?: AddressGroupLookup;
+}
 
 type TokKind =
   | 'ident'
@@ -138,11 +143,12 @@ export function validateExpression(expression: string): void {
 
 export function evaluateExpression(
   expression: string,
-  attributes: RequestAttributes
+  attributes: RequestAttributes,
+  options?: ExpressionEvalOptions
 ): ExpressionEvaluation {
   try {
     const ast = parseExpressionAst(expression);
-    const value = evalAst(ast, toEnv(attributes));
+    const value = evalAst(ast, toEnv(attributes), options?.lookupAddressGroup);
 
     if (typeof value !== 'boolean') {
       return { ok: false, error: 'expression did not evaluate to a boolean' };
@@ -1043,7 +1049,11 @@ function hasCapturingGroup(pattern: string): boolean {
   return false;
 }
 
-function evalAst(node: Ast, env: Record<string, unknown>): unknown {
+function evalAst(
+  node: Ast,
+  env: Record<string, unknown>,
+  lookupAddressGroup?: AddressGroupLookup
+): unknown {
   switch (node.kind) {
     case 'lit':
       return node.value;
@@ -1055,13 +1065,13 @@ function evalAst(node: Ast, env: Record<string, unknown>): unknown {
       return env[node.name];
     }
     case 'member':
-      return evalMember(node, env);
+      return evalMember(node, env, lookupAddressGroup);
     case 'index':
-      return evalIndex(node, env);
+      return evalIndex(node, env, lookupAddressGroup);
     case 'call':
-      return evalCall(node, env);
+      return evalCall(node, env, lookupAddressGroup);
     case 'unary': {
-      const arg = evalAst(node.arg, env);
+      const arg = evalAst(node.arg, env, lookupAddressGroup);
 
       if (node.op === '!') {
         return !asBool(arg);
@@ -1074,14 +1084,18 @@ function evalAst(node: Ast, env: Record<string, unknown>): unknown {
       return -arg;
     }
     case 'binary':
-      return evalBinary(node, env);
+      return evalBinary(node, env, lookupAddressGroup);
     case 'list':
-      return node.elements.map(el => evalAst(el, env));
+      return node.elements.map(el => evalAst(el, env, lookupAddressGroup));
     case 'map': {
       const out: Record<string, unknown> = {};
 
       for (const entry of node.entries) {
-        out[String(evalAst(entry.key, env))] = evalAst(entry.value, env);
+        out[String(evalAst(entry.key, env, lookupAddressGroup))] = evalAst(
+          entry.value,
+          env,
+          lookupAddressGroup
+        );
       }
 
       return out;
@@ -1091,29 +1105,33 @@ function evalAst(node: Ast, env: Record<string, unknown>): unknown {
   }
 }
 
-function evalBinary(node: Extract<Ast, { kind: 'binary' }>, env: Record<string, unknown>): unknown {
+function evalBinary(
+  node: Extract<Ast, { kind: 'binary' }>,
+  env: Record<string, unknown>,
+  lookupAddressGroup?: AddressGroupLookup
+): unknown {
   if (node.op === '&&') {
-    const left = evalAst(node.left, env);
+    const left = evalAst(node.left, env, lookupAddressGroup);
 
     if (!asBool(left)) {
       return false;
     }
 
-    return asBool(evalAst(node.right, env));
+    return asBool(evalAst(node.right, env, lookupAddressGroup));
   }
 
   if (node.op === '||') {
-    const left = evalAst(node.left, env);
+    const left = evalAst(node.left, env, lookupAddressGroup);
 
     if (asBool(left)) {
       return true;
     }
 
-    return asBool(evalAst(node.right, env));
+    return asBool(evalAst(node.right, env, lookupAddressGroup));
   }
 
-  const left = evalAst(node.left, env);
-  const right = evalAst(node.right, env);
+  const left = evalAst(node.left, env, lookupAddressGroup);
+  const right = evalAst(node.right, env, lookupAddressGroup);
 
   if (node.op === '+') {
     return `${asString(left)}${asString(right)}`;
@@ -1139,15 +1157,23 @@ function evalBinary(node: Extract<Ast, { kind: 'binary' }>, env: Record<string, 
   throw new EvalRuntimeError(`unsupported operator ${node.op}`);
 }
 
-function evalMember(node: Extract<Ast, { kind: 'member' }>, env: Record<string, unknown>): unknown {
-  const object = evalAst(node.object, env);
+function evalMember(
+  node: Extract<Ast, { kind: 'member' }>,
+  env: Record<string, unknown>,
+  lookupAddressGroup?: AddressGroupLookup
+): unknown {
+  const object = evalAst(node.object, env, lookupAddressGroup);
 
   return lookup(object, node.name);
 }
 
-function evalIndex(node: Extract<Ast, { kind: 'index' }>, env: Record<string, unknown>): unknown {
-  const object = evalAst(node.object, env);
-  const key = evalAst(node.key, env);
+function evalIndex(
+  node: Extract<Ast, { kind: 'index' }>,
+  env: Record<string, unknown>,
+  lookupAddressGroup?: AddressGroupLookup
+): unknown {
+  const object = evalAst(node.object, env, lookupAddressGroup);
+  const key = evalAst(node.key, env, lookupAddressGroup);
 
   return lookup(object, key);
 }
@@ -1177,7 +1203,119 @@ function lookup(object: unknown, key: unknown): unknown {
   throw new EvalRuntimeError(`cannot index '${typeof object}'`);
 }
 
-function evalCall(node: Extract<Ast, { kind: 'call' }>, env: Record<string, unknown>): unknown {
+function asStringList(value: unknown): string[] | undefined {
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map(item => item.trim())
+      .filter(item => item.length > 0);
+  }
+
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const items: string[] = [];
+
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      return undefined;
+    }
+
+    items.push(entry);
+  }
+
+  return items;
+}
+
+function requestHeaders(env: Record<string, unknown>): Record<string, unknown> | undefined {
+  const request = env.request;
+
+  if (request == null || typeof request !== 'object') {
+    return undefined;
+  }
+
+  const headers = (request as Record<string, unknown>).headers;
+
+  if (headers == null || typeof headers !== 'object' || Array.isArray(headers)) {
+    return undefined;
+  }
+
+  return headers as Record<string, unknown>;
+}
+
+function resolveEvaluateIp(source: unknown, env: Record<string, unknown>): string | undefined {
+  if (typeof source !== 'string' || source.length === 0) {
+    return undefined;
+  }
+
+  if (isValidIp(source)) {
+    return source;
+  }
+
+  const header = requestHeaders(env)?.[source.toLowerCase()];
+
+  if (typeof header !== 'string') {
+    return undefined;
+  }
+
+  return parseFirstValidIp(header) ?? undefined;
+}
+
+function evalAddressGroup(
+  node: Extract<Ast, { kind: 'call' }>,
+  env: Record<string, unknown>,
+  lookupAddressGroup?: AddressGroupLookup
+): boolean {
+  if (node.args.length < 2 || node.args.length > 3) {
+    throw new EvalRuntimeError(
+      `Function 'evaluateAddressGroup' declared with 2 or 3 args, called with ${node.args.length}`
+    );
+  }
+
+  const groupName = evalAst(requiredArg(node, 0), env, lookupAddressGroup);
+  const source = evalAst(requiredArg(node, 1), env, lookupAddressGroup);
+
+  if (typeof groupName !== 'string' || groupName.length === 0) {
+    return false;
+  }
+
+  const ip = resolveEvaluateIp(source, env);
+
+  if (ip === undefined) {
+    return false;
+  }
+
+  const items = lookupAddressGroup?.(groupName);
+
+  if (items === undefined || items.length === 0) {
+    return false;
+  }
+
+  const matched = items.some(cidr => ipInCidr(ip, cidr));
+
+  if (!matched) {
+    return false;
+  }
+
+  if (node.args.length < 3) {
+    return true;
+  }
+
+  const exclusions = asStringList(evalAst(requiredArg(node, 2), env, lookupAddressGroup));
+
+  if (exclusions === undefined) {
+    return false;
+  }
+
+  return !exclusions.some(cidr => ipInCidr(ip, cidr));
+}
+
+function evalCall(
+  node: Extract<Ast, { kind: 'call' }>,
+  env: Record<string, unknown>,
+  lookupAddressGroup?: AddressGroupLookup
+): unknown {
   const name = callName(node);
 
   if (name === 'has') {
@@ -1187,48 +1325,52 @@ function evalCall(node: Extract<Ast, { kind: 'call' }>, env: Record<string, unkn
       throw new EvalRuntimeError('has() requires an argument');
     }
 
-    return evalHas(arg, env);
+    return evalHas(arg, env, lookupAddressGroup);
+  }
+
+  if (name === 'evaluateAddressGroup') {
+    return evalAddressGroup(node, env, lookupAddressGroup);
   }
 
   if (name != null && ALWAYS_FALSE_FUNCTIONS.has(name)) {
     for (const arg of node.args) {
-      evalAst(arg, env);
+      evalAst(arg, env, lookupAddressGroup);
     }
 
     return false;
   }
 
   if (name === 'inIpRange') {
-    const ip = asString(evalAst(requiredArg(node, 0), env));
-    const cidr = asString(evalAst(requiredArg(node, 1), env));
+    const ip = asString(evalAst(requiredArg(node, 0), env, lookupAddressGroup));
+    const cidr = asString(evalAst(requiredArg(node, 1), env, lookupAddressGroup));
 
     return ipInCidr(ip, cidr);
   }
 
   if (name === 'int') {
-    return toInt(evalAst(requiredArg(node, 0), env));
+    return toInt(evalAst(requiredArg(node, 0), env, lookupAddressGroup));
   }
 
   if (name === 'size') {
-    return sizeOf(evalAst(requiredArg(node, 0), env));
+    return sizeOf(evalAst(requiredArg(node, 0), env, lookupAddressGroup));
   }
 
   if (node.callee.kind !== 'member') {
     throw new EvalRuntimeError(`undeclared reference to '${name ?? 'call'}'`);
   }
 
-  const target = evalAst(node.callee.object, env);
+  const target = evalAst(node.callee.object, env, lookupAddressGroup);
   const targetStr = asString(target);
 
   switch (name) {
     case 'contains':
-      return targetStr.includes(asString(evalAst(requiredArg(node, 0), env)));
+      return targetStr.includes(asString(evalAst(requiredArg(node, 0), env, lookupAddressGroup)));
     case 'startsWith':
-      return targetStr.startsWith(asString(evalAst(requiredArg(node, 0), env)));
+      return targetStr.startsWith(asString(evalAst(requiredArg(node, 0), env, lookupAddressGroup)));
     case 'endsWith':
-      return targetStr.endsWith(asString(evalAst(requiredArg(node, 0), env)));
+      return targetStr.endsWith(asString(evalAst(requiredArg(node, 0), env, lookupAddressGroup)));
     case 'matches': {
-      const pattern = asString(evalAst(requiredArg(node, 0), env));
+      const pattern = asString(evalAst(requiredArg(node, 0), env, lookupAddressGroup));
 
       if (hasCapturingGroup(pattern)) {
         throw new EvalRuntimeError('regular expression capture groups are not allowed');
@@ -1259,22 +1401,26 @@ function evalCall(node: Extract<Ast, { kind: 'call' }>, env: Record<string, unkn
   }
 }
 
-function evalHas(node: Ast, env: Record<string, unknown>): boolean {
+function evalHas(
+  node: Ast,
+  env: Record<string, unknown>,
+  lookupAddressGroup?: AddressGroupLookup
+): boolean {
   if (node.kind === 'index') {
-    const object = evalAst(node.object, env);
-    const key = evalAst(node.key, env);
+    const object = evalAst(node.object, env, lookupAddressGroup);
+    const key = evalAst(node.key, env, lookupAddressGroup);
 
     return hasKey(object, key);
   }
 
   if (node.kind === 'member') {
-    const object = evalAst(node.object, env);
+    const object = evalAst(node.object, env, lookupAddressGroup);
 
     return hasKey(object, node.name);
   }
 
   try {
-    evalAst(node, env);
+    evalAst(node, env, lookupAddressGroup);
 
     return true;
   } catch (err) {
