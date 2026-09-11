@@ -161,6 +161,122 @@ describe('Pub/Sub E2E: Raw HTTP API', () => {
 
   // ── Publish ──
 
+  test('6a. Late subscription receives retained messages', async () => {
+    const retainTopic = 'backfill-topic';
+    const retainSub = 'backfill-sub';
+
+    const createTopic = await fetch(emulatorUrl(`/v1/projects/${project}/topics/${retainTopic}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+
+    expect(createTopic.status).toBe(200);
+
+    const publish = await fetch(
+      emulatorUrl(`/v1/projects/${project}/topics/${retainTopic}:publish`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ data: btoa('published-first') }] }),
+      }
+    );
+
+    expect(publish.status).toBe(200);
+
+    const createSub = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${retainSub}`),
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: `projects/${project}/topics/${retainTopic}`,
+        }),
+      }
+    );
+
+    expect(createSub.status).toBe(200);
+
+    const pull = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${retainSub}:pull`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxMessages: 10 }),
+      }
+    );
+
+    expect(pull.status).toBe(200);
+
+    const pullBody = (await pull.json()) as {
+      receivedMessages: Array<{ message: { data: string } }>;
+    };
+
+    expect(pullBody.receivedMessages).toHaveLength(1);
+    expect(pullBody.receivedMessages[0]?.message.data).toBe(btoa('published-first'));
+  });
+
+  test('6b. Subscription filter delivers only matching attributes', async () => {
+    const filterTopic = 'filter-topic';
+    const filterSub = 'filter-sub';
+
+    const createTopic = await fetch(emulatorUrl(`/v1/projects/${project}/topics/${filterTopic}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+
+    expect(createTopic.status).toBe(200);
+
+    const createSub = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${filterSub}`),
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: `projects/${project}/topics/${filterTopic}`,
+          filter: 'attributes.env = "prod"',
+        }),
+      }
+    );
+
+    expect(createSub.status).toBe(200);
+
+    const publish = await fetch(
+      emulatorUrl(`/v1/projects/${project}/topics/${filterTopic}:publish`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { data: btoa('keep-me'), attributes: { env: 'prod' } },
+            { data: btoa('drop-me'), attributes: { env: 'dev' } },
+          ],
+        }),
+      }
+    );
+
+    expect(publish.status).toBe(200);
+
+    const pull = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${filterSub}:pull`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxMessages: 10 }),
+      }
+    );
+
+    expect(pull.status).toBe(200);
+
+    const pullBody = (await pull.json()) as {
+      receivedMessages: Array<{ message: { data: string } }>;
+    };
+
+    expect(pullBody.receivedMessages).toHaveLength(1);
+    expect(pullBody.receivedMessages[0]?.message.data).toBe(btoa('keep-me'));
+  });
+
   test('6. Publish messages to a topic', async () => {
     const response = await fetch(emulatorUrl(`/v1/projects/${project}/topics/${topicId}:publish`), {
       method: 'POST',
@@ -323,7 +439,14 @@ describe('Pub/Sub E2E: Raw HTTP API', () => {
     const pullBody = await pullResp.json();
 
     expect(pullBody.receivedMessages).toBeInstanceOf(Array);
-    expect(pullBody.receivedMessages.length).toBe(2);
+    expect(pullBody.receivedMessages.length).toBeGreaterThanOrEqual(2);
+
+    const pulledData = pullBody.receivedMessages.map(
+      (m: { message: { data: string } }) => m.message.data
+    );
+
+    expect(pulledData).toContain(btoa('pull-test-1'));
+    expect(pulledData).toContain(btoa('pull-test-2'));
 
     const msg1 = pullBody.receivedMessages[0];
 
@@ -653,7 +776,23 @@ describe('Pub/Sub E2E: Client Library', () => {
     const receivedMessages = pullResponse.receivedMessages;
 
     expect(receivedMessages).toBeInstanceOf(Array);
-    expect(receivedMessages?.length).toBe(2);
+    expect(receivedMessages?.length).toBeGreaterThanOrEqual(2);
+
+    const pulledData = (receivedMessages ?? []).map(m => {
+      const raw = m.message?.data;
+
+      if (Buffer.isBuffer(raw)) {
+        return raw.toString();
+      }
+
+      return typeof raw === 'string' ? raw : '';
+    });
+
+    expect(
+      pulledData.some(
+        data => data === 'client-pull-1' || data === Buffer.from('client-pull-1').toString('base64')
+      )
+    ).toBe(true);
 
     // Acknowledge
     const ackIds = (receivedMessages ?? []).map(
@@ -806,5 +945,79 @@ describe('Pub/Sub E2E: Push Delivery', () => {
     const pullBody = (await pull.json()) as { receivedMessages: unknown[] };
 
     expect(pullBody.receivedMessages).toHaveLength(0);
+  });
+
+  test('2. Push-to-pull via Terraform-shaped PATCH keeps unacked messages', async () => {
+    const topicId = 'push-to-pull-topic';
+    const subscriptionId = 'push-to-pull-sub';
+    const topicName = `projects/${project}/topics/${topicId}`;
+
+    const createTopic = await fetch(emulatorUrl(`/v1/projects/${project}/topics/${topicId}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+
+    expect(createTopic.status).toBe(200);
+
+    const createSub = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${subscriptionId}`),
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: topicName,
+          pushConfig: { pushEndpoint: `http://127.0.0.1:1/never-connect` },
+        }),
+      }
+    );
+
+    expect(createSub.status).toBe(200);
+
+    const publish = await fetch(emulatorUrl(`/v1/projects/${project}/topics/${topicId}:publish`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ data: btoa('survives-conversion') }],
+      }),
+    });
+
+    expect(publish.status).toBe(200);
+
+    const patch = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${subscriptionId}`),
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscription: { pushConfig: {} },
+          updateMask: 'pushConfig',
+        }),
+      }
+    );
+
+    expect(patch.status).toBe(200);
+
+    const patched = (await patch.json()) as { pushConfig?: unknown };
+
+    expect(patched.pushConfig).toBeUndefined();
+
+    const pull = await fetch(
+      emulatorUrl(`/v1/projects/${project}/subscriptions/${subscriptionId}:pull`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxMessages: 10 }),
+      }
+    );
+
+    expect(pull.status).toBe(200);
+
+    const pullBody = (await pull.json()) as {
+      receivedMessages: Array<{ message: { data: string } }>;
+    };
+
+    expect(pullBody.receivedMessages).toHaveLength(1);
+    expect(pullBody.receivedMessages[0]?.message.data).toBe(btoa('survives-conversion'));
   });
 });

@@ -627,6 +627,43 @@ describe('MessageRepository', () => {
 
       expect(cleaned).toBe(0);
     });
+
+    test('keeps ACKED rows when retainAcked is set and retention has not expired', async () => {
+      await messageRepo.publishMessages(
+        'projects/p/topics/t',
+        [{ data: btoa('retain') }],
+        ['projects/p/subscriptions/s1']
+      );
+
+      const pulled = await messageRepo.pullMessages('projects/p/subscriptions/s1', 10, 10);
+
+      await messageRepo.acknowledgeMessages('projects/p/subscriptions/s1', [
+        pulled[0]?.ackId ?? '',
+      ]);
+
+      const cleaned = await messageRepo.cleanupAckedMessages(
+        new Map([['projects/p/subscriptions/s1', { retainAcked: true, retentionSeconds: 604800 }]])
+      );
+
+      expect(cleaned).toBe(0);
+    });
+  });
+
+  test('releasePendingLeases resets ack deadlines so messages are pullable', async () => {
+    await messageRepo.publishMessages(
+      'projects/p/topics/t',
+      [{ data: btoa('lease') }],
+      ['projects/p/subscriptions/s1']
+    );
+
+    await messageRepo.pullMessages('projects/p/subscriptions/s1', 10, 600);
+
+    expect(await messageRepo.pullMessages('projects/p/subscriptions/s1', 10, 10)).toHaveLength(0);
+
+    const released = await messageRepo.releasePendingLeases('projects/p/subscriptions/s1');
+
+    expect(released).toBe(1);
+    expect(await messageRepo.pullMessages('projects/p/subscriptions/s1', 10, 10)).toHaveLength(1);
   });
 
   // ── resetDeliveredMessagesByTime (seek support) ──

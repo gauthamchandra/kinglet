@@ -11,13 +11,16 @@ import {
   buildSubscriptionName,
   buildTopicName,
   CreateSubscriptionRequestSchema,
+  defaultExpirationPolicy,
   handlePubSubError,
+  mergeUpdateMask,
   PubSubError,
   parseSchemaName,
   parseSnapshotName,
   parseSubscriptionName,
   parseTopicName,
   schemaRecordToResponse,
+  serializePushConfig,
   topicRecordToResponse,
 } from './types.ts';
 
@@ -284,6 +287,56 @@ describe('handlePubSubError', () => {
     const result = handlePubSubError(err, 'Topic', mockResponseUtils as never);
 
     expect(result.status).toBe(400);
+  });
+});
+
+describe('mergeUpdateMask', () => {
+  test('prefers body updateMask over the query', () => {
+    expect(mergeUpdateMask({ updateMask: 'labels' }, 'pushConfig')).toEqual({
+      updateMask: 'labels',
+    });
+  });
+
+  test('uses the query when the body omits updateMask', () => {
+    expect(mergeUpdateMask({ subscription: { pushConfig: {} } }, 'pushConfig')).toEqual({
+      subscription: { pushConfig: {} },
+      updateMask: 'pushConfig',
+    });
+  });
+
+  test('joins repeated query updateMask values', () => {
+    expect(mergeUpdateMask({}, ['pushConfig', 'labels'])).toEqual({
+      updateMask: 'pushConfig,labels',
+    });
+  });
+});
+
+describe('defaultExpirationPolicy', () => {
+  test('omitted policy becomes the 31-day GCP default', () => {
+    expect(defaultExpirationPolicy(undefined)).toEqual({ ttl: '2678400s' });
+    expect(defaultExpirationPolicy(null)).toEqual({ ttl: '2678400s' });
+  });
+
+  test('empty ttl means the subscription never expires', () => {
+    expect(defaultExpirationPolicy({ ttl: '' })).toEqual({ ttl: '' });
+  });
+});
+
+describe('serializePushConfig', () => {
+  test('empty or missing endpoint serializes as pull (null)', () => {
+    expect(serializePushConfig(undefined)).toBeNull();
+    expect(serializePushConfig(null)).toBeNull();
+    expect(serializePushConfig({})).toBeNull();
+    expect(serializePushConfig({ attributes: { 'x-goog-version': 'v1' } })).toBeNull();
+  });
+
+  test('defaults x-goog-version for a push endpoint', () => {
+    expect(
+      JSON.parse(serializePushConfig({ pushEndpoint: 'https://example.com/push' }) ?? '{}')
+    ).toEqual({
+      pushEndpoint: 'https://example.com/push',
+      attributes: { 'x-goog-version': 'v1' },
+    });
   });
 });
 

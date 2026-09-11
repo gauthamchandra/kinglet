@@ -11,7 +11,12 @@ import type {
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { SubscriptionService } from './subscription-service.ts';
-import { buildSubscriptionName, buildTopicName, handlePubSubError } from './types.ts';
+import {
+  buildSubscriptionName,
+  buildTopicName,
+  handlePubSubError,
+  mergeUpdateMask,
+} from './types.ts';
 
 export class SubscriptionHandlers {
   private service: SubscriptionService;
@@ -182,7 +187,10 @@ export class SubscriptionHandlers {
     try {
       const { project, subscription } = req.params;
       const name = buildSubscriptionName(project as string, subscription as string);
-      const result = await this.service.updateSubscription(name, req.body);
+      const result = await this.service.updateSubscription(
+        name,
+        mergeUpdateMask(req.body, req.query.updateMask)
+      );
 
       return this.responseUtils.success(result);
     } catch (err) {
@@ -287,7 +295,9 @@ export class SubscriptionHandlers {
     try {
       const { project, topic } = req.params;
       const topicName = buildTopicName(project as string, topic as string);
-      const result = await this.service.listTopicSubscriptions(topicName);
+      const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : undefined;
+      const pageToken = req.query.pageToken as string | undefined;
+      const result = await this.service.listTopicSubscriptions(topicName, pageSize, pageToken);
 
       return this.responseUtils.success(result);
     } catch (err) {

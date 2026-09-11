@@ -11,7 +11,7 @@ import type {
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { SnapshotService } from './snapshot-service.ts';
-import { buildSnapshotName, buildTopicName, handlePubSubError } from './types.ts';
+import { buildSnapshotName, buildTopicName, handlePubSubError, mergeUpdateMask } from './types.ts';
 
 export class SnapshotHandlers {
   private service: SnapshotService;
@@ -116,7 +116,10 @@ export class SnapshotHandlers {
     try {
       const { project, snapshot } = req.params;
       const name = buildSnapshotName(project as string, snapshot as string);
-      const result = await this.service.updateSnapshot(name, req.body);
+      const result = await this.service.updateSnapshot(
+        name,
+        mergeUpdateMask(req.body, req.query.updateMask)
+      );
 
       return this.responseUtils.success(result);
     } catch (err) {
@@ -146,7 +149,9 @@ export class SnapshotHandlers {
     try {
       const { project, topic } = req.params;
       const topicName = buildTopicName(project as string, topic as string);
-      const result = await this.service.listTopicSnapshots(topicName);
+      const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : undefined;
+      const pageToken = req.query.pageToken as string | undefined;
+      const result = await this.service.listTopicSnapshots(topicName, pageSize, pageToken);
 
       return this.responseUtils.success(result);
     } catch (err) {

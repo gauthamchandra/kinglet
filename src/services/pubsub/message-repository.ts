@@ -257,37 +257,16 @@ export class MessageRepository {
     );
   }
 
-  async cleanupAckedMessages(): Promise<number> {
-    const acked = await this.storage.find<DeliveredMessageRecord>(PUBSUB_DELIVERED_MESSAGES_TABLE, {
-      filter: {
-        conditions: [{ field: 'ackStatus', operator: 'eq', value: AckStatus.ACKED }],
-      },
-    });
-
-    const count = acked.data.length;
-
-    if (count > 0) {
-      await this.storage.deleteMany(PUBSUB_DELIVERED_MESSAGES_TABLE, {
-        conditions: [{ field: 'ackStatus', operator: 'eq', value: AckStatus.ACKED }],
-      });
-    }
-
-    return count;
-  }
-
   async resetDeliveredMessagesByTime(
     subscriptionName: string,
-    beforeTime: string
+    beforeTime: string,
+    includeAcked = false
   ): Promise<number> {
-    // Find all PENDING delivered messages for this subscription
     const delivered = await this.storage.find<DeliveredMessageRecord>(
       PUBSUB_DELIVERED_MESSAGES_TABLE,
       {
         filter: {
-          conditions: [
-            { field: 'subscriptionName', operator: 'eq', value: subscriptionName },
-            { field: 'ackStatus', operator: 'eq', value: AckStatus.PENDING },
-          ],
+          conditions: [{ field: 'subscriptionName', operator: 'eq', value: subscriptionName }],
         },
       }
     );
@@ -303,11 +282,17 @@ export class MessageRepository {
       });
 
       if (message && message.publishTime <= beforeTime) {
-        // Reset ackDeadline to epoch to make it re-deliverable
+        if (dm.ackStatus === AckStatus.ACKED && !includeAcked) {
+          continue;
+        }
+
         await this.storage.updateById<DeliveredMessageRecord>(
           PUBSUB_DELIVERED_MESSAGES_TABLE,
           dm.id,
-          { ackDeadline: new Date(0).toISOString() }
+          {
+            ackDeadline: new Date(0).toISOString(),
+            ackStatus: AckStatus.PENDING,
+          }
         );
 
         resetCount++;
@@ -321,6 +306,153 @@ export class MessageRepository {
     await this.storage.deleteMany(PUBSUB_DELIVERED_MESSAGES_TABLE, {
       conditions: [{ field: 'subscriptionName', operator: 'eq', value: subscriptionName }],
     });
+  }
+
+  async listMessagesByTopic(topicName: string): Promise<MessageRecord[]> {
+    const messages = await this.storage.find<MessageRecord>(PUBSUB_MESSAGES_TABLE, {
+      filter: {
+        conditions: [{ field: 'topicName', operator: 'eq', value: topicName }],
+      },
+      sort: [{ field: 'publishTime', direction: 'asc' }],
+    });
+
+    return messages.data;
+  }
+
+  async fanOutExistingMessages(
+    topicName: string,
+    subscriptionName: string,
+    options: {
+      filter?: string | null;
+      retainAfter?: string | undefined;
+      matchesFilter: (
+        attributes: Record<string, string> | undefined,
+        filter: string | null
+      ) => boolean;
+    }
+  ): Promise<number> {
+    const messages = await this.listMessagesByTopic(topicName);
+    let created = 0;
+
+    for (const message of messages) {
+      if (options.retainAfter != null && message.publishTime < options.retainAfter) {
+        continue;
+      }
+
+      const attributes = message.attributes
+        ? (JSON.parse(message.attributes) as Record<string, string>)
+        : undefined;
+
+      if (!options.matchesFilter(attributes, options.filter ?? null)) {
+        continue;
+      }
+
+      const existing = await this.storage.findFirst<DeliveredMessageRecord>(
+        PUBSUB_DELIVERED_MESSAGES_TABLE,
+        {
+          filter: {
+            conditions: [
+              { field: 'subscriptionName', operator: 'eq', value: subscriptionName },
+              { field: 'messageId', operator: 'eq', value: message.messageId },
+            ],
+          },
+        }
+      );
+
+      if (existing) {
+        continue;
+      }
+
+      await this.storage.create<DeliveredMessageRecord>(PUBSUB_DELIVERED_MESSAGES_TABLE, {
+        ackId: crypto.randomUUID(),
+        subscriptionName,
+        messageId: message.messageId,
+        deliveryAttempt: 0,
+        ackDeadline: new Date(0).toISOString(),
+        ackStatus: AckStatus.PENDING,
+      });
+
+      created++;
+    }
+
+    return created;
+  }
+
+  async releasePendingLeases(subscriptionName: string): Promise<number> {
+    const delivered = await this.storage.find<DeliveredMessageRecord>(
+      PUBSUB_DELIVERED_MESSAGES_TABLE,
+      {
+        filter: {
+          conditions: [
+            { field: 'subscriptionName', operator: 'eq', value: subscriptionName },
+            { field: 'ackStatus', operator: 'eq', value: AckStatus.PENDING },
+          ],
+        },
+      }
+    );
+
+    const epoch = new Date(0).toISOString();
+    let released = 0;
+
+    for (const dm of delivered.data) {
+      await this.storage.updateById<DeliveredMessageRecord>(
+        PUBSUB_DELIVERED_MESSAGES_TABLE,
+        dm.id,
+        { ackDeadline: epoch }
+      );
+
+      released++;
+    }
+
+    return released;
+  }
+
+  async cleanupAckedMessages(
+    retainBySubscription?: Map<string, { retainAcked: boolean; retentionSeconds: number }>
+  ): Promise<number> {
+    const acked = await this.storage.find<DeliveredMessageRecord>(PUBSUB_DELIVERED_MESSAGES_TABLE, {
+      filter: {
+        conditions: [{ field: 'ackStatus', operator: 'eq', value: AckStatus.ACKED }],
+      },
+    });
+
+    let deleted = 0;
+    const now = Date.now();
+
+    for (const dm of acked.data) {
+      const retain = retainBySubscription?.get(dm.subscriptionName);
+
+      if (retain?.retainAcked) {
+        const message = await this.storage.findFirst<MessageRecord>(PUBSUB_MESSAGES_TABLE, {
+          filter: {
+            conditions: [{ field: 'messageId', operator: 'eq', value: dm.messageId }],
+          },
+        });
+
+        if (message) {
+          const expiresAt = Date.parse(message.publishTime) + retain.retentionSeconds * 1000;
+
+          if (Number.isFinite(expiresAt) && expiresAt > now) {
+            continue;
+          }
+        }
+      }
+
+      await this.storage.deleteById(PUBSUB_DELIVERED_MESSAGES_TABLE, dm.id);
+      deleted++;
+    }
+
+    return deleted;
+  }
+
+  async detachMessagesFromTopic(topicName: string): Promise<void> {
+    const messages = await this.listMessagesByTopic(topicName);
+
+    for (const msg of messages) {
+      await this.storage.updateById<MessageRecord>(PUBSUB_MESSAGES_TABLE, msg.id, {
+        topicName: '_deleted-topic_',
+      });
+    }
   }
 
   async deleteMessagesByTopic(topicName: string): Promise<void> {

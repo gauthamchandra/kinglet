@@ -11,7 +11,7 @@ import type {
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { TopicService } from './topic-service.ts';
-import { buildTopicName, handlePubSubError } from './types.ts';
+import { buildTopicName, handlePubSubError, mergeUpdateMask } from './types.ts';
 
 export class TopicHandlers {
   private service: TopicService;
@@ -115,7 +115,10 @@ export class TopicHandlers {
     try {
       const { project, topic } = req.params;
       const name = buildTopicName(project as string, topic as string);
-      const result = await this.service.updateTopic(name, req.body);
+      const result = await this.service.updateTopic(
+        name,
+        mergeUpdateMask(req.body, req.query.updateMask)
+      );
 
       return this.responseUtils.success(result);
     } catch (err) {

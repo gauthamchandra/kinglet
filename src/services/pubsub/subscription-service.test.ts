@@ -60,6 +60,46 @@ describe('SubscriptionService', () => {
 
     expect(sub.ackDeadlineSeconds).toBe(10);
     expect(sub.messageRetentionDuration).toBe('604800s');
+    expect(sub.expirationPolicy).toEqual({ ttl: '2678400s' });
+  });
+
+  test('createSubscription defaults x-goog-version on push subscriptions', async () => {
+    const sub = await service.createSubscription('p', 'push-defaults', {
+      topic: 'projects/p/topics/t',
+      pushConfig: { pushEndpoint: 'https://example.com/push' },
+    });
+
+    expect(sub.pushConfig?.pushEndpoint).toBe('https://example.com/push');
+    expect(sub.pushConfig?.attributes).toEqual({ 'x-goog-version': 'v1' });
+  });
+
+  test('createSubscription empty expirationPolicy.ttl means never expire', async () => {
+    const sub = await service.createSubscription('p', 'never-expire', {
+      topic: 'projects/p/topics/t',
+      expirationPolicy: { ttl: '' },
+    });
+
+    expect(sub.expirationPolicy).toEqual({ ttl: '' });
+  });
+
+  test('createSubscription copies topicMessageRetentionDuration from the topic', async () => {
+    await topicService.createTopic('p', 'retained', { messageRetentionDuration: '3600s' });
+
+    const sub = await service.createSubscription('p', 'retained-sub', {
+      topic: 'projects/p/topics/retained',
+    });
+
+    expect(sub.topicMessageRetentionDuration).toBe('3600s');
+  });
+
+  test('createSubscription rejects unsupported filters', async () => {
+    const promise = service.createSubscription('p', 'bad-filter', {
+      topic: 'projects/p/topics/t',
+      filter: 'attributes.foo != "bar"',
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(PubSubError);
+    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
   });
 
   test('createSubscription throws NOT_FOUND when topic does not exist', async () => {
@@ -328,6 +368,85 @@ describe('SubscriptionService', () => {
     expect(sub.pushConfig?.pushEndpoint).toBe('https://example.com/push');
   });
 
+  test('modifyPushConfig empty config converts push to pull without dropping backlog', async () => {
+    await service.createSubscription('p', 'convertible', {
+      topic: 'projects/p/topics/t',
+      pushConfig: { pushEndpoint: 'https://example.com/push' },
+    });
+
+    await service.publish('projects/p/topics/t', {
+      messages: [{ data: btoa('keep-me') }, { data: btoa('keep-me-too') }],
+    });
+
+    await service.modifyPushConfig('projects/p/subscriptions/convertible', { pushConfig: {} });
+
+    const sub = await service.getSubscription('projects/p/subscriptions/convertible');
+
+    expect(sub.pushConfig).toBeUndefined();
+
+    const pulled = await service.pull('projects/p/subscriptions/convertible', { maxMessages: 10 });
+
+    expect(pulled.receivedMessages).toHaveLength(2);
+    expect(pulled.receivedMessages.map(m => m.message.data).sort()).toEqual([
+      btoa('keep-me'),
+      btoa('keep-me-too'),
+    ]);
+  });
+
+  test('push-to-pull releases outstanding leases so pull can read immediately', async () => {
+    await service.createSubscription('p', 'leased', {
+      topic: 'projects/p/topics/t',
+      pushConfig: { pushEndpoint: 'https://example.com/push' },
+      ackDeadlineSeconds: 600,
+    });
+
+    await service.publish('projects/p/topics/t', {
+      messages: [{ data: btoa('leased-message') }],
+    });
+
+    const firstPull = await service.pull('projects/p/subscriptions/leased', { maxMessages: 10 });
+
+    expect(firstPull.receivedMessages).toHaveLength(1);
+
+    const emptyWhileLeased = await service.pull('projects/p/subscriptions/leased', {
+      maxMessages: 10,
+    });
+
+    expect(emptyWhileLeased.receivedMessages).toHaveLength(0);
+
+    await service.modifyPushConfig('projects/p/subscriptions/leased', { pushConfig: {} });
+
+    const afterConvert = await service.pull('projects/p/subscriptions/leased', { maxMessages: 10 });
+
+    expect(afterConvert.receivedMessages).toHaveLength(1);
+    expect(afterConvert.receivedMessages[0]?.message.data).toBe(btoa('leased-message'));
+  });
+
+  test('updateSubscription pushConfig mask with empty object matches Terraform push-to-pull', async () => {
+    await service.createSubscription('p', 'tf-convertible', {
+      topic: 'projects/p/topics/t',
+      pushConfig: { pushEndpoint: 'https://example.com/push' },
+    });
+
+    await service.publish('projects/p/topics/t', {
+      messages: [{ data: btoa('from-push') }],
+    });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/tf-convertible', {
+      subscription: { pushConfig: {} },
+      updateMask: 'pushConfig',
+    });
+
+    expect(updated.pushConfig).toBeUndefined();
+
+    const pulled = await service.pull('projects/p/subscriptions/tf-convertible', {
+      maxMessages: 10,
+    });
+
+    expect(pulled.receivedMessages).toHaveLength(1);
+    expect(pulled.receivedMessages[0]?.message.data).toBe(btoa('from-push'));
+  });
+
   test('modifyPushConfig throws NOT_FOUND for missing subscription', async () => {
     const promise = service.modifyPushConfig('projects/p/subscriptions/missing', {
       pushConfig: { pushEndpoint: 'https://example.com/push' },
@@ -415,6 +534,131 @@ describe('SubscriptionService', () => {
       'projects/p/subscriptions/s1',
       'projects/p/subscriptions/s2',
     ]);
+  });
+
+  test('createSubscription backfills retained published messages', async () => {
+    await service.publish('projects/p/topics/t', {
+      messages: [{ data: btoa('before-subscribe') }],
+    });
+
+    await service.createSubscription('p', 'late-sub', { topic: 'projects/p/topics/t' });
+
+    const pulled = await service.pull('projects/p/subscriptions/late-sub', { maxMessages: 10 });
+
+    expect(pulled.receivedMessages).toHaveLength(1);
+    expect(pulled.receivedMessages[0]?.message.data).toBe(btoa('before-subscribe'));
+  });
+
+  test('publish applies attribute filters per subscription', async () => {
+    await service.createSubscription('p', 'filtered', {
+      topic: 'projects/p/topics/t',
+      filter: 'attributes.env = "prod"',
+    });
+    await service.createSubscription('p', 'unfiltered', { topic: 'projects/p/topics/t' });
+
+    await service.publish('projects/p/topics/t', {
+      messages: [
+        { data: btoa('prod-only'), attributes: { env: 'prod' } },
+        { data: btoa('dev-only'), attributes: { env: 'dev' } },
+      ],
+    });
+
+    const filtered = await service.pull('projects/p/subscriptions/filtered', { maxMessages: 10 });
+    const unfiltered = await service.pull('projects/p/subscriptions/unfiltered', {
+      maxMessages: 10,
+    });
+
+    expect(filtered.receivedMessages).toHaveLength(1);
+    expect(filtered.receivedMessages[0]?.message.data).toBe(btoa('prod-only'));
+    expect(unfiltered.receivedMessages).toHaveLength(2);
+  });
+
+  test('retainAckedMessages keeps acked messages available for seek', async () => {
+    await service.createSubscription('p', 'retain-sub', {
+      topic: 'projects/p/topics/t',
+      retainAckedMessages: true,
+    });
+
+    await service.publish('projects/p/topics/t', {
+      messages: [{ data: btoa('replay-me') }],
+    });
+
+    const pulled = await service.pull('projects/p/subscriptions/retain-sub', { maxMessages: 10 });
+
+    expect(pulled.receivedMessages).toHaveLength(1);
+
+    await service.acknowledge('projects/p/subscriptions/retain-sub', {
+      ackIds: [pulled.receivedMessages[0]?.ackId as string],
+    });
+
+    await service.seek('projects/p/subscriptions/retain-sub', {
+      time: new Date().toISOString(),
+    });
+
+    const replayed = await service.pull('projects/p/subscriptions/retain-sub', { maxMessages: 10 });
+
+    expect(replayed.receivedMessages).toHaveLength(1);
+    expect(replayed.receivedMessages[0]?.message.data).toBe(btoa('replay-me'));
+  });
+
+  test('updateSubscription accepts snake_case updateMask fields from Terraform', async () => {
+    await service.createSubscription('p', 'snake-sub', { topic: 'projects/p/topics/t' });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/snake-sub', {
+      subscription: { pushConfig: { pushEndpoint: 'https://example.com/tf' } },
+      updateMask: 'push_config',
+    });
+
+    expect(updated.pushConfig?.pushEndpoint).toBe('https://example.com/tf');
+  });
+
+  test('updateSubscription updateMask supports filter and enableMessageOrdering', async () => {
+    await service.createSubscription('p', 'mask-sub', { topic: 'projects/p/topics/t' });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/mask-sub', {
+      subscription: {
+        filter: 'attributes.env = "prod"',
+        enableMessageOrdering: true,
+      },
+      updateMask: 'filter,enableMessageOrdering',
+    });
+
+    expect(updated.filter).toBe('attributes.env = "prod"');
+    expect(updated.enableMessageOrdering).toBe(true);
+  });
+
+  test('updateSubscription updateMask persists bigqueryConfig and cloudStorageConfig', async () => {
+    await service.createSubscription('p', 'echo-sub', { topic: 'projects/p/topics/t' });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/echo-sub', {
+      subscription: {
+        bigqueryConfig: { table: 'proj.dataset.table', writeMetadata: true },
+        cloudStorageConfig: { bucket: 'kinglet-bucket' },
+      },
+      updateMask: 'bigqueryConfig,cloudStorageConfig',
+    });
+
+    expect(updated.bigqueryConfig).toEqual({ table: 'proj.dataset.table', writeMetadata: true });
+    expect(updated.cloudStorageConfig).toEqual({ bucket: 'kinglet-bucket' });
+  });
+
+  test('listTopicSubscriptions paginates', async () => {
+    await service.createSubscription('p', 'page-a', { topic: 'projects/p/topics/t' });
+    await service.createSubscription('p', 'page-b', { topic: 'projects/p/topics/t' });
+
+    const first = await service.listTopicSubscriptions('projects/p/topics/t', 1);
+
+    expect(first.subscriptions).toHaveLength(1);
+    expect(first.nextPageToken).toBeTypeOf('string');
+
+    const second = await service.listTopicSubscriptions(
+      'projects/p/topics/t',
+      1,
+      first.nextPageToken
+    );
+
+    expect(second.subscriptions).toHaveLength(1);
+    expect(second.subscriptions[0]).not.toBe(first.subscriptions[0]);
   });
 
   test('listTopicSubscriptions throws NOT_FOUND for missing topic', async () => {

@@ -67,7 +67,11 @@ export class PubSubService {
     await this.schemaRepository.initialize();
 
     // Services
-    this.topicService = new TopicService(this.topicRepository, this.messageRepository);
+    this.topicService = new TopicService(
+      this.topicRepository,
+      this.messageRepository,
+      this.subscriptionRepository
+    );
     this.subscriptionService = new SubscriptionService(
       this.subscriptionRepository,
       this.topicRepository,

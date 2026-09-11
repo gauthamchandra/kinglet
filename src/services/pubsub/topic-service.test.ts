@@ -5,14 +5,17 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { MessageRepository } from './message-repository.ts';
+import { SubscriptionRepository } from './subscription-repository.ts';
+import { SubscriptionService } from './subscription-service.ts';
 import { TopicRepository } from './topic-repository.ts';
 import { TopicService } from './topic-service.ts';
-import { PubSubError } from './types.ts';
+import { DELETED_TOPIC_NAME, PubSubError } from './types.ts';
 
 describe('TopicService', () => {
   let storage: StorageManager;
   let repo: TopicRepository;
   let messageRepo: MessageRepository;
+  let subRepo: SubscriptionRepository;
   let service: TopicService;
 
   beforeEach(async () => {
@@ -22,7 +25,9 @@ describe('TopicService', () => {
     await repo.initialize();
     messageRepo = new MessageRepository(storage);
     await messageRepo.initialize();
-    service = new TopicService(repo, messageRepo);
+    subRepo = new SubscriptionRepository(storage);
+    await subRepo.initialize();
+    service = new TopicService(repo, messageRepo, subRepo);
   });
 
   // ── createTopic ──
@@ -124,6 +129,28 @@ describe('TopicService', () => {
     const promise = service.getTopic('projects/p/topics/t');
 
     await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
+  });
+
+  test('deleteTopic points remaining subscriptions at _deleted-topic_ and keeps backlog', async () => {
+    await service.createTopic('p', 'doomed', {});
+
+    const subService = new SubscriptionService(subRepo, repo, messageRepo);
+
+    await subService.createSubscription('p', 'survivor', { topic: 'projects/p/topics/doomed' });
+    await subService.publish('projects/p/topics/doomed', {
+      messages: [{ data: btoa('still-here') }],
+    });
+
+    await service.deleteTopic('projects/p/topics/doomed');
+
+    const sub = await subService.getSubscription('projects/p/subscriptions/survivor');
+
+    expect(sub.topic).toBe(DELETED_TOPIC_NAME);
+
+    const pulled = await subService.pull('projects/p/subscriptions/survivor', { maxMessages: 10 });
+
+    expect(pulled.receivedMessages).toHaveLength(1);
+    expect(pulled.receivedMessages[0]?.message.data).toBe(btoa('still-here'));
   });
 
   test('deleteTopic throws NOT_FOUND for missing topic', async () => {

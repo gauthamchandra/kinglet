@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord, TableSchema } from '@/core/storage/types.ts';
 import type { ListByPrefixResult, NamedRecord } from './resource-repository.ts';
@@ -244,5 +247,70 @@ describe('deleteByPrefix', () => {
 
   test('deleteByPrefix_givenNoMatches_deletesNothing', async () => {
     expect(await repository.deleteByPrefix(PREFIX)).toBe(0);
+  });
+});
+
+describe('initialize schema sync', () => {
+  let dbDir: string | undefined;
+
+  afterEach(async () => {
+    if (dbDir) {
+      await rm(dbDir, { recursive: true, force: true });
+    }
+  });
+
+  test('initialize_onExistingSqliteTable_addsNewColumns', async () => {
+    dbDir = await mkdtemp(join(tmpdir(), 'kinglet-resource-repo-'));
+    const sqlitePath = join(dbDir, 'emulator.db');
+
+    const writer = new StorageManager();
+
+    await writer.initialize({ type: 'sqlite', database: { path: sqlitePath } });
+
+    class LegacyWidgetRepository extends ResourceRepository<WidgetRecord> {
+      constructor(storage: StorageManager) {
+        super(storage, WIDGETS_TABLE, widgetTableSchema, 'widget');
+      }
+    }
+
+    await new LegacyWidgetRepository(writer).initialize();
+    await writer.close();
+
+    const reader = new StorageManager();
+
+    await reader.initialize({ type: 'sqlite', database: { path: sqlitePath } });
+
+    interface ExtendedWidgetRecord extends WidgetRecord {
+      extra?: string;
+    }
+
+    const extendedSchema: TableSchema = {
+      name: WIDGETS_TABLE,
+      columns: [
+        { name: 'name', type: 'string', unique: true },
+        { name: 'note', type: 'string' },
+        { name: 'extra', type: 'string', nullable: true },
+      ],
+      indexes: [{ name: `idx_${WIDGETS_TABLE}_name`, columns: ['name'], unique: true }],
+      timestamps: true,
+    };
+
+    class ExtendedWidgetRepository extends ResourceRepository<ExtendedWidgetRecord> {
+      constructor(storage: StorageManager) {
+        super(storage, WIDGETS_TABLE, extendedSchema, 'widget');
+      }
+    }
+
+    await new ExtendedWidgetRepository(reader).initialize();
+
+    const created = await new ExtendedWidgetRepository(reader).create({
+      name: `${PREFIX}synced`,
+      note: 'n',
+      extra: 'added-by-schema-sync',
+    });
+
+    expect(created.extra).toBe('added-by-schema-sync');
+
+    await reader.close();
   });
 });

@@ -22,9 +22,15 @@ export interface TerraformValidationCase {
 export const TERRAFORM_VALIDATION_CASES = [
   {
     id: 'pubsub',
-    description: 'Pub/Sub topic and pull subscription',
+    description: 'Pub/Sub topic, pull/push subscriptions, and push-to-pull conversion',
     services: ['pubsub'],
-    targets: ['google_pubsub_topic.events', 'google_pubsub_subscription.events_pull'],
+    targets: [
+      'google_pubsub_topic.events',
+      'google_pubsub_topic.events_dead_letter',
+      'google_pubsub_subscription.events_pull',
+      'google_pubsub_subscription.events_push',
+      'google_pubsub_subscription.events_convertible',
+    ],
   },
   {
     id: 'kms',
