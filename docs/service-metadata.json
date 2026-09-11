@@ -58,7 +58,7 @@
     "networksecurity": {
       "status": "experimental",
       "dataPlane": "Emulated in-process",
-      "summary": "Project-scoped address groups (CRUD + LROs). Organization collections, IAM, addItems/removeItems/cloneItems, and listReferences are unregistered. Cloud Armor evaluateAddressGroup() still always returns false."
+      "summary": "Project-scoped address groups (CRUD + LROs). Organization collections, IAM, addItems/removeItems/cloneItems, and listReferences are unregistered. Cloud Armor evaluateAddressGroup() reads project-global groups; evaluateOrganizationAddressGroup() still always returns false."
     }
   }
 }

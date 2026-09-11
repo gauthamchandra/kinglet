@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import type { AddressGroupLookup } from './expression.ts';
 import {
   evaluateExpression,
+  expressionUsesAddressGroup,
   expressionUsesBodyPhase,
   matchSrcIpRanges,
   validateExpression,
@@ -17,7 +19,8 @@ const CHROME_JA4 = 't13d1516h2_8daaf6152771_b0da82dd1658';
 
 function evalExpr(
   expression: string,
-  overrides: Partial<RequestAttributeInput> = {}
+  overrides: Partial<RequestAttributeInput> = {},
+  lookupAddressGroup?: AddressGroupLookup
 ): ExpressionEvaluation {
   const input: RequestAttributeInput = {
     method: overrides.method ?? 'GET',
@@ -43,11 +46,19 @@ function evalExpr(
   if (overrides.params != null) input.params = overrides.params;
   if (overrides.jsonParsing != null) input.jsonParsing = overrides.jsonParsing;
 
-  return evaluateExpression(expression, buildRequestAttributes(input));
+  if (lookupAddressGroup == null) {
+    return evaluateExpression(expression, buildRequestAttributes(input));
+  }
+
+  return evaluateExpression(expression, buildRequestAttributes(input), { lookupAddressGroup });
 }
 
-function matched(expression: string, overrides?: Partial<RequestAttributeInput>): boolean {
-  const result = evalExpr(expression, overrides);
+function matched(
+  expression: string,
+  overrides?: Partial<RequestAttributeInput>,
+  lookupAddressGroup?: AddressGroupLookup
+): boolean {
+  const result = evalExpr(expression, overrides, lookupAddressGroup);
 
   expect(result.ok).toBe(true);
 
@@ -254,7 +265,6 @@ describe('evaluateExpression functions', () => {
     const names = [
       "evaluatePreconfiguredWaf('xss-v422-stable')",
       "evaluatePreconfiguredExpr('xss-stable')",
-      "evaluateAddressGroup('g', origin.ip)",
       "evaluateOrganizationAddressGroup('g', origin.ip)",
       "evaluateThreatIntelligence('iplist-known-malicious-ips')",
       "evaluateAdaptiveProtection('alert')",
@@ -265,6 +275,118 @@ describe('evaluateExpression functions', () => {
       expect(() => validateExpression(expr)).not.toThrow();
       expect(matched(expr)).toBe(false);
     }
+  });
+
+  test('evaluateAddressGroup matches items, exclusions, headers, and missing groups', () => {
+    const lookup: AddressGroupLookup = name => {
+      if (name === 'malicious-ips') {
+        return ['198.51.100.0/24', '203.0.113.10'];
+      }
+
+      if (name === 'ipv6-block') {
+        return ['2001:db8::/32'];
+      }
+
+      return undefined;
+    };
+
+    expect(() =>
+      validateExpression("evaluateAddressGroup('malicious-ips', origin.ip)")
+    ).not.toThrow();
+
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', origin.ip)",
+        { originIp: '198.51.100.20' },
+        lookup
+      )
+    ).toBe(true);
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', origin.ip)",
+        { originIp: '203.0.113.10' },
+        lookup
+      )
+    ).toBe(true);
+    expect(
+      matched("evaluateAddressGroup('malicious-ips', origin.ip)", { originIp: '192.0.2.8' }, lookup)
+    ).toBe(false);
+    expect(
+      matched("evaluateAddressGroup('missing', origin.ip)", { originIp: '198.51.100.20' }, lookup)
+    ).toBe(false);
+    expect(
+      matched("evaluateAddressGroup('malicious-ips', origin.ip)", { originIp: '198.51.100.20' })
+    ).toBe(false);
+
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', origin.ip, ['198.51.100.20', '203.0.113.0/24'])",
+        { originIp: '198.51.100.20' },
+        lookup
+      )
+    ).toBe(false);
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', origin.ip, ['203.0.113.0/24'])",
+        { originIp: '198.51.100.20' },
+        lookup
+      )
+    ).toBe(true);
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', origin.ip, '198.51.100.20, 203.0.113.0/24')",
+        { originIp: '198.51.100.20' },
+        lookup
+      )
+    ).toBe(false);
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', origin.ip, '203.0.113.0/24')",
+        { originIp: '198.51.100.20' },
+        lookup
+      )
+    ).toBe(true);
+
+    expect(
+      matched("evaluateAddressGroup('ipv6-block', origin.ip)", { originIp: '2001:db8::5' }, lookup)
+    ).toBe(true);
+    expect(
+      matched(
+        "evaluateAddressGroup('ipv6-block', origin.ip)",
+        { originIp: '198.51.100.20' },
+        lookup
+      )
+    ).toBe(false);
+
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', origin.user_ip)",
+        {
+          originIp: '192.0.2.8',
+          headers: { 'true-client-ip': '198.51.100.20' },
+          userIpRequestHeaders: ['True-Client-IP'],
+        },
+        lookup
+      )
+    ).toBe(true);
+
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', 'x-real-ip')",
+        {
+          originIp: '192.0.2.8',
+          headers: { 'x-real-ip': '198.51.100.20' },
+        },
+        lookup
+      )
+    ).toBe(true);
+    expect(
+      matched(
+        "evaluateAddressGroup('malicious-ips', 'x-real-ip')",
+        { originIp: '198.51.100.20' },
+        lookup
+      )
+    ).toBe(false);
   });
 
   test('origin attributes use supplied values', () => {
@@ -300,5 +422,22 @@ describe('body-phase detection', () => {
     expect(expressionUsesBodyPhase("request['params'].category == 'electronics'")).toBe(true);
     expect(expressionUsesBodyPhase("evaluatePreconfiguredWaf('xss-v422-stable')")).toBe(true);
     expect(expressionUsesBodyPhase("request.path == '/x'")).toBe(false);
+  });
+});
+
+describe('address-group detection', () => {
+  test('flags evaluateAddressGroup calls and ignores other expressions', () => {
+    expect(expressionUsesAddressGroup("evaluateAddressGroup('malicious-ips', origin.ip)")).toBe(
+      true
+    );
+    expect(
+      expressionUsesAddressGroup(
+        "request.path.startsWith('/admin') && evaluateAddressGroup('g', origin.ip)"
+      )
+    ).toBe(true);
+    expect(expressionUsesAddressGroup("request.path == '/x'")).toBe(false);
+    expect(expressionUsesAddressGroup("evaluateOrganizationAddressGroup('g', origin.ip)")).toBe(
+      false
+    );
   });
 });

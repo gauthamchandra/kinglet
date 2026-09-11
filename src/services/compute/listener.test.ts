@@ -5,14 +5,16 @@
  * directly (unit tests) and also test policy resolution logic.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import type { EvaluationResult } from './armor/types.ts';
 import {
   buildRequestAttributesFromListenerRequest,
   handleArmorDecision,
   jsonParsingFromPolicy,
+  policyUsesAddressGroup,
   redirectTargetFromPolicy,
   selectPolicy,
+  startArmorListener,
   userIpRequestHeadersFromPolicy,
 } from './listener.ts';
 import { buildSecurityPolicySelfLink, type SecurityPolicyResponse } from './types.ts';
@@ -892,5 +894,101 @@ describe('jsonParsing through the listener adapter', () => {
     expect(disabled.attributes.request.params.city).toBeUndefined();
     expect(enabled.attributes.request.params.city).toBe('NewYork');
     expect(enabled.attributes.request.params.n).toBe('1');
+  });
+});
+
+function makeListenerTestPolicy(
+  name: string,
+  rules: SecurityPolicyResponse['rules'] = []
+): SecurityPolicyResponse {
+  return {
+    kind: 'compute#securityPolicy',
+    id: `proj-${name}`,
+    creationTimestamp: '2026-01-01T00:00:00.000Z',
+    name,
+    selfLink: buildSecurityPolicySelfLink('proj', name),
+    fingerprint: 'abc',
+    rules,
+  };
+}
+
+describe('policyUsesAddressGroup', () => {
+  test('is false for SRC_IPS_V1-only policies', () => {
+    expect(
+      policyUsesAddressGroup(
+        makeListenerTestPolicy('path', [
+          {
+            priority: 2147483647,
+            action: 'allow',
+            match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+          },
+        ])
+      )
+    ).toBe(false);
+  });
+
+  test('is true when a rule calls evaluateAddressGroup', () => {
+    expect(
+      policyUsesAddressGroup(
+        makeListenerTestPolicy('ag', [
+          {
+            priority: 1000,
+            action: 'deny(403)',
+            match: { expr: { expression: "evaluateAddressGroup('g', origin.ip)" } },
+          },
+        ])
+      )
+    ).toBe(true);
+  });
+});
+
+describe('startArmorListener address-group loading', () => {
+  test('does not load groups when the policy has no evaluateAddressGroup rule', async () => {
+    const loadAddressGroups = mock(async (_project: string) => () => undefined);
+    const server = startArmorListener({
+      port: 0,
+      getPolicies: async () => [makeListenerTestPolicy('only')],
+      loadAddressGroups,
+    });
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.port}/public`);
+
+      expect(res.status).toBe(200);
+      expect(loadAddressGroups).not.toHaveBeenCalled();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test('loads groups when a rule uses evaluateAddressGroup', async () => {
+    const loadAddressGroups = mock(async (_project: string) => {
+      return (name: string) => (name === 'g' ? ['198.51.100.0/24'] : undefined);
+    });
+    const server = startArmorListener({
+      port: 0,
+      getPolicies: async () => [
+        makeListenerTestPolicy('ag', [
+          {
+            priority: 1000,
+            action: 'deny(403)',
+            match: { expr: { expression: "evaluateAddressGroup('g', origin.ip)" } },
+          },
+        ]),
+      ],
+      loadAddressGroups,
+    });
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.port}/public`, {
+        headers: { 'X-Kinglet-Origin-IP': '198.51.100.20' },
+      });
+
+      expect(res.status).toBe(403);
+      expect(loadAddressGroups).toHaveBeenCalledTimes(1);
+      expect(loadAddressGroups.mock.calls[0]?.[0]).toBe('proj');
+    } finally {
+      server.stop();
+    }
   });
 });

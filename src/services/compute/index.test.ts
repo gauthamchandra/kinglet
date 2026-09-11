@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { AddressGroupRepository } from '@/services/networksecurity/repository.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { ComputeService } from './index.ts';
 
@@ -214,6 +215,55 @@ describe('ComputeService', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+
+    await listening.stop();
+  });
+
+  test('listener matches evaluateAddressGroup against stored address groups', async () => {
+    const listening = new ComputeService(storage, logger, { listenerPort: 0 });
+
+    await listening.initialize();
+
+    const groups = new AddressGroupRepository(storage);
+
+    await groups.create({
+      name: 'projects/proj/locations/global/addressGroups/malicious-ips',
+      type: 'IPV4',
+      capacity: 10,
+      items: JSON.stringify(['198.51.100.0/24']),
+      purpose: JSON.stringify(['CLOUD_ARMOR']),
+      labels: '{}',
+      description: '',
+      createTime: '2026-01-01T00:00:00.000Z',
+      updateTime: '2026-01-01T00:00:00.000Z',
+    });
+
+    await listening.getSecurityPolicyService().insert('proj', 'ag-policy', {
+      rules: [
+        {
+          priority: 1000,
+          action: 'deny(403)',
+          match: { expr: { expression: "evaluateAddressGroup('malicious-ips', origin.ip)" } },
+        },
+      ],
+    });
+
+    const started = listening.start();
+
+    expect(started.listenerStarted).toBe(true);
+    expect(started.listenerPort).toBeTypeOf('number');
+
+    const hit = await fetch(`http://127.0.0.1:${started.listenerPort}/public`, {
+      headers: { 'X-Kinglet-Origin-IP': '198.51.100.20' },
+    });
+    const miss = await fetch(`http://127.0.0.1:${started.listenerPort}/public`, {
+      headers: { 'X-Kinglet-Origin-IP': '192.0.2.8' },
+    });
+
+    expect(hit.status).toBe(403);
+    expect(hit.headers.get('x-kinglet-enforced-priority')).toBe('1000');
+    expect(miss.status).toBe(200);
+    expect(miss.headers.get('x-kinglet-enforced-priority')).toBe('2147483647');
 
     await listening.stop();
   });
