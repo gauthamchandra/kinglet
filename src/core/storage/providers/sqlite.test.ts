@@ -541,6 +541,88 @@ describe('SQLiteStorageProvider', () => {
     });
   });
 
+  describe('json columns', () => {
+    interface JsonRecord extends BaseRecord {
+      name: string;
+      // The storage boundary accepts either a raw object or an already-encoded
+      // string on a `json` column, and always hands back the encoded string.
+      settings: unknown;
+    }
+
+    beforeEach(async () => {
+      await provider.createTable('json_records', {
+        name: 'json_records',
+        columns: [
+          { name: 'id', type: 'string', primaryKey: true },
+          { name: 'name', type: 'string' },
+          { name: 'settings', type: 'json' },
+        ],
+        timestamps: true,
+      });
+    });
+
+    afterEach(async () => {
+      await provider.dropTable('json_records');
+    });
+
+    test('create returns the stored encoding of an object value', async () => {
+      // The write path stringifies the bound value, so returning the caller's
+      // object made `create` and `findById` disagree on the field's type (#69).
+      const created = await provider.create<JsonRecord>('json_records', {
+        name: 'orders',
+        settings: { tier: 'small' },
+      });
+
+      expect(created.settings).toBe(JSON.stringify({ tier: 'small' }));
+
+      const found = await provider.findById<JsonRecord>('json_records', created.id);
+
+      expect(found?.settings).toBe(JSON.stringify({ tier: 'small' }));
+    });
+
+    test('createMany returns the stored encoding of an object value', async () => {
+      const [created] = await provider.createMany<JsonRecord>('json_records', [
+        { name: 'orders', settings: { tier: 'small' } },
+      ]);
+
+      expect(created?.settings).toBe(JSON.stringify({ tier: 'small' }));
+    });
+
+    test('updateById returns the stored encoding of an object value', async () => {
+      const created = await provider.create<JsonRecord>('json_records', {
+        name: 'orders',
+        settings: { tier: 'small' },
+      });
+      const updated = await provider.updateById<JsonRecord>('json_records', created.id, {
+        settings: { tier: 'large' },
+      });
+
+      expect(updated?.settings).toBe(JSON.stringify({ tier: 'large' }));
+    });
+
+    test('leaves already-stringified JSON values alone', async () => {
+      const encoded = JSON.stringify({ tier: 'small' });
+      const created = await provider.create<JsonRecord>('json_records', {
+        name: 'orders',
+        settings: encoded,
+      });
+
+      expect(created.settings).toBe(encoded);
+    });
+
+    test('keeps timestamps as Dates alongside an encoded json column', async () => {
+      // Guards against fixing the json shape by running the whole record
+      // through the value serializer, which would flatten these to strings.
+      const created = await provider.create<JsonRecord>('json_records', {
+        name: 'orders',
+        settings: { tier: 'small' },
+      });
+
+      expect(created.createdAt).toBeInstanceOf(Date);
+      expect(created.updatedAt).toBeInstanceOf(Date);
+    });
+  });
+
   describe('schema sync', () => {
     test('should add missing columns and relax NOT NULL constraints', async () => {
       await provider.createTable('legacy_jobs', {

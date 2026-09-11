@@ -99,17 +99,10 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     });
 
     const transaction = await this.provider.beginTransaction(options);
+    const txManager = new TransactionalStorageManager(this.provider, this);
 
     try {
-      const result = await transaction.execute(async () => {
-        // Create a transaction-aware storage manager wrapper
-        if (!this.provider) {
-          throw new ValidationError('Storage manager not initialized');
-        }
-        const txManager = new TransactionalStorageManager(this.provider, this);
-
-        return await fn(txManager);
-      });
+      const result = await transaction.execute(async () => await fn(txManager));
 
       await transaction.commit();
 
@@ -131,6 +124,9 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
       throw error;
     } finally {
       this.operationStats.activeTransactions--;
+
+      // Runs on both paths on purpose: see `flushInvalidations`.
+      await txManager.flushInvalidations();
     }
   }
 
@@ -307,24 +303,33 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
     const startTime = Date.now();
 
     try {
+      // The affected ids are resolved BEFORE the write, as they are for
+      // deleteMany: an update that changes a field its own filter tests leaves
+      // no row matching afterwards, so a post-write lookup finds nothing to
+      // invalidate and the pre-update entries survive.
+      const cache = this.getCache();
+      let affectedRecordIds: string[] | null = null;
+
+      if (cache) {
+        try {
+          const affectedRecords = await this.provider.find<T>(table, { filter });
+
+          affectedRecordIds = affectedRecords.data.map(record => record.id);
+        } catch {
+          // Leaving the ids unresolved falls back to clearing the table below.
+        }
+      }
+
       const count = await this.provider.updateMany<T>(table, filter, data);
 
       if (count > 0) {
-        // Targeted cache invalidation: find affected records and invalidate only those
-        const cache = this.getCache();
-
         if (cache) {
-          try {
-            // First, find which records match the filter to get their IDs
-            const affectedRecords = await this.provider.find<T>(table, { filter });
-
-            // Invalidate cache entries only for the affected records
-            for (const record of affectedRecords.data) {
-              await cache.delete(`${table}:${record.id}`);
-            }
-          } catch {
-            // If targeted invalidation fails, fall back to clearing all table entries
+          if (affectedRecordIds === null) {
             await cache.deleteByPrefix(`${table}:`);
+          } else {
+            for (const id of affectedRecordIds) {
+              await cache.delete(`${table}:${id}`);
+            }
           }
         }
 
@@ -631,6 +636,9 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
  * are performed on the same transaction context.
  */
 class TransactionalStorageManager implements IStorageManager {
+  private readonly staleKeys = new Set<string>();
+  private readonly staleTables = new Set<string>();
+
   constructor(
     private provider: StorageProvider,
     private parentManager: StorageManager
@@ -658,14 +666,24 @@ class TransactionalStorageManager implements IStorageManager {
 
   // Delegate all operations to the provider
   async create<T extends BaseRecord>(table: string, data: Omit<T, keyof BaseRecord>): Promise<T> {
-    return await this.provider.create<T>(table, data);
+    const created = await this.provider.create<T>(table, data);
+
+    this.recordKey(`${table}:${created.id}`);
+
+    return created;
   }
 
   async createMany<T extends BaseRecord>(
     table: string,
     data: Array<Omit<T, keyof BaseRecord>>
   ): Promise<T[]> {
-    return await this.provider.createMany<T>(table, data);
+    const created = await this.provider.createMany<T>(table, data);
+
+    for (const record of created) {
+      this.recordKey(`${table}:${record.id}`);
+    }
+
+    return created;
   }
 
   async findById<T extends BaseRecord>(table: string, id: string): Promise<T | null> {
@@ -685,7 +703,13 @@ class TransactionalStorageManager implements IStorageManager {
     id: string,
     data: Partial<Omit<T, keyof BaseRecord>>
   ): Promise<T | null> {
-    return await this.provider.updateById<T>(table, id, data);
+    const updated = await this.provider.updateById<T>(table, id, data);
+
+    if (updated) {
+      this.recordKey(`${table}:${id}`);
+    }
+
+    return updated;
   }
 
   async updateMany<T extends BaseRecord>(
@@ -693,15 +717,38 @@ class TransactionalStorageManager implements IStorageManager {
     filter: QueryFilter,
     data: Partial<Omit<T, keyof BaseRecord>>
   ): Promise<number> {
-    return await this.provider.updateMany<T>(table, filter, data);
+    // Resolved before the write: an update that changes a field its own filter
+    // tests leaves no row matching afterwards, so a post-write lookup would
+    // find nothing to invalidate.
+    const affectedIds = await this.findMatchingIds(table, filter);
+    const count = await this.provider.updateMany<T>(table, filter, data);
+
+    if (count > 0) {
+      this.recordIds(table, affectedIds);
+    }
+
+    return count;
   }
 
   async deleteById(table: string, id: string): Promise<boolean> {
-    return await this.provider.deleteById(table, id);
+    const deleted = await this.provider.deleteById(table, id);
+
+    if (deleted) {
+      this.recordKey(`${table}:${id}`);
+    }
+
+    return deleted;
   }
 
   async deleteMany(table: string, filter: QueryFilter): Promise<number> {
-    return await this.provider.deleteMany(table, filter);
+    const affectedIds = await this.findMatchingIds(table, filter);
+    const count = await this.provider.deleteMany(table, filter);
+
+    if (count > 0) {
+      this.recordIds(table, affectedIds);
+    }
+
+    return count;
   }
 
   async exists(table: string, id: string): Promise<boolean> {
@@ -730,6 +777,75 @@ class TransactionalStorageManager implements IStorageManager {
 
   async getStats(): Promise<StorageStats> {
     return await this.parentManager.getStats();
+  }
+
+  /**
+   * Cache invalidation for the transaction's own writes.
+   *
+   * Reads go through `StorageManager.findById`, which caches, while these
+   * mutations run straight against the provider — and the SQLite provider
+   * leaves its cache entirely to the manager. Without this, a committed
+   * transactional write left the pre-transaction record in the cache to be
+   * served by the next read.
+   *
+   * The keys are recorded as each mutation runs and cleared once the
+   * transaction settles, on the rollback path as well as the commit path. A
+   * transaction shares the provider's single connection, so a read that
+   * interleaves with an open transaction sees — and caches — uncommitted rows;
+   * clearing at both exits means such an entry cannot outlive the write it
+   * came from. Inserts are recorded for the same reason: a row read through
+   * the manager before a rollback leaves behind a cached record the database
+   * no longer has.
+   *
+   * Providers that manage their own cache (memory) invalidate as they go, so
+   * this is duplicated work rather than the only pass there.
+   */
+  async flushInvalidations(): Promise<void> {
+    const cache = this.provider.getCache();
+
+    if (cache) {
+      for (const table of this.staleTables) {
+        await cache.deleteByPrefix(`${table}:`);
+      }
+
+      for (const key of this.staleKeys) {
+        await cache.delete(key);
+      }
+    }
+
+    this.staleKeys.clear();
+    this.staleTables.clear();
+  }
+
+  private recordKey(key: string): void {
+    this.staleKeys.add(key);
+  }
+
+  /** A null id list means the affected rows are unknown, so the table goes. */
+  private recordIds(table: string, ids: string[] | null): void {
+    if (ids === null) {
+      this.staleTables.add(table);
+
+      return;
+    }
+
+    for (const id of ids) {
+      this.staleKeys.add(`${table}:${id}`);
+    }
+  }
+
+  private async findMatchingIds(table: string, filter: QueryFilter): Promise<string[] | null> {
+    if (!this.provider.getCache()) {
+      return [];
+    }
+
+    try {
+      const matching = await this.provider.find<BaseRecord>(table, { filter });
+
+      return matching.data.map(record => record.id);
+    } catch {
+      return null;
+    }
   }
 
   async close(): Promise<void> {

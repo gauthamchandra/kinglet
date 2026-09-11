@@ -280,7 +280,7 @@ describe('StorageManager', () => {
       await manager.close();
     });
 
-    test('should initialize hybrid storage (SQLite + cache features)', async () => {
+    test('should initialize hybrid storage with an LRU cache in front of SQLite', async () => {
       const healthCheck = await manager.healthCheck();
 
       expect(healthCheck).toBe(true);
@@ -288,23 +288,202 @@ describe('StorageManager', () => {
       const stats = await manager.getStats();
 
       expect(stats.provider).toBe('hybrid');
+
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
     });
 
-    test('should provide cache-aware operations', async () => {
-      const data = {
+    test('should cache reads and invalidate on update and delete', async () => {
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
         name: 'Hybrid Test',
         email: 'hybrid@example.com',
         age: 28,
         active: true,
-      };
+      });
 
-      const created = await manager.create<TestRecord>('test_records', data);
-
-      // Multiple accesses should be efficient with caching
+      // First findById populates the cache; the second should be a hit.
       const found1 = await manager.findById<TestRecord>('test_records', created.id);
       const found2 = await manager.findById<TestRecord>('test_records', created.id);
 
       expect(found1).toEqual(found2);
+      expect(await cache.get(`test_records:${created.id}`)).not.toBeNull();
+
+      await manager.updateById<TestRecord>('test_records', created.id, { age: 29 });
+      expect(await cache.get(`test_records:${created.id}`)).toBeNull();
+
+      await manager.findById<TestRecord>('test_records', created.id);
+      expect(await cache.get(`test_records:${created.id}`)).not.toBeNull();
+
+      await manager.deleteById('test_records', created.id);
+      expect(await cache.get(`test_records:${created.id}`)).toBeNull();
+    });
+
+    test('should invalidate on mutations made inside a transaction', async () => {
+      // The SQLite provider never touches the cache itself, so invalidation
+      // lives in the manager. The transactional wrapper delegates straight to
+      // the provider, which left committed writes serving the pre-transaction
+      // record on the next read.
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
+        name: 'Tx Test',
+        email: 'tx@example.com',
+        age: 28,
+        active: true,
+      });
+
+      await manager.findById<TestRecord>('test_records', created.id);
+      expect(await cache.get(`test_records:${created.id}`)).not.toBeNull();
+
+      await manager.withTransaction(async tx => {
+        await tx.updateById<TestRecord>('test_records', created.id, { age: 29 });
+      });
+
+      const afterUpdate = await manager.findById<TestRecord>('test_records', created.id);
+
+      expect(afterUpdate?.age).toBe(29);
+
+      await manager.withTransaction(async tx => {
+        await tx.deleteById('test_records', created.id);
+      });
+
+      expect(await manager.findById<TestRecord>('test_records', created.id)).toBeNull();
+    });
+
+    test('should invalidate on bulk mutations made inside a transaction', async () => {
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
+        name: 'Bulk Tx Test',
+        email: 'bulk-tx@example.com',
+        age: 40,
+        active: true,
+      });
+      const filter: QueryFilter = {
+        conditions: [{ field: 'email', operator: 'eq', value: 'bulk-tx@example.com' }],
+      };
+
+      await manager.findById<TestRecord>('test_records', created.id);
+
+      await manager.withTransaction(async tx => {
+        await tx.updateMany<TestRecord>('test_records', filter, { age: 41 });
+      });
+
+      const afterUpdate = await manager.findById<TestRecord>('test_records', created.id);
+
+      expect(afterUpdate?.age).toBe(41);
+
+      await manager.withTransaction(async tx => {
+        await tx.deleteMany('test_records', filter);
+      });
+
+      expect(await manager.findById<TestRecord>('test_records', created.id)).toBeNull();
+    });
+
+    test('should invalidate a bulk update that changes the field it filters on', async () => {
+      // Resolving the affected ids after the write finds nothing, because the
+      // rows no longer match the filter that selected them.
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
+        name: 'Self Filtering',
+        email: 'self-filtering@example.com',
+        age: 40,
+        active: true,
+      });
+      const filter: QueryFilter = {
+        conditions: [{ field: 'age', operator: 'eq', value: 40 }],
+      };
+
+      await manager.findById<TestRecord>('test_records', created.id);
+
+      await manager.withTransaction(async tx => {
+        await tx.updateMany<TestRecord>('test_records', filter, { age: 41 });
+      });
+
+      const afterUpdate = await manager.findById<TestRecord>('test_records', created.id);
+
+      expect(afterUpdate?.age).toBe(41);
+    });
+
+    test('should invalidate uncommitted values cached during a rolled back transaction', async () => {
+      // Transactions share the provider's single connection, so a read that
+      // interleaves with one sees — and caches — uncommitted rows. Clearing
+      // only on the way in leaves that entry behind once the write is undone.
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      const created = await manager.create<TestRecord>('test_records', {
+        name: 'Rollback',
+        email: 'rollback@example.com',
+        age: 50,
+        active: true,
+      });
+
+      const rolledBack = manager.withTransaction(async tx => {
+        await tx.updateById<TestRecord>('test_records', created.id, { age: 51 });
+
+        // Stands in for an unrelated caller reading through the manager while
+        // the transaction is open.
+        const midTransaction = await manager.findById<TestRecord>('test_records', created.id);
+
+        expect(midTransaction?.age).toBe(51);
+
+        throw new Error('forced rollback');
+      });
+
+      await expect(rolledBack).rejects.toThrow('forced rollback');
+
+      const afterRollback = await manager.findById<TestRecord>('test_records', created.id);
+
+      expect(afterRollback?.age).toBe(50);
+    });
+
+    test('should invalidate a phantom row cached during a rolled back transaction', async () => {
+      const cache = manager.getCache();
+
+      expect(cache).not.toBeNull();
+      if (!cache) throw new Error('cache should be available');
+
+      let phantomId = '';
+
+      const rolledBack = manager.withTransaction(async tx => {
+        const phantom = await tx.create<TestRecord>('test_records', {
+          name: 'Phantom',
+          email: 'phantom@example.com',
+          age: 60,
+          active: true,
+        });
+
+        phantomId = phantom.id;
+
+        const midTransaction = await manager.findById<TestRecord>('test_records', phantom.id);
+
+        expect(midTransaction?.name).toBe('Phantom');
+
+        throw new Error('forced rollback');
+      });
+
+      await expect(rolledBack).rejects.toThrow('forced rollback');
+
+      expect(await manager.findById<TestRecord>('test_records', phantomId)).toBeNull();
     });
   });
 

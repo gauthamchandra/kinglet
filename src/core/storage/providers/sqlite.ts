@@ -9,6 +9,8 @@ import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { LRUCacheConfig } from '../cache/lru-cache.js';
+import { LRUCache } from '../cache/lru-cache.js';
 import type {
   BaseRecord,
   CacheOperations,
@@ -102,6 +104,7 @@ class SQLiteTransaction implements Transaction {
  */
 export class SQLiteStorageProvider implements StorageProvider {
   private db: Database | null = null;
+  private cache: LRUCache | null = null;
 
   async initialize(config: StorageConfig): Promise<void> {
     try {
@@ -125,6 +128,21 @@ export class SQLiteStorageProvider implements StorageProvider {
 
       // Create metadata table for tracking schema versions
       this.createMetadataTable();
+
+      // `hybrid` is SQLite with an LRU in front. Pure `sqlite` stays uncached
+      // even if a cache block is present on the config, so the two modes keep
+      // distinct behaviour. A hybrid config with no cache block (cacheSize: 0)
+      // also stays uncached.
+      if (config.type === 'hybrid' && config.cache) {
+        const cacheConfig: LRUCacheConfig = {
+          maxSize: config.cache.maxSize ?? 1000,
+          maxMemoryMb: config.cache.maxMemoryMb ?? 100,
+          ...(config.cache.ttlSeconds !== undefined ? { defaultTTL: config.cache.ttlSeconds } : {}),
+          cleanupInterval: 60,
+        };
+
+        this.cache = new LRUCache(cacheConfig);
+      }
     } catch (error) {
       throw new ConnectionError('Failed to initialize SQLite database', error as Error);
     }
@@ -143,8 +161,7 @@ export class SQLiteStorageProvider implements StorageProvider {
   }
 
   getCache(): CacheOperations | null {
-    // SQLite provider doesn't include cache by default
-    return null;
+    return this.cache;
   }
 
   async create<T extends BaseRecord>(table: string, data: Omit<T, keyof BaseRecord>): Promise<T> {
@@ -175,7 +192,7 @@ export class SQLiteStorageProvider implements StorageProvider {
 
       this.db.run(query, values);
 
-      return recordData as T;
+      return this.encodeObjectValues(recordData) as T;
     } catch (error) {
       if ((error as Error).message.includes('UNIQUE constraint')) {
         throw new ConflictError('Record already exists', error as Error);
@@ -219,7 +236,7 @@ export class SQLiteStorageProvider implements StorageProvider {
 
         this.db.run(query, values);
 
-        records.push(recordData);
+        records.push(this.encodeObjectValues(recordData));
       }
 
       this.db.run('COMMIT');
@@ -700,6 +717,11 @@ export class SQLiteStorageProvider implements StorageProvider {
   }
 
   async close(): Promise<void> {
+    if (this.cache) {
+      this.cache.destroy();
+      this.cache = null;
+    }
+
     if (this.db) {
       try {
         this.db.close();
@@ -927,6 +949,40 @@ export class SQLiteStorageProvider implements StorageProvider {
     }
 
     return result as T;
+  }
+
+  /**
+   * Applies the object half of `serializeValue` to a whole record, so a value
+   * handed back by a write carries the same encoding a read of that record
+   * would. Writes bind serialized values but return the caller's input, which
+   * left `create` reporting an object on a `json` column where `findById`
+   * reports the encoded string (#69).
+   *
+   * Only plain objects are re-encoded. `Date` and boolean values are restored
+   * on read by `deserializeRecord`, so flattening them here — as passing the
+   * record through `serializeValue` wholesale would — is what the caller sees
+   * as broken timestamps.
+   */
+  private encodeObjectValues<R extends object>(record: R): R {
+    const entries = Object.entries(record);
+    const needsEncoding = entries.some(
+      ([, value]) => value !== null && typeof value === 'object' && !(value instanceof Date)
+    );
+
+    if (!needsEncoding) {
+      return record;
+    }
+
+    const encoded: Record<string, unknown> = {};
+
+    for (const [key, value] of entries) {
+      encoded[key] =
+        value !== null && typeof value === 'object' && !(value instanceof Date)
+          ? JSON.stringify(value)
+          : value;
+    }
+
+    return encoded as R;
   }
 
   private serializeValue(value: unknown): string | number | null {
