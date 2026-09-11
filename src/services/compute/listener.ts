@@ -9,7 +9,7 @@ import type { Server } from 'bun';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { projectFromSecurityPolicySelfLink } from './address-group-lookup.ts';
 import { evaluate } from './armor/evaluate.ts';
-import type { AddressGroupLookup } from './armor/expression.ts';
+import { type AddressGroupLookup, expressionUsesAddressGroup } from './armor/expression.ts';
 import { buildRequestAttributes, isValidIp } from './armor/request.ts';
 import type {
   EvaluationResult,
@@ -315,6 +315,30 @@ export function userIpRequestHeadersFromPolicy(policy: SecurityPolicyResponse): 
   return headers.filter((header): header is string => typeof header === 'string');
 }
 
+export function policyUsesAddressGroup(policy: SecurityPolicyResponse): boolean {
+  return policy.rules.some(rule => {
+    const expression = expressionFromMatch(rule.match);
+
+    return expression != null && expressionUsesAddressGroup(expression);
+  });
+}
+
+function expressionFromMatch(match: unknown): string | undefined {
+  if (match == null || typeof match !== 'object') {
+    return undefined;
+  }
+
+  const expr = (match as { expr?: unknown }).expr;
+
+  if (expr == null || typeof expr !== 'object') {
+    return undefined;
+  }
+
+  const expression = (expr as { expression?: unknown }).expression;
+
+  return typeof expression === 'string' ? expression : undefined;
+}
+
 export function redirectTargetFromPolicy(
   policy: SecurityPolicyResponse,
   priority: number | undefined
@@ -553,7 +577,9 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
       const policy = policyOrError as SecurityPolicy;
       const project = projectFromSecurityPolicySelfLink(policyOrError.selfLink);
       const lookupAddressGroup =
-        project != null && loadAddressGroups != null ? await loadAddressGroups(project) : undefined;
+        project != null && loadAddressGroups != null && policyUsesAddressGroup(policyOrError)
+          ? await loadAddressGroups(project)
+          : undefined;
       const result = evaluate(
         policy,
         adapterResult.attributes,

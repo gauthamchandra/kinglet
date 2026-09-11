@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AddressGroupLookup } from './expression.ts';
 import {
   evaluateExpression,
+  expressionUsesAddressGroup,
   expressionUsesBodyPhase,
   matchSrcIpRanges,
   validateExpression,
@@ -421,5 +422,22 @@ describe('body-phase detection', () => {
     expect(expressionUsesBodyPhase("request['params'].category == 'electronics'")).toBe(true);
     expect(expressionUsesBodyPhase("evaluatePreconfiguredWaf('xss-v422-stable')")).toBe(true);
     expect(expressionUsesBodyPhase("request.path == '/x'")).toBe(false);
+  });
+});
+
+describe('address-group detection', () => {
+  test('flags evaluateAddressGroup calls and ignores other expressions', () => {
+    expect(expressionUsesAddressGroup("evaluateAddressGroup('malicious-ips', origin.ip)")).toBe(
+      true
+    );
+    expect(
+      expressionUsesAddressGroup(
+        "request.path.startsWith('/admin') && evaluateAddressGroup('g', origin.ip)"
+      )
+    ).toBe(true);
+    expect(expressionUsesAddressGroup("request.path == '/x'")).toBe(false);
+    expect(expressionUsesAddressGroup("evaluateOrganizationAddressGroup('g', origin.ip)")).toBe(
+      false
+    );
   });
 });

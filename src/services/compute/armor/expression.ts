@@ -179,6 +179,14 @@ export function expressionUsesBodyPhase(expression: string): boolean {
   }
 }
 
+export function expressionUsesAddressGroup(expression: string): boolean {
+  try {
+    return astUsesAddressGroup(parseExpressionAst(expression));
+  } catch {
+    return /\bevaluateAddressGroup\s*\(/.test(expression);
+  }
+}
+
 export function validateSrcIpRanges(ranges: readonly string[]): void {
   if (ranges.length > MAX_SRC_IP_RANGES) {
     throw new ArmorError(`srcIpRanges exceeds maximum of ${MAX_SRC_IP_RANGES}`);
@@ -987,6 +995,14 @@ function astUsesBodyPhase(node: Ast): boolean {
   }
 
   return childrenOf(node).some(astUsesBodyPhase);
+}
+
+function astUsesAddressGroup(node: Ast): boolean {
+  if (node.kind === 'call' && callName(node) === 'evaluateAddressGroup') {
+    return true;
+  }
+
+  return childrenOf(node).some(astUsesAddressGroup);
 }
 
 function assertRegexAllowed(pattern: string): void {
