@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.5.0](https://github.com/gauthamchandra/kinglet/compare/v2.4.0...v2.5.0) (2026-09-11)
+
+
+### Features
+
+* **alloydb:** give AlloyDB a PGlite data plane ([#81](https://github.com/gauthamchandra/kinglet/issues/81)) ([bbb03b5](https://github.com/gauthamchandra/kinglet/commit/bbb03b5f9e3d23a31a3e5b5b8bc3db636ba279c7))
+* **networksecurity:** emulate project-scoped address groups ([#91](https://github.com/gauthamchandra/kinglet/issues/91)) ([1c8e576](https://github.com/gauthamchandra/kinglet/commit/1c8e5764969cc1b3017607387ce193e5f1286825))
+
 ## [2.4.0](https://github.com/gauthamchandra/kinglet/compare/v2.3.0...v2.4.0) (2026-09-10)
 
 
