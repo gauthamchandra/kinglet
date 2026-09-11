@@ -25,6 +25,10 @@ function attrs(overrides: Partial<RequestAttributeInput> = {}): RequestAttribute
   if (overrides.regionCode != null) input.regionCode = overrides.regionCode;
   if (overrides.params != null) input.params = overrides.params;
   if (overrides.jsonParsing != null) input.jsonParsing = overrides.jsonParsing;
+  if (overrides.wafMatches != null) input.wafMatches = overrides.wafMatches;
+  if (overrides.adaptiveProtectionMatch != null) {
+    input.adaptiveProtectionMatch = overrides.adaptiveProtectionMatch;
+  }
 
   return buildRequestAttributes(input);
 }
@@ -370,6 +374,147 @@ describe('evaluate', () => {
     expect(denied.enforced?.action).toBe('deny(403)');
     expect(allowed.enforced?.action).toBe('allow');
     expect(allowed.enforced?.priority).toBe(DEFAULT_RULE_PRIORITY);
+  });
+
+  test('injected WAF match fires a body-phase deny', () => {
+    const policy: SecurityPolicy = {
+      name: 'waf-policy',
+      rules: [
+        {
+          priority: 1000,
+          action: 'deny(403)',
+          match: { expr: { expression: "evaluatePreconfiguredWaf('protocolattack-v33-stable')" } },
+        },
+        {
+          priority: DEFAULT_RULE_PRIORITY,
+          action: 'allow',
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+        },
+      ],
+    };
+    const hit = evaluate(
+      policy,
+      attrs({
+        wafMatches: [
+          {
+            ruleSet: 'protocolattack-v33-stable',
+            signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+          },
+        ],
+      })
+    );
+    const miss = evaluate(policy, attrs());
+
+    expect(hit.enforced?.priority).toBe(1000);
+    expect(hit.enforced?.action).toBe('deny(403)');
+    expect(miss.enforced?.priority).toBe(DEFAULT_RULE_PRIORITY);
+    expect(miss.enforced?.action).toBe('allow');
+  });
+
+  test('header-phase allow above an injected WAF deny still wins', () => {
+    const policy: SecurityPolicy = {
+      name: 'phase-policy',
+      rules: [
+        {
+          priority: 500,
+          action: 'allow',
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['127.0.0.1'] } },
+        },
+        {
+          priority: 1000,
+          action: 'deny(403)',
+          match: { expr: { expression: "evaluatePreconfiguredWaf('protocolattack-v33-stable')" } },
+        },
+      ],
+    };
+    const result = evaluate(
+      policy,
+      attrs({
+        wafMatches: [
+          {
+            ruleSet: 'protocolattack-v33-stable',
+            signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+          },
+        ],
+      })
+    );
+
+    expect(result.enforced?.priority).toBe(500);
+    expect(result.enforced?.action).toBe('allow');
+  });
+
+  test('WAF redirect matching from an injection becomes deny(403)', () => {
+    const policy: SecurityPolicy = {
+      rules: [
+        {
+          priority: 1000,
+          action: 'redirect',
+          match: { expr: { expression: "evaluatePreconfiguredWaf('protocolattack-v33-stable')" } },
+        },
+      ],
+    };
+    const result = evaluate(
+      policy,
+      attrs({
+        wafMatches: [
+          {
+            ruleSet: 'protocolattack-v33-stable',
+            signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+          },
+        ],
+      })
+    );
+
+    expect(result.enforced?.action).toBe('deny(403)');
+    expect(result.enforced?.outcome).toBe('DENY');
+  });
+
+  test('inIpRange and evaluatePreconfiguredWaf both have to hit', () => {
+    const policy: SecurityPolicy = {
+      rules: [
+        {
+          priority: 100,
+          action: 'deny(403)',
+          match: {
+            expr: {
+              expression:
+                "inIpRange(origin.ip, '198.51.100.0/24') && evaluatePreconfiguredWaf('sqli-v33-stable')",
+            },
+          },
+        },
+      ],
+    };
+    const injection = {
+      wafMatches: [{ ruleSet: 'sqli-v33-stable', signatureId: 'owasp-crs-v030301-id942100-sqli' }],
+    };
+
+    expect(
+      evaluate(policy, attrs({ originIp: '203.0.113.10', ...injection })).enforced
+    ).toBeUndefined();
+    expect(evaluate(policy, attrs({ originIp: '198.51.100.20' })).enforced).toBeUndefined();
+    expect(
+      evaluate(policy, attrs({ originIp: '198.51.100.20', ...injection })).enforced?.action
+    ).toBe('deny(403)');
+  });
+
+  test('Adaptive Protection deny fires only when declared', () => {
+    const policy: SecurityPolicy = {
+      rules: [
+        {
+          priority: 900,
+          action: 'deny(403)',
+          match: { expr: { expression: "evaluateAdaptiveProtection('alert')" } },
+        },
+        {
+          priority: DEFAULT_RULE_PRIORITY,
+          action: 'allow',
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+        },
+      ],
+    };
+
+    expect(evaluate(policy, attrs({ adaptiveProtectionMatch: true })).enforced?.priority).toBe(900);
+    expect(evaluate(policy, attrs()).enforced?.priority).toBe(DEFAULT_RULE_PRIORITY);
   });
 
   test('headerAction on a throttle rule makes the rate-limit action inert', () => {

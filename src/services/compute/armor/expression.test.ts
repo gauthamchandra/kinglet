@@ -37,6 +37,10 @@ function evalExpr(
   if (overrides.asn != null) input.asn = overrides.asn;
   if (overrides.regionCode != null) input.regionCode = overrides.regionCode;
   if (overrides.sni != null) input.sni = overrides.sni;
+  if (overrides.wafMatches != null) input.wafMatches = overrides.wafMatches;
+  if (overrides.adaptiveProtectionMatch != null) {
+    input.adaptiveProtectionMatch = overrides.adaptiveProtectionMatch;
+  }
   if (overrides.userIpRequestHeaders != null) {
     input.userIpRequestHeaders = overrides.userIpRequestHeaders;
   }
@@ -252,19 +256,115 @@ describe('evaluateExpression functions', () => {
 
   test('unimplemented evaluate* functions are valid syntax and return false', () => {
     const names = [
-      "evaluatePreconfiguredWaf('xss-v422-stable')",
       "evaluatePreconfiguredExpr('xss-stable')",
       "evaluateAddressGroup('g', origin.ip)",
       "evaluateOrganizationAddressGroup('g', origin.ip)",
       "evaluateThreatIntelligence('iplist-known-malicious-ips')",
-      "evaluateAdaptiveProtection('alert')",
-      'evaluateAdaptiveProtectionAutoDeploy()',
     ];
 
     for (const expr of names) {
       expect(() => validateExpression(expr)).not.toThrow();
       expect(matched(expr)).toBe(false);
     }
+  });
+
+  test('evaluatePreconfiguredWaf matches an injected ruleSet/signatureId', () => {
+    const injection = {
+      wafMatches: [
+        {
+          ruleSet: 'protocolattack-v33-stable',
+          signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+        },
+      ],
+    };
+
+    expect(() =>
+      validateExpression("evaluatePreconfiguredWaf('protocolattack-v33-stable')")
+    ).not.toThrow();
+    expect(matched("evaluatePreconfiguredWaf('protocolattack-v33-stable')", injection)).toBe(true);
+    expect(matched("evaluatePreconfiguredWaf('protocolattack-v33-stable')")).toBe(false);
+    expect(matched("evaluatePreconfiguredWaf('xss-v33-stable')", injection)).toBe(false);
+  });
+
+  test('evaluatePreconfiguredWaf honors opt_out_rule_ids', () => {
+    const injection = {
+      wafMatches: [
+        {
+          ruleSet: 'protocolattack-v33-stable',
+          signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+        },
+      ],
+    };
+    const optedOut =
+      "evaluatePreconfiguredWaf('protocolattack-v33-stable', {'opt_out_rule_ids': ['owasp-crs-v030301-id921110-protocolattack']})";
+    const otherOptOut =
+      "evaluatePreconfiguredWaf('protocolattack-v33-stable', {'opt_out_rule_ids': ['owasp-crs-v030301-id921150-protocolattack']})";
+
+    expect(matched(optedOut, injection)).toBe(false);
+    expect(matched(otherOptOut, injection)).toBe(true);
+  });
+
+  test('evaluatePreconfiguredWaf opt_in requires sensitivity 0', () => {
+    const injection = {
+      wafMatches: [
+        {
+          ruleSet: 'cve-canary',
+          signatureId: 'owasp-crs-v042200-id044228-cve',
+        },
+      ],
+    };
+    const optedIn =
+      "evaluatePreconfiguredWaf('cve-canary', {'sensitivity': 0, 'opt_in_rule_ids': ['owasp-crs-v042200-id044228-cve']})";
+    const missing =
+      "evaluatePreconfiguredWaf('cve-canary', {'sensitivity': 0, 'opt_in_rule_ids': ['owasp-crs-v042200-id144228-cve']})";
+    const withoutZero =
+      "evaluatePreconfiguredWaf('cve-canary', {'opt_in_rule_ids': ['owasp-crs-v042200-id044228-cve']})";
+
+    expect(matched(optedIn, injection)).toBe(true);
+    expect(matched(missing, injection)).toBe(false);
+    expect(matched(withoutZero, injection)).toBe(false);
+  });
+
+  test('evaluatePreconfiguredWaf treats a list second argument as a miss', () => {
+    expect(
+      matched("evaluatePreconfiguredWaf('xss-v422-stable', ['owasp-crs-v042200-id941100-xss'])", {
+        wafMatches: [{ ruleSet: 'xss-v422-stable', signatureId: 'owasp-crs-v042200-id941100-xss' }],
+      })
+    ).toBe(false);
+  });
+
+  test('evaluatePreconfiguredExpr stays false when a WAF signature is injected', () => {
+    expect(
+      matched("evaluatePreconfiguredExpr('protocolattack-v33-stable')", {
+        wafMatches: [
+          {
+            ruleSet: 'protocolattack-v33-stable',
+            signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+          },
+        ],
+      })
+    ).toBe(false);
+  });
+
+  test('evaluateAdaptiveProtection follows the declared match and ignores the alert id', () => {
+    expect(matched("evaluateAdaptiveProtection('alert')")).toBe(false);
+    expect(matched("evaluateAdaptiveProtection('alert')", { adaptiveProtectionMatch: true })).toBe(
+      true
+    );
+    expect(
+      matched("evaluateAdaptiveProtection('other-alert')", { adaptiveProtectionMatch: true })
+    ).toBe(true);
+    expect(
+      matched('evaluateAdaptiveProtectionAutoDeploy()', { adaptiveProtectionMatch: true })
+    ).toBe(true);
+    expect(matched('evaluateAdaptiveProtectionAutoDeploy()')).toBe(false);
+  });
+
+  test('WAF and Adaptive Protection injections are not CEL identifiers', () => {
+    expect(() => validateExpression('has(origin.wafMatches)')).toThrow(ArmorError);
+    expect(evalExpr('size(wafMatches) > 0').ok).toBe(false);
+    expect(evalExpr("has(request.headers['x-kinglet-waf-match'])").ok).toBe(true);
+    expect(matched("has(request.headers['x-kinglet-waf-match'])")).toBe(false);
   });
 
   test('origin attributes use supplied values', () => {
@@ -299,6 +399,7 @@ describe('body-phase detection', () => {
     expect(expressionUsesBodyPhase("request['body'].contains('x')")).toBe(true);
     expect(expressionUsesBodyPhase("request['params'].category == 'electronics'")).toBe(true);
     expect(expressionUsesBodyPhase("evaluatePreconfiguredWaf('xss-v422-stable')")).toBe(true);
+    expect(expressionUsesBodyPhase("evaluateAdaptiveProtection('alert')")).toBe(false);
     expect(expressionUsesBodyPhase("request.path == '/x'")).toBe(false);
   });
 });
