@@ -127,14 +127,16 @@ headers out of scope.
   and does not run Adaptive Protection ML.
 - A payload that would match on GCP misses here without the header. A header
   match can still miss on GCP. Sensitivity 1 vs 4 cannot be distinguished.
-- `evaluatePreconfiguredExpr`, address groups, threat intel, managed rules,
-  and `preconfiguredWafConfig` field exclusions stay unimplemented.
+- `evaluatePreconfiguredExpr`, organization address groups, threat intel,
+  managed rules, and `preconfiguredWafConfig` field exclusions stay
+  unimplemented. Project-scoped `evaluateAddressGroup` is [ADR-015](015-cloud-armor-evaluate-address-group.md).
 - `listPreconfiguredExpressionSets` stays unimplemented.
 
 ## References
 
 - [ADR-012](012-cloud-armor-emulation.md)
 - [ADR-014](014-cloud-armor-asn-region-headers.md)
+- [ADR-015](015-cloud-armor-evaluate-address-group.md)
 - Custom rules language — https://cloud.google.com/armor/docs/rules-language-reference
 - Preconfigured WAF rules — https://cloud.google.com/armor/docs/waf-rules
 - Issue #92 — https://github.com/gauthamchandra/kinglet/issues/92
