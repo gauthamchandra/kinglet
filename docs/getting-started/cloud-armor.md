@@ -68,6 +68,16 @@ evaluation is unreachable.
 | `COMPUTE_LISTENER_BIND` | `127.0.0.1` (`0.0.0.0` in the Docker image) | Bind address |
 | `COMPUTE_ARMOR_DEFAULT_POLICY` | unset | Required when more than one policy exists |
 
+`evaluateAddressGroup` reads project-scoped Network Security address
+groups from the same store. Enable both services (`SERVICES=compute,networksecurity`)
+so Terraform can create the group and the evaluation server can see it.
+`SERVICES=compute` alone still accepts the CEL call; a missing group is
+not a match. Organization groups (`evaluateOrganizationAddressGroup`)
+stay always-false. An optional third argument is an exclusion list
+(CEL list of CIDR strings, or a comma-separated string): a group hit
+that is also excluded is not a match. See
+[ADR-015](../adrs/015-cloud-armor-evaluate-address-group.md).
+
 ## 2. Apply your policies
 
 The point of the emulator is to apply the same Terraform you use for Cloud Armor
@@ -301,7 +311,8 @@ The in-repo harness runs the same requests after apply (`terraform/armor-evaluat
 | You might think you tested | What actually ran |
 | --- | --- |
 | WAF / `evaluatePreconfiguredWaf` | Writes succeed; the function is **false**; default allow often wins |
-| Address groups, threat intel, Adaptive Protection, reCAPTCHA | Same: apply may echo fields; the match never happens |
+| `evaluateOrganizationAddressGroup`, threat intel, Adaptive Protection, reCAPTCHA | Same: apply may echo fields; the match never happens |
+| Address groups without Network Security enabled | `evaluateAddressGroup` is **false** (empty table). Enable `networksecurity` and create the group in the policy’s project |
 | Policy attached to a backend / URL map | The evaluation server picks one policy (`COMPUTE_ARMOR_DEFAULT_POLICY` or the sole policy). In GCP, no attachment means no Armor |
 | HTTPS, JA3, SNI, geo | `request.scheme` is `http`. JA3/JA4/SNI are whatever you send on `X-Kinglet-Origin-JA3` / `JA4` / `SNI`, not a TLS handshake. `Host` is not SNI. ASN / region are **not** looked up from the peer (deferred; [ADR-014](../adrs/014-cloud-armor-asn-region-headers.md#deferred-work)) |
 | CDN / proxy topology | `origin.ip` is the load-balancer peer. Set `X-Kinglet-Origin-IP` to **egress**, not the end user, when the rule is `SRC_IPS_V1` |

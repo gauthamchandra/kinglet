@@ -59,6 +59,19 @@ describe('AddressGroupRepository', () => {
     expect(page2.nextPageToken).toBeUndefined();
   });
 
+  test('listAllAddressGroups returns every group in the prefix', async () => {
+    await repo.create(makeGroup({ name: 'projects/p/locations/global/addressGroups/a' }));
+    await repo.create(makeGroup({ name: 'projects/p/locations/global/addressGroups/b' }));
+    await repo.create(makeGroup({ name: 'projects/other/locations/global/addressGroups/c' }));
+
+    const listed = await repo.listAllAddressGroups('p', 'global');
+
+    expect(listed.map(group => group.name)).toEqual([
+      'projects/p/locations/global/addressGroups/a',
+      'projects/p/locations/global/addressGroups/b',
+    ]);
+  });
+
   test('update and delete operate by resource name', async () => {
     const created = await repo.create(makeGroup());
     const updated = await repo.update(created.name, { description: 'updated' });

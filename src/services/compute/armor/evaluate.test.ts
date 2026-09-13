@@ -487,4 +487,55 @@ describe('evaluate', () => {
     expect(second.preview?.action).toBe('deny(429)');
     expect(second.enforced?.action).toBe('allow');
   });
+
+  test('evaluateAddressGroup uses the supplied lookup and exclusion list', () => {
+    const lookup = (name: string) => {
+      if (name === 'malicious-ips') {
+        return ['198.51.100.0/24'];
+      }
+
+      return undefined;
+    };
+
+    const policy: SecurityPolicy = {
+      name: 'address-group-policy',
+      rules: [
+        {
+          priority: 500,
+          action: 'deny(403)',
+          match: {
+            expr: {
+              expression: "evaluateAddressGroup('malicious-ips', origin.ip, ['198.51.100.20'])",
+            },
+          },
+        },
+        {
+          priority: 1000,
+          action: 'deny(403)',
+          match: { expr: { expression: "evaluateAddressGroup('malicious-ips', origin.ip)" } },
+        },
+        {
+          priority: DEFAULT_RULE_PRIORITY,
+          action: 'allow',
+          match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+        },
+      ],
+    };
+
+    expect(
+      evaluate(policy, attrs({ originIp: '198.51.100.21' }), { lookupAddressGroup: lookup })
+        .enforced?.priority
+    ).toBe(500);
+    expect(
+      evaluate(policy, attrs({ originIp: '198.51.100.20' }), { lookupAddressGroup: lookup })
+        .enforced?.priority
+    ).toBe(1000);
+    expect(
+      evaluate(policy, attrs({ originIp: '192.0.2.8' }), { lookupAddressGroup: lookup }).enforced
+        ?.priority
+    ).toBe(DEFAULT_RULE_PRIORITY);
+    expect(evaluate(policy, attrs({ originIp: '198.51.100.21' })).enforced?.priority).toBe(
+      DEFAULT_RULE_PRIORITY
+    );
+  });
 });

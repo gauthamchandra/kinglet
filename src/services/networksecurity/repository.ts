@@ -35,4 +35,8 @@ export class AddressGroupRepository extends ResourceRepository<AddressGroupRecor
 
     return { addressGroups: records, nextPageToken };
   }
+
+  async listAllAddressGroups(project: string, location: string): Promise<AddressGroupRecord[]> {
+    return this.listAllByPrefix(buildAddressGroupListPrefix(project, location));
+  }
 }
