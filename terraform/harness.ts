@@ -8,7 +8,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { allocateDistinctPorts } from '../test-utils/helpers.ts';
-import { runArmorEvaluationCases } from './armor-evaluation.ts';
+import {
+  ARMOR_ADDRESS_GROUP_EVALUATION_CASES,
+  runArmorEvaluationCases,
+} from './armor-evaluation.ts';
 import type { TerraformValidationCase } from './manifest.ts';
 
 const ROOT_DIR = resolve(import.meta.dir, '..');
@@ -353,12 +356,15 @@ export async function runValidationCase(
       throw new Error(`[${validationCase.id}] terraform apply failed:\n${apply.output}`);
     }
 
-    if (validationCase.id === 'armor') {
+    if (validationCase.id === 'armor' || validationCase.id === 'armor-address-group') {
       if (kinglet.listenerEndpoint == null) {
         throw new Error(`[${validationCase.id}] evaluation server endpoint was not published`);
       }
 
-      await runArmorEvaluationCases(kinglet.listenerEndpoint);
+      await runArmorEvaluationCases(
+        kinglet.listenerEndpoint,
+        validationCase.id === 'armor' ? undefined : ARMOR_ADDRESS_GROUP_EVALUATION_CASES
+      );
     }
 
     const planArgs = [

@@ -1,4 +1,4 @@
-# ADR-015: Cloud Armor Preconfigured WAF and Adaptive Protection Request Headers
+# ADR-016: Cloud Armor Preconfigured WAF and Adaptive Protection Request Headers
 
 ## Status
 
