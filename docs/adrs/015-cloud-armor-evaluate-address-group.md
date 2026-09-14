@@ -4,72 +4,84 @@
 
 Proposed (addendum to [ADR-012](012-cloud-armor-emulation.md))
 
-ADR-012 is left unchanged. That record listed `evaluateAddressGroup` among
-the CEL functions that apply and evaluate to `false` until the backing
-data exists. This record is the later decision to resolve that function
-against project-scoped Network Security address groups.
+Do not edit ADR-012. That record listed `evaluateAddressGroup` with the
+CEL functions that Terraform can write, then always evaluate to `false`.
+This addendum is the later decision: look the group up in Network
+Security and match the request IP against its CIDRs.
 
 ## Context
 
 Cloud Armor’s custom rules language includes
-`evaluateAddressGroup(group, ip [, exclusions])`. Real GCP looks up the
-named address group on Network Security in the security policy’s
-project (`locations/global`) and matches the request IP against the
-group’s CIDR items. An optional third argument excludes CIDRs: a group
-hit that is also in that list is not a match.
 
-ADR-012 accepted the call so Terraform WAF / Enterprise rules apply, and
-stubbed evaluation to `false`. After kinglet gained the Network Security
-control plane for project-scoped address groups, the stub was the
-remaining gap: policies that name a group would apply and never fire.
+`evaluateAddressGroup(group, ip [, exclusions])`.
 
-The CEL engine in ADR-012 is synchronous and must not perform I/O.
-Address-group items live in a different service’s table. Those
-constraints still hold.
+On GCP that call loads a Network Security address group in the security
+policy’s project (`locations/global`) and asks whether the request IP is
+in the group. An optional third argument is a list of CIDRs to skip: if
+the IP is in the group *and* in that exclusion list, it is not a match.
+
+Kinglet accepted the call so Terraform WAF / Enterprise policies apply,
+then stubbed it to `false`. After the Network Security control plane
+could store project-scoped groups, that stub was the gap. Policies that
+named a group applied and never fired.
+
+Two constraints from ADR-012 still apply:
+
+1. The CEL engine is synchronous. It must not do I/O while evaluating a
+   rule.
+2. Address-group items live in another service’s table, not on the
+   security policy.
 
 ## Decision
 
 `evaluateAddressGroup` matches against project-scoped Network Security
-address groups in the same `StorageManager` as Compute.
+address groups that share Compute’s `StorageManager`.
 
-- Resolve the group as
+- Look up
   `projects/{policyProject}/locations/global/addressGroups/{name}`.
-  The first argument may be the short id or that full resource name.
-- The second argument is evaluated like other CEL. A value that is
-  already an IP is used as-is; otherwise it is a request header name
-  (`origin.ip` / `origin.user_ip` already become IP strings).
+  The first argument may be the short id (`my-group`) or that full
+  resource name.
+- The second argument is ordinary CEL. If the value is already an IP,
+  use it. Otherwise treat it as a request header name
+  (`origin.ip` / `origin.user_ip` are already IP strings by the time
+  CEL sees them).
 - The optional third argument is an exclusion list: a CEL list of CIDR
-  strings, or a comma-separated string. A group hit that is also
-  excluded is not a match.
-- A missing group, Network Security disabled (empty table), or an IP
-  outside the items is not a match. It is not a rule error.
-- Do not filter on `purpose`. Lookup is by name in the policy’s project.
-- `evaluateOrganizationAddressGroup` stays always-false. There is no
-  organization collection.
+  strings, or one comma-separated string. A group hit that is also in
+  this list is not a match.
+- A missing group, Network Security turned off (empty table), or an IP
+  that is not in the group is simply not a match. It is not a rule
+  error and must not 403 by itself.
+- Do not filter on the group’s `purpose` field. Lookup is by name in
+  the policy’s project.
+- `evaluateOrganizationAddressGroup` stays always-false. Kinglet has
+  no organization collection.
 
-The CEL engine does not read storage. The evaluation server loads
-groups for the policy’s project **once per request**, and **only when**
-the selected policy has a rule that calls `evaluateAddressGroup`, then
-passes a synchronous lookup into `evaluate()`.
+The CEL engine never reads storage. Before evaluation, the listener
+loads groups for the policy’s project **once per request**, and **only
+when** the selected policy has a rule that calls `evaluateAddressGroup`.
+It then hands a synchronous lookup into `evaluate()`.
 
-Compute may initialize the address-group table so `SERVICES=compute`
-alone still serves. The table is empty until Network Security is
-enabled and a group is created. Compute does not auto-enable Network
-Security.
+Compute may create the address-group table so `SERVICES=compute` alone
+still serves. That table stays empty until Network Security is enabled
+and someone creates a group. Compute does not turn Network Security on
+by itself.
 
 ## Rationale
 
-- The function is defined by Armor docs, not a kinglet convenience API.
-  Groups already persist on the Network Security resource name.
-- Shared `StorageManager` avoids a kinglet-only seed endpoint and
-  avoids the CEL engine taking a Network Security HTTP dependency.
-- A miss that looks like “no match” matches GCP’s “unknown group /
-  empty lookup” better than a 403 from an unimplemented builtin
-  (ADR-012: do not return 403 from an unimplemented WAF set).
-- Loading only for policies that call the function keeps path/IP/default
-  rules off the address-group table. A long-lived snapshot cache would
-  be another layer with invalidation; a per-request load is enough for
-  local traffic.
+This function is defined by Armor docs, not a kinglet convenience API.
+Groups already live under the Network Security resource name.
+
+Sharing `StorageManager` avoids a kinglet-only seed endpoint, and it
+avoids giving the CEL engine an HTTP dependency on Network Security.
+
+A miss that means “no match” is closer to GCP’s “unknown group / empty
+lookup” than returning 403 from an unimplemented builtin. ADR-012
+already forbade that fake 403 for unimplemented WAF sets.
+
+Loading only when the selected policy calls the function keeps ordinary
+path / IP / default rules off the address-group table. A long-lived
+snapshot cache would need invalidation. A per-request load is enough
+for local traffic.
 
 ## Alternatives Considered
 
@@ -78,43 +90,45 @@ Security.
 Rejected: ADRs are written once. An addendum records the new decision
 without rewriting the reasoning that was true when Phase 1 shipped.
 
-### Kinglet-only seed / evaluate API
+### A kinglet-only seed or evaluate API
 
-Rejected: GCP has no such RPC. Clients already create groups on
-Network Security and name them from Armor CEL.
+Rejected: GCP has no such RPC. Clients already create groups on Network
+Security and name them from Armor CEL.
 
-### Long-lived in-memory snapshot of groups
+### A long-lived in-memory snapshot of groups
 
-Rejected: extra invalidation for a local emulator. Load per evaluating
-request instead.
+Rejected: extra invalidation for a local emulator. Load once per
+evaluating request instead.
 
 ### Load groups on every Armor request
 
-Rejected: unrelated policies would scan the table on every curl. Skip
-the load unless the selected policy uses `evaluateAddressGroup`.
+Rejected: policies that never mention address groups would still scan
+the table on every curl. Skip the load unless the selected policy uses
+`evaluateAddressGroup`.
 
 ### Filter lookup by `CLOUD_ARMOR` purpose
 
-Rejected: match by name in the policy’s project. Purpose is a write-time
-Network Security field, not part of the CEL call.
+Rejected: match by name in the policy’s project. Purpose is a
+write-time Network Security field, not part of the CEL call.
 
-### Evaluate from the Network Security HTTP API at request time
+### Call the Network Security HTTP API during evaluation
 
 Rejected: the engine stays sync and GCP-shaped (ADR-012). The listener
-adapter is the I/O boundary.
+is the I/O boundary.
 
 ## Consequences
 
 - `SERVICES=compute,networksecurity` plus a group in the policy’s
-  project is enough for `evaluateAddressGroup` to fire. `SERVICES=compute`
-  alone still accepts the call; it is false until a group exists.
+  project is enough for `evaluateAddressGroup` to fire.
+  `SERVICES=compute` alone still accepts the call; it stays false until
+  a group exists.
 - Organization groups, `addItems` / `removeItems` / `cloneItems` /
   `listReferences`, and a purpose filter remain out of scope.
 - Google’s docs show some unquoted CIDR lists that are not valid CEL.
-  Quoted string lists and comma-separated strings are what kinglet
-  evaluates.
-- Preconfigured WAF, threat intel, and Adaptive Protection stay
-  always-false, as ADR-012 recorded.
+  Kinglet evaluates quoted string lists and comma-separated strings.
+- When this record shipped, preconfigured WAF, threat intel, and
+  Adaptive Protection were still always-false, as ADR-012 recorded.
+  WAF and Adaptive Protection injection is [ADR-016](016-cloud-armor-waf-adaptive-headers.md).
 
 ## References
 
