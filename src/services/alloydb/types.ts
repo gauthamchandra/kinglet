@@ -21,6 +21,7 @@ import { ADVERTISED_HOST } from '@/shared/postgres-data-plane/data-plane-manager
 export const ALLOYDB_CLUSTERS_TABLE = 'alloydb_clusters';
 export const ALLOYDB_INSTANCES_TABLE = 'alloydb_instances';
 export const ALLOYDB_USERS_TABLE = 'alloydb_users';
+export const ALLOYDB_BACKUPS_TABLE = 'alloydb_backups';
 export const ALLOYDB_OPERATIONS_TABLE = 'alloydb_operations';
 
 // ── Enumerations ──
@@ -47,6 +48,25 @@ export const UserType = {
   ALLOYDB_BUILT_IN: 'ALLOYDB_BUILT_IN',
   ALLOYDB_IAM_USER: 'ALLOYDB_IAM_USER',
 } as const;
+
+export const BackupState = {
+  READY: 'READY',
+} as const;
+
+export const BackupType = {
+  TYPE_UNSPECIFIED: 'TYPE_UNSPECIFIED',
+  ON_DEMAND: 'ON_DEMAND',
+  AUTOMATED: 'AUTOMATED',
+  CONTINUOUS: 'CONTINUOUS',
+} as const;
+
+/** GCP default when `continuousBackupConfig` is omitted on create. */
+export const DEFAULT_CONTINUOUS_BACKUP_CONFIG = {
+  enabled: true,
+  recoveryWindowDays: 14,
+} as const;
+
+const DEFAULT_INITIAL_USERNAME = 'postgres';
 
 /**
  * The discovery document does not state which version an omitted
@@ -82,6 +102,13 @@ export const USER_TYPE_ENUM: EnumNumberMap = {
   0: 'USER_TYPE_UNSPECIFIED',
   1: 'ALLOYDB_BUILT_IN',
   2: 'ALLOYDB_IAM_USER',
+};
+
+export const BACKUP_TYPE_ENUM: EnumNumberMap = {
+  0: 'TYPE_UNSPECIFIED',
+  1: 'ON_DEMAND',
+  2: 'AUTOMATED',
+  3: 'CONTINUOUS',
 };
 
 const DATABASE_VERSION_ENUM: EnumNumberMap = {
@@ -152,6 +179,10 @@ const INSTANCE_ENUM_FIELDS: Readonly<Record<string, EnumNumberMap>> = {
 
 const USER_ENUM_FIELDS: Readonly<Record<string, EnumNumberMap>> = {
   userType: USER_TYPE_ENUM,
+};
+
+const BACKUP_ENUM_FIELDS: Readonly<Record<string, EnumNumberMap>> = {
+  type: BACKUP_TYPE_ENUM,
 };
 
 /**
@@ -271,6 +302,10 @@ export function buildUserName(
   return `${buildClusterName(project, location, clusterId)}/users/${userId}`;
 }
 
+export function buildBackupName(project: string, location: string, backupId: string): string {
+  return `projects/${project}/locations/${location}/backups/${backupId}`;
+}
+
 /** The singleton sub-resource segment appended to an instance name. */
 const CONNECTION_INFO_SUFFIX = '/connectionInfo';
 
@@ -317,6 +352,12 @@ export function isValidInstanceId(instanceId: string): boolean {
  */
 export function isValidUserId(userId: string): boolean {
   return userId.length > 0 && !userId.includes('/');
+}
+
+const BACKUP_ID_PATTERN = /^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+export function isValidBackupId(backupId: string): boolean {
+  return BACKUP_ID_PATTERN.test(backupId);
 }
 
 // ── Mutable Field Sets ──
@@ -376,6 +417,15 @@ export const MUTABLE_USER_FIELDS: ReadonlySet<string> = new Set([
   'userType',
 ]);
 
+export const MUTABLE_BACKUP_FIELDS: ReadonlySet<string> = new Set([
+  'annotations',
+  'description',
+  'displayName',
+  'encryptionConfig',
+  'etag',
+  'labels',
+]);
+
 /**
  * Writable fields the emulator keeps in a real column, so they must not also be
  * mirrored into `spec` — two homes for one field is two chances to disagree.
@@ -395,6 +445,8 @@ const COLUMNED_USER_FIELDS: ReadonlySet<string> = new Set([
   'password',
   'keepExtraRoles',
 ]);
+
+const COLUMNED_BACKUP_FIELDS: ReadonlySet<string> = new Set(['type', 'clusterName']);
 
 // ── Storage Records ──
 
@@ -434,6 +486,21 @@ export interface UserRecord extends BaseRecord {
   spec: string; // JSON-serialized writable fields without a column of their own
 }
 
+export interface BackupRecord extends BaseRecord {
+  name: string;
+  uid: string;
+  state: string;
+  type: string;
+  clusterName: string;
+  clusterUid: string;
+  reconciling: number; // SQLite boolean (0/1)
+  createTime: string;
+  updateTime: string;
+  deleteTime: string | null;
+  sizeBytes: string;
+  spec: string;
+}
+
 // ── Responses ──
 
 export type ClusterResponse = Record<string, unknown> & {
@@ -460,6 +527,19 @@ export type InstanceResponse = Record<string, unknown> & {
 export type UserResponse = Record<string, unknown> & {
   name: string;
   userType: string;
+};
+
+export type BackupResponse = Record<string, unknown> & {
+  name: string;
+  uid: string;
+  state: string;
+  type: string;
+  clusterName: string;
+  clusterUid: string;
+  reconciling: boolean;
+  createTime: string;
+  updateTime: string;
+  sizeBytes: string;
 };
 
 export interface ConnectionInfo {
@@ -517,6 +597,26 @@ export const userTableSchema: TableSchema = {
     { name: 'spec', type: 'json' },
   ],
   indexes: [{ name: 'idx_alloydb_users_name', columns: ['name'], unique: true }],
+  timestamps: true,
+};
+
+export const backupTableSchema: TableSchema = {
+  name: ALLOYDB_BACKUPS_TABLE,
+  columns: [
+    { name: 'name', type: 'string', unique: true },
+    { name: 'uid', type: 'string' },
+    { name: 'state', type: 'string' },
+    { name: 'type', type: 'string' },
+    { name: 'clusterName', type: 'string' },
+    { name: 'clusterUid', type: 'string' },
+    { name: 'reconciling', type: 'number' },
+    { name: 'createTime', type: 'string' },
+    { name: 'updateTime', type: 'string' },
+    { name: 'deleteTime', type: 'string', nullable: true },
+    { name: 'sizeBytes', type: 'string' },
+    { name: 'spec', type: 'json' },
+  ],
+  indexes: [{ name: 'idx_alloydb_backups_name', columns: ['name'], unique: true }],
   timestamps: true,
 };
 
@@ -579,6 +679,7 @@ export function normalizeSpecFieldValue(
 export const CLUSTER_SPEC_ENUM_FIELDS = CLUSTER_ENUM_FIELDS;
 export const INSTANCE_SPEC_ENUM_FIELDS = INSTANCE_ENUM_FIELDS;
 export const USER_SPEC_ENUM_FIELDS = USER_ENUM_FIELDS;
+export const BACKUP_SPEC_ENUM_FIELDS = BACKUP_ENUM_FIELDS;
 
 /**
  * Read `Cluster.initialUser` into its username and password, or nulls when
@@ -602,6 +703,23 @@ export function readInitialUser(body: Record<string, unknown>): {
   return {
     username: typeof user === 'string' && user.length > 0 ? user : null,
     password: typeof password === 'string' ? password : null,
+  };
+}
+
+/**
+ * Terraform and the registry treat `initialUser` as optional. An omitted block
+ * (or a password-only / user-only block) becomes the postgres role with whatever
+ * password was supplied, matching the provider docs.
+ */
+export function resolveInitialUser(body: Record<string, unknown>): {
+  username: string;
+  password: string;
+} {
+  const { username, password } = readInitialUser(body);
+
+  return {
+    username: username ?? DEFAULT_INITIAL_USERNAME,
+    password: password ?? '',
   };
 }
 
@@ -675,6 +793,7 @@ export function clusterRequestToRecord(
   );
 
   spec.databaseVersion ??= DEFAULT_DATABASE_VERSION;
+  spec.continuousBackupConfig ??= { ...DEFAULT_CONTINUOUS_BACKUP_CONFIG };
 
   return {
     name,
@@ -683,7 +802,7 @@ export function clusterRequestToRecord(
     // CREATING — it is READY by the time the caller sees the Operation.
     state: ClusterState.READY,
     clusterType: ClusterType.PRIMARY,
-    initialUserName: readInitialUser(body).username,
+    initialUserName: resolveInitialUser(body).username,
     reconciling: 0,
     createTime: now,
     updateTime: now,
@@ -775,9 +894,65 @@ export function userRequestToRecord(
 }
 
 export function userRecordToResponse(record: Omit<UserRecord, keyof BaseRecord>): UserResponse {
+  const spec = parseSpecJson(record.spec);
+  const databaseRoles = spec.databaseRoles;
+
+  if (Array.isArray(databaseRoles)) {
+    spec.databaseRoles = [...databaseRoles].map(role => String(role)).sort();
+  }
+
+  return {
+    ...spec,
+    name: record.name,
+    userType: record.userType,
+  };
+}
+
+export function backupRequestToRecord(
+  name: string,
+  body: Record<string, unknown>,
+  clusterUid: string
+): Omit<BackupRecord, keyof BaseRecord> {
+  const now = new Date().toISOString();
+  const requestedType = normalizeEnum(body.type, BACKUP_TYPE_ENUM);
+  const clusterName = typeof body.clusterName === 'string' ? body.clusterName : '';
+
+  return {
+    name,
+    uid: crypto.randomUUID(),
+    state: BackupState.READY,
+    type:
+      typeof requestedType === 'string' && requestedType !== 'TYPE_UNSPECIFIED'
+        ? requestedType
+        : BackupType.ON_DEMAND,
+    clusterName,
+    clusterUid,
+    reconciling: 0,
+    createTime: now,
+    updateTime: now,
+    deleteTime: null,
+    sizeBytes: '0',
+    spec: JSON.stringify(
+      pickSpecFields(body, MUTABLE_BACKUP_FIELDS, COLUMNED_BACKUP_FIELDS, BACKUP_ENUM_FIELDS)
+    ),
+  };
+}
+
+export function backupRecordToResponse(
+  record: Omit<BackupRecord, keyof BaseRecord>
+): BackupResponse {
   return {
     ...parseSpecJson(record.spec),
     name: record.name,
-    userType: record.userType,
+    uid: record.uid,
+    state: record.state,
+    type: record.type,
+    clusterName: record.clusterName,
+    clusterUid: record.clusterUid,
+    reconciling: record.reconciling === 1,
+    createTime: record.createTime,
+    updateTime: record.updateTime,
+    sizeBytes: record.sizeBytes,
+    ...(record.deleteTime == null ? {} : { deleteTime: record.deleteTime }),
   };
 }

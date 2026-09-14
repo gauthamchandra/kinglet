@@ -142,13 +142,20 @@ describe('AlloyDB E2E: Raw HTTP API', () => {
     expect(error.message).toContain('clusterId');
   });
 
-  test('5. Create a cluster without initialUser - 400 INVALID_ARGUMENT', async () => {
+  test('5. Create a cluster without initialUser - 200 with a default postgres role', async () => {
     const response = await postJson(`${clustersPath}?clusterId=no-initial-user`, {
       network: 'default',
     });
 
-    expect(response.status).toBe(400);
-    expect((await response.json()).error.status).toBe('INVALID_ARGUMENT');
+    expect(response.status).toBe(200);
+
+    const operation = await response.json();
+
+    expect(operation.done).toBe(true);
+    expect(operation.response.name).toBe(
+      `projects/${project}/locations/${location}/clusters/no-initial-user`
+    );
+    expect(operation.response).not.toHaveProperty('initialUser');
   });
 
   test('6. List clusters - keys on "clusters"', async () => {
@@ -320,14 +327,67 @@ describe('AlloyDB E2E: Raw HTTP API', () => {
     expect(operation.done).toBe(true);
   });
 
-  test('18. Delete the cluster while it has an instance - 400 FAILED_PRECONDITION', async () => {
+  test('18. Create and get an on-demand backup - sizeBytes is the string 0', async () => {
+    const backupsPath = `/v1/projects/${project}/locations/${location}/backups`;
+    const created = await postJson(`${backupsPath}?backupId=e2e-backup`, {
+      clusterName,
+      type: 'ON_DEMAND',
+    });
+
+    expect(created.status).toBe(200);
+
+    const operation = await created.json();
+
+    expect(operation.done).toBe(true);
+    expect(operation.response.sizeBytes).toBe('0');
+    expect(operation.response.state).toBe('READY');
+
+    const fetched = await fetch(emulatorUrl(`${backupsPath}/e2e-backup`));
+
+    expect(fetched.status).toBe(200);
+
+    const backup = await fetched.json();
+
+    expect(backup.name).toBe(`projects/${project}/locations/${location}/backups/e2e-backup`);
+    expect(backup.sizeBytes).toBe('0');
+    expect(backup.clusterName).toBe(clusterName);
+    expect(backup.clusterUid).toBeTypeOf('string');
+    expect(backup.clusterUid.length).toBeGreaterThan(0);
+  });
+
+  test('19. Restore a cluster from a missing backup - still mints an empty cluster', async () => {
+    const restoredId = 'e2e-restored';
+    const response = await postJson(`${clustersPath}:restore?clusterId=${restoredId}`, {
+      backupSource: {
+        backupName: `projects/${project}/locations/${location}/backups/does-not-exist`,
+      },
+      cluster: {
+        network: `projects/${project}/global/networks/default`,
+      },
+    });
+
+    expect(response.status).toBe(200);
+
+    const operation = await response.json();
+
+    expect(operation.done).toBe(true);
+    expect(operation.metadata.verb).toBe('restore');
+    expect(operation.response.name).toBe(
+      `projects/${project}/locations/${location}/clusters/${restoredId}`
+    );
+    expect(operation.response.backupSource).toEqual({
+      backupName: `projects/${project}/locations/${location}/backups/does-not-exist`,
+    });
+  });
+
+  test('20. Delete the cluster while it has an instance - 400 FAILED_PRECONDITION', async () => {
     const response = await fetch(emulatorUrl(clusterPath), { method: 'DELETE' });
 
     expect(response.status).toBe(400);
     expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
   });
 
-  test('19. Delete the cluster with force=true - cascades to its instances', async () => {
+  test('21. Delete the cluster with force=true - cascades instances, not backups', async () => {
     const response = await fetch(emulatorUrl(`${clusterPath}?force=true`), { method: 'DELETE' });
 
     expect(response.status).toBe(200);
@@ -335,9 +395,16 @@ describe('AlloyDB E2E: Raw HTTP API', () => {
 
     expect((await fetch(emulatorUrl(clusterPath))).status).toBe(404);
     expect((await fetch(emulatorUrl(`${clusterPath}/instances/${instanceId}`))).status).toBe(404);
+
+    const leftover = await fetch(
+      emulatorUrl(`/v1/projects/${project}/locations/${location}/backups/e2e-backup`)
+    );
+
+    expect(leftover.status).toBe(200);
+    expect((await leftover.json()).clusterName).toBe(clusterName);
   });
 
-  test('20. List supported database flags', async () => {
+  test('22. List supported database flags', async () => {
     const response = await fetch(
       emulatorUrl(`/v1/projects/${project}/locations/${location}/supportedDatabaseFlags`)
     );
@@ -352,7 +419,7 @@ describe('AlloyDB E2E: Raw HTTP API', () => {
     expect(flags.some(flag => flag.flagName === 'max_connections')).toBe(true);
   });
 
-  test('21. Get a location, and 404 for one that is not served', async () => {
+  test('23. Get a location, and 404 for one that is not served', async () => {
     const served = await fetch(emulatorUrl(`/v1/projects/${project}/locations/${location}`));
 
     expect(served.status).toBe(200);

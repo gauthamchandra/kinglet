@@ -27,6 +27,12 @@ export class ClusterHandlers {
   getRoutes(): RouteDefinition[] {
     return [
       {
+        id: 'alloydb.clusters.restore',
+        method: 'POST',
+        path: '/v1/projects/:project/locations/:location/clusters:restore',
+        handler: req => this.handleRestore(req),
+      },
+      {
         id: 'alloydb.clusters.create',
         method: 'POST',
         path: '/v1/projects/:project/locations/:location/clusters',
@@ -73,6 +79,24 @@ export class ClusterHandlers {
       }
 
       return this.service.createCluster(
+        req.params.project ?? '',
+        req.params.location ?? '',
+        clusterId,
+        readBody(req),
+        { validateOnly: parseBooleanFlag(req.query.validateOnly) }
+      );
+    });
+  }
+
+  private handleRestore(req: RouteRequest): Promise<RouteResponse> {
+    return respondWith(RESOURCE_TYPE, this.responseUtils, () => {
+      const clusterId = readQueryString(req.query.clusterId);
+
+      if (clusterId === undefined) {
+        throw new AlloyDbError('INVALID_ARGUMENT', 'clusterId query parameter is required');
+      }
+
+      return this.service.restoreCluster(
         req.params.project ?? '',
         req.params.location ?? '',
         clusterId,

@@ -2,10 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import {
+  ALLOYDB_BACKUPS_TABLE,
   ALLOYDB_CLUSTERS_TABLE,
   ALLOYDB_INSTANCES_TABLE,
   ALLOYDB_USERS_TABLE,
   AlloyDbError,
+  BACKUP_TYPE_ENUM,
+  BackupState,
+  BackupType,
+  backupRecordToResponse,
+  backupRequestToRecord,
+  backupTableSchema,
+  buildBackupName,
   buildClusterName,
   buildConnectionInfo,
   buildConnectionInfoName,
@@ -17,6 +25,7 @@ import {
   clusterRecordToResponse,
   clusterRequestToRecord,
   clusterTableSchema,
+  DEFAULT_CONTINUOUS_BACKUP_CONFIG,
   handleAlloyDbError,
   INSTANCE_TYPE_ENUM,
   InstanceState,
@@ -24,8 +33,10 @@ import {
   instanceRecordToResponse,
   instanceRequestToRecord,
   instanceTableSchema,
+  isValidBackupId,
   isValidClusterId,
   isValidInstanceId,
+  MUTABLE_BACKUP_FIELDS,
   MUTABLE_CLUSTER_FIELDS,
   MUTABLE_INSTANCE_FIELDS,
   MUTABLE_USER_FIELDS,
@@ -33,6 +44,7 @@ import {
   parseDataPlaneInstanceKey,
   parseInstanceName,
   readInitialUser,
+  resolveInitialUser,
   USER_TYPE_ENUM,
   UserType,
   userRecordToResponse,
@@ -263,6 +275,25 @@ describe('mutable field sets', () => {
     ]);
     expect(MUTABLE_USER_FIELDS.has('name')).toBe(false);
   });
+
+  test('MUTABLE_BACKUP_FIELDS_excludesEveryOutputOnlyBackupField', () => {
+    for (const readOnlyField of [
+      'name',
+      'uid',
+      'state',
+      'type',
+      'clusterName',
+      'clusterUid',
+      'createTime',
+      'updateTime',
+      'deleteTime',
+      'reconciling',
+      'sizeBytes',
+      'encryptionInfo',
+    ]) {
+      expect(MUTABLE_BACKUP_FIELDS.has(readOnlyField)).toBe(false);
+    }
+  });
 });
 
 describe('cluster conversion', () => {
@@ -347,6 +378,20 @@ describe('cluster conversion', () => {
 
     expect(response.reconciling).toBe(false);
   });
+
+  test('clusterRequestToRecord_defaultsOmittedContinuousBackupConfig', () => {
+    const response = clusterRecordToResponse(clusterRequestToRecord(CLUSTER_NAME, {}));
+
+    expect(response.continuousBackupConfig).toEqual({ ...DEFAULT_CONTINUOUS_BACKUP_CONFIG });
+  });
+
+  test('clusterRequestToRecord_echoesAnExplicitlyDisabledContinuousBackupConfig', () => {
+    const response = clusterRecordToResponse(
+      clusterRequestToRecord(CLUSTER_NAME, { continuousBackupConfig: { enabled: false } })
+    );
+
+    expect(response.continuousBackupConfig).toEqual({ enabled: false });
+  });
 });
 
 describe('parseInstanceName', () => {
@@ -375,6 +420,26 @@ describe('readInitialUser', () => {
 
   test('readInitialUser_defaultsMissingFieldsToNull', () => {
     expect(readInitialUser({})).toEqual({ username: null, password: null });
+  });
+});
+
+describe('resolveInitialUser', () => {
+  test('resolveInitialUser_defaultsAnOmittedBlockToPostgresWithAnEmptyPassword', () => {
+    expect(resolveInitialUser({})).toEqual({ username: 'postgres', password: '' });
+  });
+
+  test('resolveInitialUser_defaultsAPasswordOnlyBlockToPostgres', () => {
+    expect(resolveInitialUser({ initialUser: { password: 'secret' } })).toEqual({
+      username: 'postgres',
+      password: 'secret',
+    });
+  });
+
+  test('resolveInitialUser_defaultsAUserOnlyBlockToAnEmptyPassword', () => {
+    expect(resolveInitialUser({ initialUser: { user: 'alice' } })).toEqual({
+      username: 'alice',
+      password: '',
+    });
   });
 });
 
@@ -447,6 +512,39 @@ describe('instance conversion', () => {
     expect(response.databaseFlags).toEqual({ 'alloydb.enable_pgaudit': 'on' });
     expect(response.machineConfig).toEqual({ cpuCount: 4 });
   });
+
+  test('instanceRecordToResponse_echoesEmptyConnectionPoolFlagsAndObservability', () => {
+    const response = instanceRecordToResponse(
+      instanceRequestToRecord(INSTANCE_NAME, {
+        connectionPoolConfig: { enabled: false, flags: {} },
+        observabilityConfig: {
+          enabled: true,
+          preserveComments: true,
+          trackWaitEvents: true,
+          trackWaitEventTypes: true,
+          trackActiveQueries: true,
+          maxQueryStringLength: 4500,
+          recordApplicationTags: true,
+          queryPlansPerMinute: 5,
+        },
+        machineConfig: { cpuCount: 2, machineType: 'n2-highmem-2' },
+      })
+    );
+
+    expect(response.connectionPoolConfig).toEqual({ enabled: false, flags: {} });
+    expect(response.observabilityConfig).toEqual({
+      enabled: true,
+      preserveComments: true,
+      trackWaitEvents: true,
+      trackWaitEventTypes: true,
+      trackActiveQueries: true,
+      maxQueryStringLength: 4500,
+      recordApplicationTags: true,
+      queryPlansPerMinute: 5,
+    });
+    expect(response.machineConfig).toEqual({ cpuCount: 2, machineType: 'n2-highmem-2' });
+    expect(response).not.toHaveProperty('networkConfig');
+  });
 });
 
 describe('user conversion', () => {
@@ -467,6 +565,18 @@ describe('user conversion', () => {
     expect(userRecordToResponse(record).databaseRoles).toEqual(['pg_read_all_data']);
   });
 
+  test('userRecordToResponse_sortsDatabaseRolesAlphabetically', () => {
+    const record = userRequestToRecord(`${CLUSTER_NAME}/users/admin`, {
+      databaseRoles: ['pg_write_all_data', 'alloydbsuperuser', 'pg_read_all_data'],
+    });
+
+    expect(userRecordToResponse(record).databaseRoles).toEqual([
+      'alloydbsuperuser',
+      'pg_read_all_data',
+      'pg_write_all_data',
+    ]);
+  });
+
   // `User.password` is input-only in the discovery document: stored for
   // data-plane auth, never returned.
   test('userRecordToResponse_neverExposesThePassword', () => {
@@ -478,11 +588,48 @@ describe('user conversion', () => {
   });
 });
 
+describe('backup conversion', () => {
+  const BACKUP_NAME = 'projects/p/locations/us-central1/backups/b1';
+
+  test('buildBackupName_matchesTheDiscoveryDocumentFormat', () => {
+    expect(buildBackupName('p', 'us-central1', 'b1')).toBe(BACKUP_NAME);
+  });
+
+  test.each(['b1', 'my-backup', 'a', 'a9'])('isValidBackupId_accepts_%s', id => {
+    expect(isValidBackupId(id)).toBe(true);
+  });
+
+  test.each(['0-9', '1abc', 'abc-', 'MyBackup', ''])('isValidBackupId_rejects_%s', id => {
+    expect(isValidBackupId(id)).toBe(false);
+  });
+
+  test('backupRequestToRecord_defaultsTypeToOnDemandAndSizeBytesToTheStringZero', () => {
+    const record = backupRequestToRecord(BACKUP_NAME, { clusterName: CLUSTER_NAME }, 'cluster-uid');
+
+    expect(record.state).toBe(BackupState.READY);
+    expect(record.type).toBe(BackupType.ON_DEMAND);
+    expect(record.sizeBytes).toBe('0');
+    expect(record.clusterUid).toBe('cluster-uid');
+  });
+
+  test('backupRecordToResponse_reportsSizeBytesAsAStringAndReconcilingAsABoolean', () => {
+    const response = backupRecordToResponse(
+      backupRequestToRecord(BACKUP_NAME, { clusterName: CLUSTER_NAME, type: 'ON_DEMAND' }, 'uid-1')
+    );
+
+    expect(response.sizeBytes).toBe('0');
+    expect(response.reconciling).toBe(false);
+    expect(response.clusterName).toBe(CLUSTER_NAME);
+    expect(response.clusterUid).toBe('uid-1');
+  });
+});
+
 describe('table schemas', () => {
   test.each([
     [ALLOYDB_CLUSTERS_TABLE, clusterTableSchema],
     [ALLOYDB_INSTANCES_TABLE, instanceTableSchema],
     [ALLOYDB_USERS_TABLE, userTableSchema],
+    [ALLOYDB_BACKUPS_TABLE, backupTableSchema],
   ])('%s_isUniquelyIndexedOnNameAndKeepsTimestamps', (tableName, schema) => {
     expect(schema.name).toBe(tableName);
     expect(schema.timestamps).toBe(true);
@@ -563,6 +710,12 @@ describe('protobuf enum normalization', () => {
     expect(normalizeEnum(2, USER_TYPE_ENUM)).toBe('ALLOYDB_IAM_USER');
   });
 
+  test('normalizeEnum_resolvesBackupTypeNumbers', () => {
+    expect(normalizeEnum(1, BACKUP_TYPE_ENUM)).toBe('ON_DEMAND');
+    expect(normalizeEnum(2, BACKUP_TYPE_ENUM)).toBe('AUTOMATED');
+    expect(normalizeEnum(3, BACKUP_TYPE_ENUM)).toBe('CONTINUOUS');
+  });
+
   test('instanceRequestToRecord_storesTheEnumNameWhenGivenAWireNumber', () => {
     expect(instanceRequestToRecord(INSTANCE_NAME, { instanceType: 2 }).instanceType).toBe(
       InstanceType.READ_POOL
@@ -573,6 +726,12 @@ describe('protobuf enum normalization', () => {
     expect(userRequestToRecord(`${CLUSTER_NAME}/users/admin`, { userType: 2 }).userType).toBe(
       UserType.ALLOYDB_IAM_USER
     );
+  });
+
+  test('backupRequestToRecord_storesTheEnumNameWhenGivenAWireNumber', () => {
+    expect(
+      backupRequestToRecord(buildBackupName('p', 'us-central1', 'b1'), { type: 2 }, '').type
+    ).toBe(BackupType.AUTOMATED);
   });
 
   test('clusterRecordToResponse_reportsDatabaseVersionByNameWhenGivenAWireNumber', () => {

@@ -116,11 +116,12 @@ describe('createCluster', () => {
   });
 
   /**
-   * `Cluster.initialUser` is documented "Input only… Required", so omitting it
-   * must fail rather than quietly produce a cluster with no way in.
+   * Terraform and the registry treat `initialUser` as optional. An omitted
+   * block becomes the postgres role with an empty password so apply can
+   * succeed without a password block.
    */
-  test('createCluster_withoutAnInitialUser_reportsInvalidArgument', async () => {
-    const promise = service.createCluster(
+  test('createCluster_withoutAnInitialUser_defaultsToPostgresWithAnEmptyPassword', async () => {
+    await service.createCluster(
       PROJECT,
       LOCATION,
       CLUSTER_ID,
@@ -128,13 +129,16 @@ describe('createCluster', () => {
       {}
     );
 
-    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
-    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
-    await expect(promise).rejects.toThrow(/initialUser/);
+    const user = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres'));
+
+    expect(user?.password).toBe('');
+    expect(JSON.stringify(await service.getCluster(PROJECT, LOCATION, CLUSTER_ID))).not.toContain(
+      'initialUser'
+    );
   });
 
-  test('createCluster_withAnInitialUserMissingItsUsername_reportsInvalidArgument', async () => {
-    const promise = service.createCluster(
+  test('createCluster_withAPasswordOnlyInitialUser_defaultsTheUsernameToPostgres', async () => {
+    await service.createCluster(
       PROJECT,
       LOCATION,
       CLUSTER_ID,
@@ -145,7 +149,9 @@ describe('createCluster', () => {
       {}
     );
 
-    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+    const user = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres'));
+
+    expect(user?.password).toBe('hunter2');
   });
 
   /**
@@ -168,23 +174,110 @@ describe('createCluster', () => {
     expect(await clusters.getByName(CLUSTER_NAME)).toBeNull();
   });
 
-  // Real AlloyDB requires the initial postgres password on create, so a body
-  // without one must fail here rather than only against production.
-  test('createCluster_withAnInitialUserMissingItsPassword_reportsInvalidArgument', async () => {
-    const promise = service.createCluster(
+  test('createCluster_withAUserOnlyInitialUser_persistsThatUsernameAndAnEmptyPassword', async () => {
+    await service.createCluster(
       PROJECT,
       LOCATION,
       CLUSTER_ID,
       {
-        initialUser: { user: 'postgres' },
+        initialUser: { user: 'alice' },
         networkConfig: { network: 'projects/p/global/networks/default' },
       },
       {}
     );
 
-    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
-    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
-    await expect(promise).rejects.toThrow(/password/);
+    const user = await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'alice'));
+
+    expect(user?.password).toBe('');
+  });
+
+  test('createCluster_omittingContinuousBackupConfig_defaultsToEnabledWithA14DayWindow', async () => {
+    await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, {});
+
+    expect(
+      (await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).continuousBackupConfig
+    ).toEqual({
+      enabled: true,
+      recoveryWindowDays: 14,
+    });
+  });
+
+  test('createCluster_withContinuousBackupDisabled_echoesExactlyTheSentConfig', async () => {
+    await service.createCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { ...VALID_BODY, continuousBackupConfig: { enabled: false } },
+      {}
+    );
+
+    expect(
+      (await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).continuousBackupConfig
+    ).toEqual({
+      enabled: false,
+    });
+  });
+
+  test('createCluster_withAnExplicitContinuousBackupWindow_echoesIt', async () => {
+    await service.createCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      {
+        ...VALID_BODY,
+        continuousBackupConfig: { enabled: true, recoveryWindowDays: 35 },
+      },
+      {}
+    );
+
+    expect(
+      (await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).continuousBackupConfig
+    ).toEqual({
+      enabled: true,
+      recoveryWindowDays: 35,
+    });
+  });
+
+  test('createCluster_echoesADisabledAutomatedBackupPolicyIncludingRetention', async () => {
+    const automatedBackupPolicy = {
+      enabled: false,
+      timeBasedRetention: { retentionPeriod: '1209600s' },
+    };
+
+    await service.createCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { ...VALID_BODY, automatedBackupPolicy },
+      {}
+    );
+
+    expect((await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).automatedBackupPolicy).toEqual(
+      automatedBackupPolicy
+    );
+  });
+
+  test('createCluster_echoesMaintenanceWindowStartTimeZeros', async () => {
+    const maintenanceUpdatePolicy = {
+      maintenanceWindows: [
+        {
+          day: 'SUNDAY',
+          startTime: { hours: 3, minutes: 0, seconds: 0, nanos: 0 },
+        },
+      ],
+    };
+
+    await service.createCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { ...VALID_BODY, maintenanceUpdatePolicy },
+      {}
+    );
+
+    expect(
+      (await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).maintenanceUpdatePolicy
+    ).toEqual(maintenanceUpdatePolicy);
   });
 
   test.each([
@@ -271,6 +364,101 @@ describe('createCluster', () => {
     const operation = await service.createCluster(PROJECT, LOCATION, CLUSTER_ID, VALID_BODY, {});
 
     expect(JSON.stringify(operation)).not.toContain('hunter2');
+  });
+});
+
+describe('restoreCluster', () => {
+  const NETWORK = { networkConfig: { network: 'projects/p/global/networks/default' } };
+
+  test('restoreCluster_fromACamelCaseBackupSource_mintsAnEmptyCluster', async () => {
+    const operation = await service.restoreCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      {
+        backupSource: { backupName: 'projects/p/locations/us-central1/backups/missing' },
+        cluster: NETWORK,
+      },
+      {}
+    );
+
+    expect(operation.done).toBe(true);
+    expect(operation.metadata.verb).toBe('restore');
+
+    const cluster = await service.getCluster(PROJECT, LOCATION, CLUSTER_ID);
+
+    expect(cluster.name).toBe(CLUSTER_NAME);
+    expect(cluster.backupSource).toEqual({
+      backupName: 'projects/p/locations/us-central1/backups/missing',
+    });
+  });
+
+  test('restoreCluster_fromASnakeCaseBackupSource_mintsAnEmptyCluster', async () => {
+    await service.restoreCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      {
+        backup_source: { backup_name: 'projects/p/locations/us-central1/backups/b1' },
+        cluster: NETWORK,
+      },
+      {}
+    );
+
+    expect((await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).backupSource).toEqual({
+      backupName: 'projects/p/locations/us-central1/backups/b1',
+    });
+  });
+
+  test('restoreCluster_fromAContinuousBackupSource_acceptsAnyPointInTime', async () => {
+    await service.restoreCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      {
+        continuous_backup_source: {
+          cluster: CLUSTER_NAME,
+          point_in_time: '2024-01-15T12:00:00Z',
+        },
+        cluster: NETWORK,
+      },
+      {}
+    );
+
+    expect(
+      (await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).continuousBackupSource
+    ).toEqual({
+      cluster: CLUSTER_NAME,
+      point_in_time: '2024-01-15T12:00:00Z',
+      pointInTime: '2024-01-15T12:00:00Z',
+    });
+  });
+
+  test('restoreCluster_fromABackupDrWrapper_mintsAnEmptyCluster', async () => {
+    await service.restoreCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      {
+        restore_backupdr_backup_source: {
+          backup: 'projects/p/locations/us-central1/backupVaults/v/dataSources/d/backups/b',
+        },
+        cluster: NETWORK,
+      },
+      {}
+    );
+
+    expect((await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).backupdrBackupSource).toEqual({
+      backup: 'projects/p/locations/us-central1/backupVaults/v/dataSources/d/backups/b',
+    });
+  });
+
+  test('restoreCluster_withoutASource_stillMintsAnEmptyCluster', async () => {
+    const operation = await service.restoreCluster(PROJECT, LOCATION, CLUSTER_ID, NETWORK, {});
+
+    expect(operation.done).toBe(true);
+    expect(operation.metadata.verb).toBe('restore');
+    expect((await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).name).toBe(CLUSTER_NAME);
   });
 });
 
