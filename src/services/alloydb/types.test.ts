@@ -461,6 +461,26 @@ describe('buildDataPlaneInstanceKey', () => {
 });
 
 describe('instance conversion', () => {
+  test('instanceRequestToRecord_defaultsOmittedConnectionPoolConfigToDisabled', () => {
+    const response = instanceRecordToResponse(instanceRequestToRecord(INSTANCE_NAME, {}));
+
+    expect(response.connectionPoolConfig).toEqual({ enabled: false });
+  });
+
+  test('instanceRecordToResponse_synthesizesOutputOnlyTrackWaitEventTypesWhenOmitted', () => {
+    const response = instanceRecordToResponse(
+      instanceRequestToRecord(INSTANCE_NAME, {
+        observabilityConfig: { enabled: true, trackWaitEvents: true },
+      })
+    );
+
+    expect(response.observabilityConfig).toEqual({
+      enabled: true,
+      trackWaitEvents: true,
+      trackWaitEventTypes: true,
+    });
+  });
+
   test('instanceRequestToRecord_defaultsToPrimaryAndReadyState', () => {
     const record = instanceRequestToRecord(INSTANCE_NAME, { instanceType: 'PRIMARY' });
 

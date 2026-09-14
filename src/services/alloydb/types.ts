@@ -827,6 +827,30 @@ export function clusterRecordToResponse(
   };
 }
 
+/**
+ * Terraform 7.45 omits proto3-default `connectionPoolConfig.enabled = false`
+ * and never writes output-only `trackWaitEventTypes`. Real GET still reports
+ * MCP as disabled and wait-event-type tracking as on, which the provider
+ * compares against config.
+ */
+function applyInstanceResponseDefaults(spec: Record<string, unknown>): Record<string, unknown> {
+  if (spec.connectionPoolConfig == null) {
+    spec.connectionPoolConfig = { enabled: false };
+  }
+
+  const observability = spec.observabilityConfig;
+
+  if (observability !== null && typeof observability === 'object') {
+    const config = observability as Record<string, unknown>;
+
+    if (config.trackWaitEventTypes == null) {
+      config.trackWaitEventTypes = true;
+    }
+  }
+
+  return spec;
+}
+
 export function instanceRequestToRecord(
   name: string,
   body: Record<string, unknown>
@@ -844,7 +868,9 @@ export function instanceRequestToRecord(
     updateTime: now,
     deleteTime: null,
     spec: JSON.stringify(
-      pickSpecFields(body, MUTABLE_INSTANCE_FIELDS, COLUMNED_INSTANCE_FIELDS, INSTANCE_ENUM_FIELDS)
+      applyInstanceResponseDefaults(
+        pickSpecFields(body, MUTABLE_INSTANCE_FIELDS, COLUMNED_INSTANCE_FIELDS, INSTANCE_ENUM_FIELDS)
+      )
     ),
   };
 }
@@ -853,7 +879,7 @@ export function instanceRecordToResponse(
   record: Omit<InstanceRecord, keyof BaseRecord>
 ): InstanceResponse {
   return {
-    ...parseSpecJson(record.spec),
+    ...applyInstanceResponseDefaults(parseSpecJson(record.spec)),
     name: record.name,
     uid: record.uid,
     state: record.state,
