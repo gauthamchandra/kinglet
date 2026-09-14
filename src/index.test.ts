@@ -76,10 +76,13 @@ describe('src/index.ts shutdown', () => {
       stderr: 'ignore',
     });
 
-    const health = await waitForHealth<{ status?: string }>(port);
+    try {
+      const health = await waitForHealth<{ status?: string }>(port);
 
-    expect(health?.status).toBe('ok');
-    child.kill('SIGTERM');
+      expect(health?.status).toBe('ok');
+    } finally {
+      child.kill('SIGTERM');
+    }
 
     const exitCode = await child.exited;
 
