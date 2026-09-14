@@ -25,15 +25,9 @@ export class EnvConfigSource implements ConfigSource {
   name = 'environment';
 
   async load(): Promise<DeepPartial<Config> | null> {
-    try {
-      const envConfig = validateEnv(process.env);
+    const envConfig = validateEnv(process.env);
 
-      return mapEnvToConfig(envConfig);
-    } catch (error) {
-      console.warn(`Failed to load environment configuration: ${error}`);
-
-      return null;
-    }
+    return mapEnvToConfig(envConfig);
   }
 }
 

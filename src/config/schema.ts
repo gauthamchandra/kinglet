@@ -13,9 +13,8 @@ const ServerConfigSchema = z.object({
 
 // Storage configuration schema
 const StorageConfigSchema = z.object({
-  type: z.enum(['memory', 'sqlite', 'hybrid']).default('hybrid'),
+  type: z.enum(['memory', 'sqlite']).default('sqlite'),
   sqlitePath: z.string().optional().default('./data/emulator.db'),
-  cacheSize: z.number().int().min(0).default(104857600), // 100MB
 });
 
 // Authentication configuration schema
@@ -170,9 +169,15 @@ export const EnvConfigSchema = z.object({
   MAX_CONNECTIONS: z.string().transform(Number).pipe(z.number().int().min(1)).optional(),
 
   // Storage configuration
-  STORAGE_TYPE: z.enum(['memory', 'sqlite', 'hybrid']).optional(),
+  STORAGE_TYPE: z
+    .enum(['memory', 'sqlite'], {
+      error: issue =>
+        issue.input === 'hybrid'
+          ? 'STORAGE_TYPE=hybrid was removed (ADR-016); use "sqlite" (durable) or "memory"'
+          : undefined,
+    })
+    .optional(),
   SQLITE_PATH: z.string().optional(),
-  CACHE_SIZE: z.string().transform(Number).pipe(z.number().int().min(0)).optional(),
 
   // Authentication configuration
   AUTH_ENABLED: z
@@ -321,15 +326,10 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.MAX_CONNECTIONS !== undefined) config.server.maxConnections = env.MAX_CONNECTIONS;
   }
 
-  if (
-    env.STORAGE_TYPE !== undefined ||
-    env.SQLITE_PATH !== undefined ||
-    env.CACHE_SIZE !== undefined
-  ) {
+  if (env.STORAGE_TYPE !== undefined || env.SQLITE_PATH !== undefined) {
     config.storage = {};
     if (env.STORAGE_TYPE !== undefined) config.storage.type = env.STORAGE_TYPE;
     if (env.SQLITE_PATH !== undefined) config.storage.sqlitePath = env.SQLITE_PATH;
-    if (env.CACHE_SIZE !== undefined) config.storage.cacheSize = env.CACHE_SIZE;
   }
 
   if (

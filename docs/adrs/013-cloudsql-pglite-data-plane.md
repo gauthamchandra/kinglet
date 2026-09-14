@@ -50,7 +50,7 @@ exactly as ADR-003 describes.
 - **Persistence follows kinglet's own storage mode.** `STORAGE_TYPE=memory`
   gives `memory://` PGlite instances; otherwise each database gets a directory
   beside kinglet's SQLite file, so deleting that directory really is a reset.
-  Under the default `hybrid` storage an instance and its data survive a
+  Under the default `sqlite` storage an instance and its data survive a
   restart: the control-plane rows come back from SQLite and the data plane
   re-opens their PGlite directories. That depends on kinglet's own storage
   actually persisting, which it did not until the storage fix in this same

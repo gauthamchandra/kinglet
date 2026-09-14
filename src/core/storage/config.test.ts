@@ -13,15 +13,6 @@ describe('toStorageConfig', () => {
     });
   });
 
-  test('gives hybrid storage the configured path', () => {
-    // Regression guard: hybrid is the default storage type, so dropping the
-    // path here silently turned every default deployment in-memory.
-    expect(toStorageConfig({ type: 'hybrid', sqlitePath: '/var/lib/kinglet.db' })).toEqual({
-      type: 'hybrid',
-      database: { path: '/var/lib/kinglet.db' },
-    });
-  });
-
   test('passes no path along for memory storage', () => {
     expect(toStorageConfig({ type: 'memory', sqlitePath: './data/emulator.db' })).toEqual({
       type: 'memory',

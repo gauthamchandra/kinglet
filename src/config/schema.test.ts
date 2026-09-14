@@ -34,7 +34,7 @@ describe('Configuration Schema', () => {
       expect(config.server.httpPort).toBe(8765);
       expect(config.server.grpcPort).toBe(8766);
       expect(config.server.maxConnections).toBe(100);
-      expect(config.storage.type).toBe('hybrid');
+      expect(config.storage.type).toBe('sqlite');
       expect(config.auth.enabled).toBe(false);
       expect(config.auth.mode).toBe('bypass');
       expect(config.logging.level).toBe('info');
@@ -49,7 +49,6 @@ describe('Configuration Schema', () => {
         },
         storage: {
           type: 'memory',
-          cacheSize: 50000000,
         },
         auth: {
           enabled: true,

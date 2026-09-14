@@ -9,7 +9,7 @@ is not edited, because the reasoning that was true at the time is the whole poin
 |---|---|---|
 | [001](001-bun-runtime-choice.md) | Choice of Bun Runtime | Accepted |
 | [002](002-dual-testing-framework-approach.md) | Pure Bun Testing Framework Approach | Superseded |
-| [003](003-hybrid-storage-architecture.md) | Hybrid Storage Architecture | Accepted |
+| [003](003-hybrid-storage-architecture.md) | Hybrid Storage Architecture | Superseded |
 | [004](004-modular-service-gateway.md) | Modular Service Gateway Pattern | Accepted |
 | [005](005-pubsub-message-fanout-delivery.md) | Pub/Sub Message Fan-Out and Delivery | Accepted |
 | [006](006-open-source-licensing-and-governance.md) | Open-Source Licensing and Governance | Accepted |
@@ -22,6 +22,7 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [013](013-cloudsql-pglite-data-plane.md) | Cloud SQL Data Plane on PGlite | Accepted |
 | [014](014-cloud-armor-asn-region-headers.md) | Cloud Armor ASN, Region, TLS Fingerprint, and SNI Request Headers (addendum to 012) | Proposed |
 | [015](015-cloud-armor-evaluate-address-group.md) | Cloud Armor `evaluateAddressGroup` (addendum to 012) | Proposed |
+| [016](016-memory-and-sqlite-storage.md) | Memory and SQLite Storage Modes | Accepted |
 
 ## A note on the project's former name
 

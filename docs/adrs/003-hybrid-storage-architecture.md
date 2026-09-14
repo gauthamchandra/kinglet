@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-016](016-memory-and-sqlite-storage.md)
 
 ## Context
 

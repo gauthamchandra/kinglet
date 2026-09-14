@@ -5,9 +5,8 @@
     "maxConnections": 100
   },
   "storage": {
-    "type": "hybrid",
-    "sqlitePath": "./data/emulator.db",
-    "cacheSize": 104857600
+    "type": "sqlite",
+    "sqlitePath": "./data/emulator.db"
   },
   "auth": {
     "enabled": false,
