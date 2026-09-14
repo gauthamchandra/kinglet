@@ -185,7 +185,7 @@ describe('Configuration Loader', () => {
 
       expect(config.server.httpPort).toBe(8765); // Default value
       expect(config.server.grpcPort).toBe(8766); // Default value
-      expect(config.storage.type).toBe('hybrid'); // Default value
+      expect(config.storage.type).toBe('sqlite'); // Default value
     });
   });
 

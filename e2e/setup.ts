@@ -32,7 +32,6 @@ beforeAll(async () => {
     },
     storage: {
       type: 'memory', // Use memory storage for fast E2E tests
-      cacheSize: 10 * 1024 * 1024, // 10MB cache
     },
     auth: {
       enabled: false, // Disable auth for E2E tests
