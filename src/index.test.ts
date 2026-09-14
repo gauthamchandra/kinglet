@@ -33,30 +33,56 @@ function freePort(): number {
   return port;
 }
 
+// Proves the child bound its port and finished starting; a bind failure
+// (another process grabbed the port) would fail here instead of being
+// mistaken for the exit code under test.
+async function waitForHealth<T>(port: number, timeoutMs = 10_000): Promise<T | undefined> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/health`);
+
+      if (response.ok) {
+        return (await response.json()) as T;
+      }
+    } catch {
+      // still starting
+    }
+
+    await Bun.sleep(100);
+  }
+
+  return undefined;
+}
+
 describe('src/index.ts shutdown', () => {
   test('uncaughtException_afterStartup_exitsNonZeroInsteadOfLookingLikeACleanStop', async () => {
     const child = Bun.spawn(['bun', '--preload', THROW_AFTER_STARTUP_FIXTURE, INDEX_ENTRYPOINT], {
       cwd: REPO_ROOT,
       env: { ...process.env, PORT: String(freePort()), SERVICES: 'secrets', LOG_LEVEL: 'error' },
       stdout: 'ignore',
-      stderr: 'ignore',
+      stderr: 'pipe',
     });
 
-    const exitCode = await child.exited;
+    const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
 
     expect(exitCode).toBe(1);
+    expect(stderr).toContain('test-injected fatal crash');
   }, 10000);
 
   test('sigterm_exitsZeroAsACleanStop', async () => {
+    const port = freePort();
     const child = Bun.spawn(['bun', INDEX_ENTRYPOINT], {
       cwd: REPO_ROOT,
-      env: { ...process.env, PORT: String(freePort()), SERVICES: 'secrets', LOG_LEVEL: 'error' },
+      env: { ...process.env, PORT: String(port), SERVICES: 'secrets', LOG_LEVEL: 'error' },
       stdout: 'ignore',
       stderr: 'ignore',
     });
 
-    // Give the emulator a moment to finish starting before asking it to stop.
-    await Bun.sleep(300);
+    const health = await waitForHealth<{ status?: string }>(port);
+
+    expect(health?.status).toBe('ok');
     child.kill('SIGTERM');
 
     const exitCode = await child.exited;
@@ -65,13 +91,8 @@ describe('src/index.ts shutdown', () => {
   }, 10000);
 
   test('health reports the Cloud Armor evaluation server when compute is enabled', async () => {
-    const http = Bun.serve({ port: 0, fetch: () => new Response('ok') });
-    const evaluation = Bun.serve({ port: 0, fetch: () => new Response('ok') });
-    const httpPort = http.port;
-    const evaluationPort = evaluation.port;
-
-    http.stop(true);
-    evaluation.stop(true);
+    const httpPort = freePort();
+    const evaluationPort = freePort();
 
     const child = Bun.spawn(['bun', INDEX_ENTRYPOINT], {
       cwd: REPO_ROOT,
@@ -89,7 +110,6 @@ describe('src/index.ts shutdown', () => {
     });
 
     try {
-      const deadline = Date.now() + 10_000;
       type HealthPayload = {
         status?: string;
         kingletCloudArmorEvaluationServer?: {
@@ -98,22 +118,7 @@ describe('src/index.ts shutdown', () => {
           bind?: string;
         };
       };
-      let body: HealthPayload | undefined;
-
-      while (Date.now() < deadline) {
-        try {
-          const response = await fetch(`http://127.0.0.1:${httpPort}/health`);
-
-          if (response.ok) {
-            body = (await response.json()) as HealthPayload;
-            break;
-          }
-        } catch {
-          // still starting
-        }
-
-        await Bun.sleep(100);
-      }
+      const body = await waitForHealth<HealthPayload>(httpPort);
 
       expect(body).toBeDefined();
       expect(body?.status).toBe('ok');
