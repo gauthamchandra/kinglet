@@ -8,8 +8,14 @@
 | --- | --- | --- |
 | `GET` | `/v1/projects/:project/locations` | `locations.list` |
 | `GET` | `/v1/projects/:project/locations/:location` | `locations.get` |
+| `GET` | `/v1/projects/:project/locations/:location/backups` | `alloydb.backups.list` |
+| `POST` | `/v1/projects/:project/locations/:location/backups` | `alloydb.backups.create` |
+| `DELETE` | `/v1/projects/:project/locations/:location/backups/:backup` | `alloydb.backups.delete` |
+| `GET` | `/v1/projects/:project/locations/:location/backups/:backup` | `alloydb.backups.get` |
+| `PATCH` | `/v1/projects/:project/locations/:location/backups/:backup` | `alloydb.backups.patch` |
 | `GET` | `/v1/projects/:project/locations/:location/clusters` | `alloydb.clusters.list` |
 | `POST` | `/v1/projects/:project/locations/:location/clusters` | `alloydb.clusters.create` |
+| `POST` | `/v1/projects/:project/locations/:location/clusters:restore` | `alloydb.clusters.restore` |
 | `DELETE` | `/v1/projects/:project/locations/:location/clusters/:cluster` | `alloydb.clusters.delete` |
 | `GET` | `/v1/projects/:project/locations/:location/clusters/:cluster` | `alloydb.clusters.get` |
 | `PATCH` | `/v1/projects/:project/locations/:location/clusters/:cluster` | `alloydb.clusters.patch` |

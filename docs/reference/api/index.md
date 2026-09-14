@@ -6,7 +6,7 @@ HTTP routes registered by kinglet, grouped by emulated GCP service.
 
 | Service | Routes |
 | --- | ---: |
-| [AlloyDB](alloydb.md) | 23 |
+| [AlloyDB](alloydb.md) | 29 |
 | [Cloud Tasks](cloud-tasks.md) | 17 |
 | [Cloud Scheduler](cloud-scheduler.md) | 10 |
 | [Memorystore for Valkey](memorystore.md) | 38 |
