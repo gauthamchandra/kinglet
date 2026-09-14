@@ -4,132 +4,193 @@
 
 Proposed (addendum to [ADR-012](012-cloud-armor-emulation.md))
 
-ADR-012 is left unchanged. This record only adds the listener path ADR-012
-deferred for `evaluatePreconfiguredWaf`, `evaluateAdaptiveProtection`, and
-`evaluateAdaptiveProtectionAutoDeploy`.
+Do not edit ADR-012. That record already lets Terraform *write* WAF and
+Adaptive Protection rules, then evaluates those CEL functions to `false`.
+This addendum is the local testing path for:
+
+- `evaluatePreconfiguredWaf`
+- `evaluateAdaptiveProtection`
+- `evaluateAdaptiveProtectionAutoDeploy`
 
 ## Context
 
-ADR-012 accepts those CEL builtins at write time so Terraform WAF / Adaptive
-Protection rules apply, and evaluates them to `false`. A WAF-only policy
-therefore falls through to default allow. There is no `securityPolicies.evaluate`
-RPC, and kinglet cannot run OWASP CRS or Adaptive Protection ML.
+On GCP, Cloud Armor can deny a request because a preconfigured WAF
+signature matched, or because Adaptive Protection flagged the traffic.
+Kinglet already stores those rules. It does not run OWASP CRS, and it
+does not run Adaptive Protection’s model. Until this change, the three
+functions above always returned `false` at evaluate time. A policy whose
+only deny rule is WAF therefore applied cleanly and then allowed every
+request.
 
-The useful local test is the same as ASN / JA3 / SNI in
-[ADR-014](014-cloud-armor-asn-region-headers.md): the tester declares the Armor
-request view. Issue #92 asks for:
+There is still no `securityPolicies.evaluate` RPC. Testers need a way to
+say “treat this request as a WAF / Adaptive Protection hit” the same way
+they already spoof `origin.ip`, ASN, JA3, and SNI with kinglet-only
+headers ([ADR-014](014-cloud-armor-asn-region-headers.md)).
+
+Issue #92’s example:
 
 ```
 X-Kinglet-Waf-Match: protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack
 X-Kinglet-Adaptive-Protection: true
 ```
 
-Real Terraform almost never calls a bare `evaluatePreconfiguredWaf('set')`.
-It adds `opt_out_rule_ids` / `opt_in_rule_ids`. Matching on rule-set name
-alone would 403 an opted-out signature. ADR-012 forbids that fake 403.
+Real Terraform almost never calls `evaluatePreconfiguredWaf('set')` with
+no options. Authors pass `opt_out_rule_ids` or `opt_in_rule_ids`. If
+kinglet matched on the rule-set name alone, an opted-out signature would
+still return 403. That is a fake match, which ADR-012 forbids.
 
 ## Decision
 
-The listener accepts two more request headers, in the same adapter as
-`X-Kinglet-Origin-IP`. Kinglet header names still appear only in
-`listener.ts`. The engine stays GCP-shaped.
+The evaluation listener accepts two more request headers, in the same
+adapter as `X-Kinglet-Origin-IP`. Those header names appear only in
+`listener.ts`. The CEL engine keeps talking in GCP terms (`origin`,
+`request`, and the documented builtins). It does not know the kinglet
+header names.
 
-| Header | Armor effect | Absent / empty | Valid values | Invalid |
+| Header | What it means | Missing or empty | Accepted values | Anything else |
 |---|---|---|---|---|
-| `X-Kinglet-Waf-Match` | Injected `{ ruleSet, signatureId }` list for `evaluatePreconfiguredWaf` | no matches | Comma-separated `ruleSet/signatureId` | 400, no evaluate |
-| `X-Kinglet-Adaptive-Protection` | `evaluateAdaptiveProtection` and `evaluateAdaptiveProtectionAutoDeploy` | `false` | `true` / `false` (case-insensitive) | 400, no evaluate |
+| `X-Kinglet-Waf-Match` | “These WAF signatures hit.” Each item is `ruleSet/signatureId`. | No WAF matches | Comma-separated `ruleSet/signatureId` pairs | HTTP 400; kinglet does not evaluate the policy |
+| `X-Kinglet-Adaptive-Protection` | “Adaptive Protection flagged this request.” | Treated as `false` | `true` or `false`, any case | HTTP 400; kinglet does not evaluate the policy |
 
-These headers are stripped before CEL, so
-`has(request.headers['x-kinglet-waf-match'])` is false. Duplicate WAF headers
-are comma-joined by HTTP; the adapter splits on comma. A rule-set-only value
-(`protocolattack-v33-stable` with no `/signatureId`) is invalid: without an id,
-`opt_out` cannot be truthful. A third path segment (sensitivity) is invalid.
-Empty-after-trim is unset, not garbage.
+Strip both headers before CEL runs. A rule that checks
+`request.headers['x-kinglet-waf-match']` must not see them. HTTP already
+joins duplicate headers with commas; the adapter splits on comma.
 
-`evaluatePreconfiguredWaf(set, opts?)` returns true iff an injected match has
-the same `ruleSet`, the signature survives `opt_out_rule_ids` /
-`opt_in_rule_ids`, and the requested sensitivity is a non-empty base set
-(`>= 1`, default 4) or is `0` with the id in `opt_in_rule_ids`. Injected
-signatures have no paranoia level. They are in every non-empty base set. There
-is no catalog of official signature ids. A list-form second argument is a miss
-(the deprecated LIST shape is not implemented on this function).
+A WAF value is invalid (400, no evaluate) when:
+
+- a piece has no `/` (rule-set name only — without a signature id,
+  `opt_out` cannot be honest)
+- a piece has more than one `/` (a sensitivity / paranoia segment we
+  cannot honor)
+- a piece is empty after trimming
+
+Empty-after-trim on the whole header means “unset,” not garbage.
+
+### How `evaluatePreconfiguredWaf` decides
+
+`evaluatePreconfiguredWaf(set, opts?)` is true only when all of these
+hold:
+
+1. The tester injected a pair whose `ruleSet` equals `set`.
+2. That signature is allowed by the option map, if one was passed.
+3. The option map is a map. A list as the second argument is a miss.
+   Kinglet does not implement the older list-shaped second argument on
+   this function.
+
+Option map rules:
+
+- `opt_out_rule_ids` — those signature ids do **not** match, even if
+  injected.
+- `opt_in_rule_ids` — only those ids match, and only when
+  `sensitivity` is `0`.
+- Passing both `opt_in` and `opt_out` is a miss.
+- `opt_in` with a sensitivity other than `0` is a miss.
+- `sensitivity` defaults to `4`. Allowed values are integers `0`–`4`.
+  Any other value is a miss.
+- Kinglet has no catalog of official signature ids and no paranoia
+  mapping. An injected id has no sensitivity of its own. If the base
+  set is non-empty (`sensitivity >= 1`), the id is treated as in that
+  set. Testers cannot distinguish `sensitivity: 1` from `sensitivity: 4`.
+
+Unknown WAF set names still apply at write time. Options are checked
+only at evaluate time. A map with nonsense values misses that rule and
+evaluation continues to the next one. Extra keys on the map are ignored
+(kinglet still cannot prove what production apply does with them).
+
+### How Adaptive Protection decides
 
 `evaluateAdaptiveProtection(alertId)` and
-`evaluateAdaptiveProtectionAutoDeploy()` both follow the boolean. The CEL
-argument is evaluated and then ignored. The same `true` is a declared Adaptive
-Protection hit, not a real alert or heavy-hitter IP. Alert-id equality is out
-of scope.
+`evaluateAdaptiveProtectionAutoDeploy()` both follow the header boolean.
+Kinglet evaluates the CEL arguments so a broken expression still errors,
+then ignores their values. The same `true` means “this request was
+flagged.” It is not a real alert id and not a heavy-hitter IP. Matching
+a specific alert id is out of scope. Values other than `true` / `false`
+are 400 so `yes` or a UUID cannot silently miss.
 
-WAF calls stay body-phase even though matching is injected. A WAF `redirect`
-that matches still becomes `deny(403)`. A header-phase allow still
-short-circuits a later WAF deny. Adaptive Protection-only expressions stay
-header-phase. GET with an empty body can still match. Injection does not skip
-other conjuncts.
+### When the rule runs
 
-Write-time validation is unchanged. Unknown WAF set names still apply. Option
-maps are honored at evaluate time only. Nonsense maps miss the rule; evaluation
-continues.
+WAF expressions still run in the **body** phase, even though the match
+comes from a header. That keeps GCP-shaped ordering:
 
-Do not put `wafMatches` / `adaptiveProtectionMatch` in the CEL env. They sit
-on `RequestAttributes` the way `sni` already does. The listener does not echo
-matched signatures on the response. Existing `X-Kinglet-*` response headers
-remain the Cloud Logging stand-in.
+- a WAF `redirect` that matches still becomes `deny(403)`
+- an earlier header-phase `allow` still wins over a later WAF deny
+- other conditions in the same expression still have to match
+  (`origin.ip` and WAF both have to hit)
+- GET with an empty body can still match if the WAF header is set
+
+Adaptive Protection-only expressions stay in the **header** phase.
+
+Do not expose `wafMatches` or `adaptiveProtectionMatch` as CEL
+identifiers. They live on `RequestAttributes` the same way `sni` already
+does. The listener does not copy the matched signature onto the
+response. Existing `X-Kinglet-*` response headers stay the Cloud Logging
+stand-in.
 
 ## Rationale
 
-- Testers need to exercise the same Terraform they apply on GCP. A CRS engine
-  would invent detections kinglet cannot certify.
-- `opt_out` / `opt_in` must be real or local 403s lie.
-- A sensitivity segment on the header would pretend paranoia filtering works
-  without Google's mapping.
-- Boolean Adaptive Protection is the first rung that unblocks AutoDeploy
-  policies. Distinguishing alert ids needs two AP rules we do not have.
-- Fail-closed 400 matches Origin-IP / JA3: a typo must not fall through to
-  default allow.
+Testers should exercise the same Terraform they apply on GCP. Shipping a
+CRS engine would invent detections we cannot certify against Google’s
+sets.
+
+`opt_out` / `opt_in` have to work. Otherwise a local 403 is a lie.
+
+A sensitivity segment on the header would pretend kinglet knows which
+signatures belong to paranoia levels 1–4. It does not.
+
+One Adaptive Protection boolean is enough to test AutoDeploy policies.
+Two headers would be more faithful to the two CEL functions, but the
+issue only needs “this request was flagged.”
+
+A bad header returns 400, same as a bad `X-Kinglet-Origin-IP`. A typo
+must not fall through to default allow.
 
 ## Alternatives Considered
 
 ### Run OWASP CRS / ModSecurity against the request
 
-Closest to GCLB. Rejected: Google's preconfigured sets are not a drop-in CRS
-release, and a local 403 from a guessed regex is the fake match ADR-012 forbade.
+Closest to GCLB. Rejected: Google’s preconfigured sets are not a drop-in
+CRS release. A local 403 from a guessed regex is the fake match ADR-012
+forbade.
 
 ### Ship a signature catalog (id → sensitivity)
 
-Would make `sensitivity: 1` vs `4` real. Rejected for this change: the tables
-go stale, and the issue's test suites declare a specific id.
+Would make `sensitivity: 1` vs `4` real. Rejected for this change: the
+tables go stale, and the issue’s tests declare a specific id.
 
-### Write-time reject of unknown sets / bad option maps
+### Reject unknown sets / bad option maps at write time
 
-Follows the docs page. Rejected until we have production-apply evidence
-(ADR-012 write path is **[Field]**). Evaluate-time filtering is enough for
-tests not to 403 an opted-out signature.
+Follows the public docs page. Rejected until we have production-apply
+evidence (ADR-012 write path is **[Field]**). Filtering at evaluate time
+is enough so tests do not 403 an opted-out signature.
 
 ### Exact Adaptive Protection alert ids
 
-Rejected until a fixture has two alerts to distinguish. Non-boolean header
-values 400 so `yes` / a UUID cannot silently miss.
+Rejected until a fixture has two alerts to tell apart. Non-boolean
+header values still 400.
 
-### Separate AutoDeploy header
+### A separate AutoDeploy header
 
-More faithful to the two CEL functions. Rejected: the issue's use case is
-"this request was flagged by Adaptive Protection." Document the collapse.
+More faithful to the two CEL functions. Rejected: the issue’s use case
+is “this request was flagged by Adaptive Protection.” Document the
+collapse.
 
 ### Echo the matched signature on the response
 
-Rejected: testers already sent the value. ADR-012 left match-field response
-headers out of scope.
+Rejected: testers already sent the value. ADR-012 left match-field
+response headers out of scope.
 
 ## Consequences
 
-- `terraform apply` plus curl can exercise preconfigured WAF and Adaptive
-  Protection rules. Send the headers. Kinglet does not inspect the payload
-  and does not run Adaptive Protection ML.
-- A payload that would match on GCP misses here without the header. A header
-  match can still miss on GCP. Sensitivity 1 vs 4 cannot be distinguished.
-- `evaluatePreconfiguredExpr`, organization address groups, threat intel,
-  managed rules, and `preconfiguredWafConfig` field exclusions stay
-  unimplemented. Project-scoped `evaluateAddressGroup` is [ADR-015](015-cloud-armor-evaluate-address-group.md).
+- `terraform apply` plus curl can exercise preconfigured WAF and
+  Adaptive Protection rules. Send the headers. Kinglet does not inspect
+  the payload and does not run Adaptive Protection ML.
+- A payload that would match on GCP misses here without the header. A
+  header match can still miss on GCP. Sensitivity 1 vs 4 cannot be
+  distinguished.
+- `evaluatePreconfiguredExpr`, organization address groups, threat
+  intel, managed rules, and `preconfiguredWafConfig` field exclusions
+  stay unimplemented. Project-scoped `evaluateAddressGroup` is
+  [ADR-015](015-cloud-armor-evaluate-address-group.md).
 - `listPreconfiguredExpressionSets` stays unimplemented.
 
 ## References
