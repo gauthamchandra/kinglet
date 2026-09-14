@@ -63,7 +63,8 @@ you opt into sqlite; sqlite was what hybrid already provided.
 
 ### Negative
 
-- `STORAGE_TYPE=hybrid` becomes invalid; callers must migrate to `sqlite`
+- `STORAGE_TYPE=hybrid` becomes invalid; callers must migrate to `sqlite`. Shipped as a
+  major version bump (v3.0.0) rather than a silent alias
 - App-level LRU helpers in the storage layer remain as unused internals until
   a follow-up cleanup
 
