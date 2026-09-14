@@ -169,7 +169,14 @@ export const EnvConfigSchema = z.object({
   MAX_CONNECTIONS: z.string().transform(Number).pipe(z.number().int().min(1)).optional(),
 
   // Storage configuration
-  STORAGE_TYPE: z.enum(['memory', 'sqlite']).optional(),
+  STORAGE_TYPE: z
+    .enum(['memory', 'sqlite'], {
+      error: issue =>
+        issue.input === 'hybrid'
+          ? 'STORAGE_TYPE=hybrid was removed (ADR-016); use "sqlite" (durable) or "memory"'
+          : undefined,
+    })
+    .optional(),
   SQLITE_PATH: z.string().optional(),
 
   // Authentication configuration

@@ -19,11 +19,25 @@ const THROW_AFTER_STARTUP_FIXTURE = join(
   'throw-after-startup.ts'
 );
 
+// PORT=0 is rejected by the config schema (min 1), so grab a real free port.
+function freePort(): number {
+  const server = Bun.serve({ port: 0, fetch: () => new Response('ok') });
+  const port = server.port;
+
+  server.stop(true);
+
+  if (port == null) {
+    throw new Error('Bun.serve did not report a port');
+  }
+
+  return port;
+}
+
 describe('src/index.ts shutdown', () => {
   test('uncaughtException_afterStartup_exitsNonZeroInsteadOfLookingLikeACleanStop', async () => {
     const child = Bun.spawn(['bun', '--preload', THROW_AFTER_STARTUP_FIXTURE, INDEX_ENTRYPOINT], {
       cwd: REPO_ROOT,
-      env: { ...process.env, PORT: '0', SERVICES: 'secrets', LOG_LEVEL: 'error' },
+      env: { ...process.env, PORT: String(freePort()), SERVICES: 'secrets', LOG_LEVEL: 'error' },
       stdout: 'ignore',
       stderr: 'ignore',
     });
@@ -36,7 +50,7 @@ describe('src/index.ts shutdown', () => {
   test('sigterm_exitsZeroAsACleanStop', async () => {
     const child = Bun.spawn(['bun', INDEX_ENTRYPOINT], {
       cwd: REPO_ROOT,
-      env: { ...process.env, PORT: '0', SERVICES: 'secrets', LOG_LEVEL: 'error' },
+      env: { ...process.env, PORT: String(freePort()), SERVICES: 'secrets', LOG_LEVEL: 'error' },
       stdout: 'ignore',
       stderr: 'ignore',
     });

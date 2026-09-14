@@ -106,6 +106,34 @@ describe('Configuration Loader', () => {
         process.env = originalEnv;
       }
     });
+
+    test('should reject the removed hybrid storage type with an explanatory error', async () => {
+      const originalEnv = { ...process.env };
+
+      try {
+        process.env.STORAGE_TYPE = 'hybrid';
+
+        const promise = new EnvConfigSource().load();
+
+        await expect(promise).rejects.toThrow(/hybrid.*removed.*ADR-016/);
+      } finally {
+        process.env = originalEnv;
+      }
+    });
+
+    test('should reject invalid environment values instead of dropping the source', async () => {
+      const originalEnv = { ...process.env };
+
+      try {
+        process.env.PORT = 'abc';
+
+        const promise = new EnvConfigSource().load();
+
+        await expect(promise).rejects.toThrow();
+      } finally {
+        process.env = originalEnv;
+      }
+    });
   });
 
   describe('ConfigLoader', () => {

@@ -24,16 +24,12 @@ export interface ConfigSource {
 export class EnvConfigSource implements ConfigSource {
   name = 'environment';
 
+  // Invalid values propagate so startup fails loudly instead of silently
+  // dropping every environment override.
   async load(): Promise<DeepPartial<Config> | null> {
-    try {
-      const envConfig = validateEnv(process.env);
+    const envConfig = validateEnv(process.env);
 
-      return mapEnvToConfig(envConfig);
-    } catch (error) {
-      console.warn(`Failed to load environment configuration: ${error}`);
-
-      return null;
-    }
+    return mapEnvToConfig(envConfig);
   }
 }
 

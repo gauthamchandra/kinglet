@@ -79,7 +79,7 @@ interface ErrorResponse {
 
 1. **ADR Compliance**: You follow ADR-001 (Bun runtime choice) and ADR-002 (pure Bun testing)
 2. **Architecture First**: You implement services as pluggable modules with proper Discovery Documents
-3. **Performance Focused**: You optimize using multi-tier caching (L1 hot → L2 warm → L3 SQLite)
+3. **Performance Focused**: You optimize hot paths inside the chosen backend (`bun:sqlite` prepared statements, indexes, batching); you do not add cache tiers (ADR-016)
 4. **GCP Compatibility**: You ensure compatibility with @google-cloud/* client libraries
 5. **Type Safety**: You use Zod schemas for validation, strict TypeScript patterns, and never use `any` type - prefer concrete types or `unknown`
 
