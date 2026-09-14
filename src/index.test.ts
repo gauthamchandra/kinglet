@@ -19,7 +19,6 @@ const THROW_AFTER_STARTUP_FIXTURE = join(
   'throw-after-startup.ts'
 );
 
-// PORT=0 is rejected by the config schema (min 1), so grab a real free port.
 function freePort(): number {
   const server = Bun.serve({ port: 0, fetch: () => new Response('ok') });
   const port = server.port;
@@ -33,9 +32,6 @@ function freePort(): number {
   return port;
 }
 
-// Proves the child bound its port and finished starting; a bind failure
-// (another process grabbed the port) would fail here instead of being
-// mistaken for the exit code under test.
 async function waitForHealth<T>(port: number, timeoutMs = 10_000): Promise<T | undefined> {
   const deadline = Date.now() + timeoutMs;
 
