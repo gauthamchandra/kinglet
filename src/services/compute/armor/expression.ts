@@ -1234,11 +1234,21 @@ function lookup(object: unknown, key: unknown): unknown {
   throw new EvalRuntimeError(`cannot index '${typeof object}'`);
 }
 
+const WAF_OPTION_KEYS = new Set(['sensitivity', 'opt_out_rule_ids', 'opt_in_rule_ids']);
+
 function evalPreconfiguredWaf(
   node: Extract<Ast, { kind: 'call' }>,
   env: Record<string, unknown>,
   lookupAddressGroup?: AddressGroupLookup
 ): boolean {
+  if (node.args.length < 1 || node.args.length > 2) {
+    for (const arg of node.args) {
+      evalAst(arg, env, lookupAddressGroup);
+    }
+
+    return false;
+  }
+
   const ruleSet = asString(evalAst(requiredArg(node, 0), env, lookupAddressGroup));
   let sensitivity = 4;
   let optOut: readonly string[] | undefined;
@@ -1252,6 +1262,12 @@ function evalPreconfiguredWaf(
     }
 
     const map = opts as Record<string, unknown>;
+
+    for (const key of Object.keys(map)) {
+      if (!WAF_OPTION_KEYS.has(key)) {
+        return false;
+      }
+    }
 
     if (Object.hasOwn(map, 'sensitivity')) {
       const value = map.sensitivity;
@@ -1461,6 +1477,12 @@ function evalCall(
   if (name === 'evaluateAdaptiveProtection' || name === 'evaluateAdaptiveProtectionAutoDeploy') {
     for (const arg of node.args) {
       evalAst(arg, env, lookupAddressGroup);
+    }
+
+    const expected = name === 'evaluateAdaptiveProtection' ? 1 : 0;
+
+    if (node.args.length !== expected) {
+      return false;
     }
 
     return evalAttributesOf(env).adaptiveProtectionMatch;

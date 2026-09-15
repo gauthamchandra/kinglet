@@ -93,19 +93,22 @@ Option map rules:
   set. Testers cannot distinguish `sensitivity: 1` from `sensitivity: 4`.
 
 Unknown WAF set names still apply at write time. Options are checked
-only at evaluate time. A map with nonsense values misses that rule and
-evaluation continues to the next one. Extra keys on the map are ignored
-(kinglet still cannot prove what production apply does with them).
+only at evaluate time. A map with nonsense values, unknown keys (a typo
+like `opt_ot_rule_ids`), or the wrong number of arguments misses that
+rule and evaluation continues. Write-time validation does not reject
+those shapes.
 
 ### How Adaptive Protection decides
 
 `evaluateAdaptiveProtection(alertId)` and
-`evaluateAdaptiveProtectionAutoDeploy()` both follow the header boolean.
-Kinglet evaluates the CEL arguments so a broken expression still errors,
-then ignores their values. The same `true` means “this request was
-flagged.” It is not a real alert id and not a heavy-hitter IP. Matching
-a specific alert id is out of scope. Values other than `true` / `false`
-are 400 so `yes` or a UUID cannot silently miss.
+`evaluateAdaptiveProtectionAutoDeploy()` both follow the header boolean
+when the call has the documented argument count (one alert id, or none).
+Kinglet still evaluates every supplied argument so a broken expression
+errors, then ignores the values. The wrong number of arguments is a
+miss, not a hit. The same `true` means “this request was flagged.” It
+is not a real alert id and not a heavy-hitter IP. Matching a specific
+alert id is out of scope. Values other than `true` / `false` are 400 so
+`yes` or a UUID cannot silently miss.
 
 ### When the rule runs
 
