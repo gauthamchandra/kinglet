@@ -128,7 +128,7 @@ is the I/O boundary.
   Kinglet evaluates quoted string lists and comma-separated strings.
 - When this record shipped, preconfigured WAF, threat intel, and
   Adaptive Protection were still always-false, as ADR-012 recorded.
-  WAF and Adaptive Protection injection is [ADR-016](016-cloud-armor-waf-adaptive-headers.md).
+  WAF and Adaptive Protection injection is [ADR-017](017-cloud-armor-waf-adaptive-headers.md).
 
 ## References
 

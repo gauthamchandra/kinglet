@@ -4,7 +4,7 @@
     "format": "json"
   },
   "storage": {
-    "type": "hybrid",
+    "type": "sqlite",
     "sqlitePath": "/app/data/emulator.db"
   },
   "server": {

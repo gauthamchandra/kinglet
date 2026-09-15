@@ -14,9 +14,8 @@ All configuration is via environment variables. Defaults are shown below.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `STORAGE_TYPE` | `hybrid` | `memory`, `sqlite`, or `hybrid` |
+| `STORAGE_TYPE` | `sqlite` | `memory` or `sqlite` |
 | `SQLITE_PATH` | `./data/emulator.db` | Path to SQLite database file |
-| `CACHE_SIZE` | `104857600` | LRU cache size in bytes (100 MB) |
 
 See [Storage modes](storage.md) for details on each storage type.
 

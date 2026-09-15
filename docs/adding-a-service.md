@@ -14,7 +14,7 @@ build itself and hand back a list of routes. The gateway does the rest.
 
 ```
 Bun.serve()  →  RequestRouter  →  route.handler  →  Handlers → Service → Repository → StorageManager
-                                                    (HTTP)     (rules)   (queries)    (sqlite/memory/hybrid)
+                                                    (HTTP)     (rules)   (queries)    (sqlite/memory)
 ```
 
 The contract every service satisfies:
@@ -148,8 +148,8 @@ export class CryptoKeyRepository {
 
 `StorageManager` gives you `create`, `createMany`, `findById`, `find`, `findFirst`,
 `updateById`, `updateMany`, `deleteById`, `deleteMany`, `exists`, `count`, and
-`withTransaction`. See [ADR-003](adrs/003-hybrid-storage-architecture.md) for why storage is
-hybrid (SQLite + LRU cache) and what that means for consistency.
+`withTransaction`. See [ADR-016](adrs/016-memory-and-sqlite-storage.md) for the
+`memory` / `sqlite` storage modes and what that means for persistence.
 
 **Note the uniqueness caveat.** The memory provider does not enforce unique indexes. Where GCP
 would reject a duplicate, guard explicitly in the repository — `scheduler/repository.ts`

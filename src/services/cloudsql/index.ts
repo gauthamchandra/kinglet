@@ -31,7 +31,7 @@ export const DEFAULT_CLOUDSQL_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOptio
   enabled: true,
   portRangeStart: 5432,
   portRangeEnd: 5531,
-  storageType: 'hybrid',
+  storageType: 'sqlite',
   sqlitePath: './data/emulator.db',
   postgis: false,
 };

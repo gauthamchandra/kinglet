@@ -353,7 +353,7 @@ The in-repo harness runs the same requests after apply (`terraform/armor-evaluat
 
 | You might think you tested | What actually ran |
 | --- | --- |
-| WAF / `evaluatePreconfiguredWaf` | Writes succeed. The function is **true** only when `X-Kinglet-Waf-Match` injects a `ruleSet/signatureId` that survives `opt_out` / `opt_in`. Kinglet does not inspect the payload ([ADR-016](../adrs/016-cloud-armor-waf-adaptive-headers.md)) |
+| WAF / `evaluatePreconfiguredWaf` | Writes succeed. The function is **true** only when `X-Kinglet-Waf-Match` injects a `ruleSet/signatureId` that survives `opt_out` / `opt_in`. Kinglet does not inspect the payload ([ADR-017](../adrs/017-cloud-armor-waf-adaptive-headers.md)) |
 | Adaptive Protection CEL | `X-Kinglet-Adaptive-Protection: true` trips `evaluateAdaptiveProtection` and `evaluateAdaptiveProtectionAutoDeploy`. Not ML. `adaptiveProtectionConfig` Compute RPCs still 404 |
 | `evaluateOrganizationAddressGroup`, threat intel, reCAPTCHA | Apply may echo fields; the match never happens |
 | Address groups without Network Security enabled | `evaluateAddressGroup` is **false** (empty table). Enable `networksecurity` and create the group in the policy’s project |

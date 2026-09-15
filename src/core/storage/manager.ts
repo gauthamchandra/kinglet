@@ -2,7 +2,7 @@
  * Storage Manager Implementation
  *
  * This module implements the main storage manager that provides a unified interface
- * for storage operations and supports hybrid storage (SQLite + Cache) strategies.
+ * for storage operations across the memory and SQLite providers.
  */
 
 import type {
@@ -52,10 +52,6 @@ export class StorageManager implements IStorageManager, IStorageEventEmitter {
         break;
       case 'memory':
         this.provider = new MemoryStorageProvider();
-        break;
-      case 'hybrid':
-        // For hybrid, use SQLite with caching enabled
-        this.provider = new SQLiteStorageProvider();
         break;
       default:
         throw new ValidationError(`Unsupported storage type: ${config.type}`);

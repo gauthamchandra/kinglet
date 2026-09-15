@@ -54,7 +54,7 @@ starts automatically when the data plane is enabled.
 - On restart, re-spawn a process for every persisted `ACTIVE` instance and
   rewrite its `discoveryEndpoints` with the freshly allocated port, since the
   previous process did not survive the restart even though the instance row
-  did (under `hybrid`/`sqlite` storage).
+  did (under `sqlite` storage).
 
 ## Rationale
 

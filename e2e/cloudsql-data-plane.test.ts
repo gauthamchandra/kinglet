@@ -378,19 +378,19 @@ describe('Cloud SQL data plane persistence', () => {
       // allocating from the same ports, racing each other to bind.
       const rangeStart = PORT_RANGE_END + 1;
 
-      // `hybrid` is kinglet's default storage type. Both the control-plane rows
+      // `sqlite` is kinglet's default storage type. Both the control-plane rows
       // and the data plane's Postgres files have to outlive the process for a
       // restart to be a no-op from the caller's point of view.
       async function bootService(): Promise<{ service: CloudSqlService; server: Server }> {
         const storage = new StorageManager();
 
-        await storage.initialize(toStorageConfig({ type: 'hybrid', sqlitePath }));
+        await storage.initialize(toStorageConfig({ type: 'sqlite', sqlitePath }));
 
         const service = new CloudSqlService(storage, new Logger('e2e', 'error'), {
           enabled: true,
           portRangeStart: rangeStart,
           portRangeEnd: rangeStart + 5,
-          storageType: 'hybrid',
+          storageType: 'sqlite',
           sqlitePath,
         });
 
