@@ -724,18 +724,19 @@ export function resolveInitialUser(body: Record<string, unknown>): {
 }
 
 /**
- * Password the wire server authenticates against.
+ * Data-plane credentials for an AlloyDB user.
  *
- * <p>An empty stored password skips the challenge (Cloud SQL's "no password
- * required"). AlloyDB built-in users never allow that: an omitted `initialUser`
- * still has to fail login rather than bind a passwordless listener. The sentinel
- * cannot match a client-supplied secret.
+ * <p>An empty stored password skips the wire challenge (Cloud SQL's "no
+ * password required"). AlloyDB built-in users never allow that: an omitted
+ * `initialUser` still has to fail login. `loginDisabled` challenges and then
+ * rejects every password, rather than substituting a guessable sentinel.
  */
-export function alloydbDataPlanePassword(stored: string): string {
-  return stored === '' ? DISABLED_ALLOYDB_LOGIN : stored;
+export function alloydbDataPlaneUser(stored: string): {
+  password: string;
+  loginDisabled?: boolean;
+} {
+  return stored === '' ? { password: '', loginDisabled: true } : { password: stored };
 }
-
-const DISABLED_ALLOYDB_LOGIN = 'kinglet-alloydb-login-disabled';
 
 /**
  * Instance key the shared data plane uses for one AlloyDB instance.

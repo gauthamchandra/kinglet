@@ -53,7 +53,7 @@ import { LocationHandlers } from './location-handlers.ts';
 import {
   ALLOYDB_OPERATIONS_TABLE,
   AlloyDbError,
-  alloydbDataPlanePassword,
+  alloydbDataPlaneUser,
   buildDataPlaneInstanceKey,
   buildUserName,
   DEFAULT_DATABASE_NAME,
@@ -141,7 +141,7 @@ export class AlloyDbService {
           buildUserName(project, parsed.location, parsed.clusterId, user)
         );
 
-        return record ? { password: alloydbDataPlanePassword(record.password) } : null;
+        return record ? alloydbDataPlaneUser(record.password) : null;
       }
     );
 

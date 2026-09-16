@@ -7,7 +7,7 @@ import {
   ALLOYDB_INSTANCES_TABLE,
   ALLOYDB_USERS_TABLE,
   AlloyDbError,
-  alloydbDataPlanePassword,
+  alloydbDataPlaneUser,
   BACKUP_TYPE_ENUM,
   BackupState,
   BackupType,
@@ -444,14 +444,13 @@ describe('resolveInitialUser', () => {
   });
 });
 
-describe('alloydbDataPlanePassword', () => {
-  test('alloydbDataPlanePassword_mapsAnEmptyPasswordToANonEmptySentinel', () => {
-    expect(alloydbDataPlanePassword('')).not.toBe('');
-    expect(alloydbDataPlanePassword('').length).toBeGreaterThan(0);
+describe('alloydbDataPlaneUser', () => {
+  test('alloydbDataPlaneUser_disablesLoginWhenTheStoredPasswordIsEmpty', () => {
+    expect(alloydbDataPlaneUser('')).toEqual({ password: '', loginDisabled: true });
   });
 
-  test('alloydbDataPlanePassword_passesARealPasswordThrough', () => {
-    expect(alloydbDataPlanePassword('hunter2')).toBe('hunter2');
+  test('alloydbDataPlaneUser_passesARealPasswordThrough', () => {
+    expect(alloydbDataPlaneUser('hunter2')).toEqual({ password: 'hunter2' });
   });
 });
 
