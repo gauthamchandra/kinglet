@@ -869,7 +869,12 @@ export function instanceRequestToRecord(
     deleteTime: null,
     spec: JSON.stringify(
       applyInstanceResponseDefaults(
-        pickSpecFields(body, MUTABLE_INSTANCE_FIELDS, COLUMNED_INSTANCE_FIELDS, INSTANCE_ENUM_FIELDS)
+        pickSpecFields(
+          body,
+          MUTABLE_INSTANCE_FIELDS,
+          COLUMNED_INSTANCE_FIELDS,
+          INSTANCE_ENUM_FIELDS
+        )
       )
     ),
   };
