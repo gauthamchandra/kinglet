@@ -113,8 +113,8 @@ describe('createBackup', () => {
     expect(backup.reconciling).toBe(false);
   });
 
-  test('createBackup_withoutAParentCluster_stillSucceedsWithAnEmptyClusterUid', async () => {
-    const operation = await service.createBackup(
+  test('createBackup_withoutAParentCluster_reportsNotFound', async () => {
+    const promise = service.createBackup(
       PROJECT,
       LOCATION,
       BACKUP_ID,
@@ -122,7 +122,38 @@ describe('createBackup', () => {
       {}
     );
 
-    expect(backupFromOperation(operation).clusterUid).toBe('');
+    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
+    await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
+  });
+
+  test('createBackup_withoutClusterName_reportsInvalidArgument', async () => {
+    const promise = service.createBackup(PROJECT, LOCATION, BACKUP_ID, {}, {});
+
+    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+  });
+
+  test('createBackup_givenAnUnknownType_reportsInvalidArgument', async () => {
+    const promise = service.createBackup(
+      PROJECT,
+      LOCATION,
+      BACKUP_ID,
+      { clusterName: CLUSTER_NAME, type: 'BOGUS' },
+      {}
+    );
+
+    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+  });
+
+  test('createBackup_givenAnUnrecognizedTypeNumber_reportsInvalidArgument', async () => {
+    const promise = service.createBackup(
+      PROJECT,
+      LOCATION,
+      BACKUP_ID,
+      { clusterName: CLUSTER_NAME, type: 99 },
+      {}
+    );
+
+    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
   });
 
   test('createBackup_givenADuplicate_reportsAlreadyExists', async () => {
@@ -199,6 +230,19 @@ describe('updateBackup and deleteBackup', () => {
 
     expect(backupFromOperation(operation).labels).toEqual({ env: 'dev' });
     expect((await service.getBackup(PROJECT, LOCATION, BACKUP_ID)).labels).toEqual({ env: 'dev' });
+  });
+
+  test('updateBackup_withAllowMissing_createsTheBackup', async () => {
+    const operation = await service.updateBackup(
+      PROJECT,
+      LOCATION,
+      BACKUP_ID,
+      { clusterName: CLUSTER_NAME },
+      { allowMissing: true }
+    );
+
+    expect(backupFromOperation(operation).name).toBe(BACKUP_NAME);
+    expect((await service.getBackup(PROJECT, LOCATION, BACKUP_ID)).clusterName).toBe(CLUSTER_NAME);
   });
 
   test('deleteBackup_removesTheBackup', async () => {

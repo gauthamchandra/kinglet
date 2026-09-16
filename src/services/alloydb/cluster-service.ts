@@ -535,7 +535,7 @@ function splitRestoreRequest(body: Record<string, unknown>): {
   if (backup !== undefined) {
     const backupName = firstString(backup, 'backupName', 'backup_name');
 
-    restoreSources.backupSource = backupName === undefined ? backup : { backupName };
+    restoreSources.backupSource = backupName === undefined ? {} : { backupName };
   }
 
   const continuous = firstRecord(
@@ -550,8 +550,9 @@ function splitRestoreRequest(body: Record<string, unknown>): {
     const pointInTime = firstString(continuous, 'pointInTime', 'point_in_time');
     const sourceCluster = firstString(continuous, 'cluster', 'clusterName', 'cluster_name');
 
+    // Discovery ContinuousBackupSource is camelCase only. Spreading the raw
+    // wrapper would keep Terraform snake_case keys such as `point_in_time`.
     restoreSources.continuousBackupSource = {
-      ...continuous,
       ...(sourceCluster === undefined ? {} : { cluster: sourceCluster }),
       ...(pointInTime === undefined ? {} : { pointInTime }),
     };
@@ -567,7 +568,9 @@ function splitRestoreRequest(body: Record<string, unknown>): {
   );
 
   if (backupdr !== undefined) {
-    restoreSources.backupdrBackupSource = backupdr;
+    const backupName = firstString(backupdr, 'backup');
+
+    restoreSources.backupdrBackupSource = backupName === undefined ? {} : { backup: backupName };
   }
 
   const backupdrPitr = firstRecord(
@@ -579,7 +582,13 @@ function splitRestoreRequest(body: Record<string, unknown>): {
   );
 
   if (backupdrPitr !== undefined) {
-    restoreSources.backupdrPitrSource = backupdrPitr;
+    const dataSource = firstString(backupdrPitr, 'dataSource', 'data_source');
+    const pointInTime = firstString(backupdrPitr, 'pointInTime', 'point_in_time');
+
+    restoreSources.backupdrPitrSource = {
+      ...(dataSource === undefined ? {} : { dataSource }),
+      ...(pointInTime === undefined ? {} : { pointInTime }),
+    };
   }
 
   return {

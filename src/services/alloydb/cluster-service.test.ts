@@ -429,7 +429,6 @@ describe('restoreCluster', () => {
       (await service.getCluster(PROJECT, LOCATION, CLUSTER_ID)).continuousBackupSource
     ).toEqual({
       cluster: CLUSTER_NAME,
-      point_in_time: '2024-01-15T12:00:00Z',
       pointInTime: '2024-01-15T12:00:00Z',
     });
   });

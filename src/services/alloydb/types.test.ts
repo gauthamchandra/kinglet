@@ -7,6 +7,7 @@ import {
   ALLOYDB_INSTANCES_TABLE,
   ALLOYDB_USERS_TABLE,
   AlloyDbError,
+  alloydbDataPlanePassword,
   BACKUP_TYPE_ENUM,
   BackupState,
   BackupType,
@@ -440,6 +441,17 @@ describe('resolveInitialUser', () => {
       username: 'alice',
       password: '',
     });
+  });
+});
+
+describe('alloydbDataPlanePassword', () => {
+  test('alloydbDataPlanePassword_mapsAnEmptyPasswordToANonEmptySentinel', () => {
+    expect(alloydbDataPlanePassword('')).not.toBe('');
+    expect(alloydbDataPlanePassword('').length).toBeGreaterThan(0);
+  });
+
+  test('alloydbDataPlanePassword_passesARealPasswordThrough', () => {
+    expect(alloydbDataPlanePassword('hunter2')).toBe('hunter2');
   });
 });
 

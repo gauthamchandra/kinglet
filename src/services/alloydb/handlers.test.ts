@@ -221,7 +221,46 @@ describe('cluster handlers', () => {
     expect((body(response).metadata as { verb: string }).verb).toBe('restore');
   });
 
-  test('restore_withoutTheClusterIdQueryParameter_returns400', async () => {
+  test('restore_withClusterIdInTheBody_returns200', async () => {
+    const response = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.restore', {
+      method: 'POST',
+      body: {
+        clusterId: 'from-body',
+        backupSource: { backupName: 'projects/p/locations/us-central1/backups/b1' },
+        cluster: { networkConfig: { network: 'projects/p/global/networks/default' } },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(body(response).done).toBe(true);
+
+    const fetched = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.get', {
+      params: { project: PROJECT, location: LOCATION, cluster: 'from-body' },
+    });
+
+    expect(fetched.status).toBe(200);
+  });
+
+  test('restore_withValidateOnlyInTheBody_persistsNothing', async () => {
+    const response = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.restore', {
+      method: 'POST',
+      body: {
+        clusterId: 'dry-run',
+        validateOnly: true,
+        cluster: { networkConfig: { network: 'projects/p/global/networks/default' } },
+      },
+    });
+
+    expect(response.status).toBe(200);
+
+    const fetched = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.get', {
+      params: { project: PROJECT, location: LOCATION, cluster: 'dry-run' },
+    });
+
+    expect(fetched.status).toBe(404);
+  });
+
+  test('restore_withoutClusterIdInQueryOrBody_returns400', async () => {
     const response = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.restore', {
       method: 'POST',
       body: { cluster: { networkConfig: { network: 'projects/p/global/networks/default' } } },
@@ -689,6 +728,17 @@ describe('backup handlers', () => {
 
     expect(response.status).toBe(400);
     expect(errorOf(response).message).toContain('backupId');
+  });
+
+  test('create_withoutAParentCluster_returns404', async () => {
+    const response = await invoke(backupHandlers.getRoutes(), 'alloydb.backups.create', {
+      method: 'POST',
+      query: { backupId: 'b1' },
+      body: { clusterName: 'projects/p/locations/us-central1/clusters/missing' },
+    });
+
+    expect(response.status).toBe(404);
+    expect(errorOf(response).status).toBe('NOT_FOUND');
   });
 
   test('get_returnsTheBackupWithAStringSizeBytes', async () => {

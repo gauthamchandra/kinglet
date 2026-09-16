@@ -13,17 +13,22 @@ import type { BackupRecord, BackupResponse } from './types.ts';
 import {
   AlloyDbError,
   BACKUP_SPEC_ENUM_FIELDS,
+  BACKUP_TYPE_ENUM,
+  BackupType,
   backupRecordToResponse,
   backupRequestToRecord,
   buildBackupName,
   isValidBackupId,
   MUTABLE_BACKUP_FIELDS,
+  normalizeEnum,
   normalizeSpecFieldValue,
   parseSpecJson,
 } from './types.ts';
 import { resolveMaskedFields } from './update-mask.ts';
 
 const RESOURCE_TYPE = 'Backup';
+
+const BACKUP_TYPES: ReadonlySet<string> = new Set(Object.values(BackupType));
 
 export interface ValidatableOptions {
   validateOnly?: boolean | undefined;
@@ -65,12 +70,9 @@ export class BackupService {
     options: ValidatableOptions
   ): Promise<OperationResponse> {
     validateBackupId(backupId);
+    validateBackupType(body.type);
 
-    const clusterName = typeof body.clusterName === 'string' ? body.clusterName : '';
-    const lockKey =
-      clusterName.length > 0 ? clusterName : buildBackupName(project, location, backupId);
-
-    return this.clusterMutex.runExclusively(lockKey, () =>
+    return this.clusterMutex.runExclusively(buildBackupName(project, location, backupId), () =>
       this.createBackupExclusively(project, location, backupId, body, options)
     );
   }
@@ -89,10 +91,23 @@ export class BackupService {
     }
 
     const clusterName = typeof body.clusterName === 'string' ? body.clusterName : '';
-    const cluster = clusterName.length > 0 ? await this.clusters.getByName(clusterName) : null;
-    const clusterUid = cluster?.uid ?? '';
 
-    const record = backupRequestToRecord(name, body, clusterUid);
+    if (clusterName.length === 0) {
+      throw new AlloyDbError('INVALID_ARGUMENT', 'Backup.clusterName is required');
+    }
+
+    const cluster = await this.clusters.getByName(clusterName);
+
+    if (!cluster) {
+      throw new AlloyDbError(
+        'NOT_FOUND',
+        `Cluster ${clusterName} not found`,
+        clusterName,
+        'Cluster'
+      );
+    }
+
+    const record = backupRequestToRecord(name, body, cluster.uid);
 
     if (options.validateOnly === true) {
       return this.operations.buildUnpersistedOperation(
@@ -144,7 +159,21 @@ export class BackupService {
     body: Record<string, unknown>,
     options: UpdateBackupOptions
   ): Promise<OperationResponse> {
+    return this.clusterMutex.runExclusively(buildBackupName(project, location, backupId), () =>
+      this.updateBackupExclusively(project, location, backupId, body, options)
+    );
+  }
+
+  private async updateBackupExclusively(
+    project: string,
+    location: string,
+    backupId: string,
+    body: Record<string, unknown>,
+    options: UpdateBackupOptions
+  ): Promise<OperationResponse> {
     const name = buildBackupName(project, location, backupId);
+    // Read inside the lock, or a concurrent PATCH's field is silently reverted by
+    // this one's whole-spec rewrite of a stale snapshot.
     const existing = await this.backups.getByName(name);
 
     if (!existing) {
@@ -152,7 +181,12 @@ export class BackupService {
         throw new AlloyDbError('NOT_FOUND', `Backup ${name} not found`, name);
       }
 
-      return this.createBackup(project, location, backupId, body, options);
+      // Already under the backup lock; run the create body directly rather than
+      // re-entering createBackup and deadlocking.
+      validateBackupId(backupId);
+      validateBackupType(body.type);
+
+      return this.createBackupExclusively(project, location, backupId, body, options);
     }
 
     const updates = buildBackupUpdates(existing, body, options.updateMask);
@@ -186,6 +220,17 @@ export class BackupService {
   }
 
   async deleteBackup(
+    project: string,
+    location: string,
+    backupId: string,
+    options: ValidatableOptions
+  ): Promise<OperationResponse> {
+    return this.clusterMutex.runExclusively(buildBackupName(project, location, backupId), () =>
+      this.deleteBackupExclusively(project, location, backupId, options)
+    );
+  }
+
+  private async deleteBackupExclusively(
     project: string,
     location: string,
     backupId: string,
@@ -227,6 +272,18 @@ function validateBackupId(backupId: string): void {
   throw new AlloyDbError(
     'INVALID_ARGUMENT',
     `Backup ID "${backupId}" must be 1-63 characters, start with a lowercase letter, contain only lowercase letters, digits and dashes, and end alphanumerically`
+  );
+}
+
+/** Normalized before validating — see {@link normalizeEnum}. */
+function validateBackupType(type: unknown): void {
+  if (type === undefined) return;
+
+  if (BACKUP_TYPES.has(String(normalizeEnum(type, BACKUP_TYPE_ENUM)))) return;
+
+  throw new AlloyDbError(
+    'INVALID_ARGUMENT',
+    `Backup.type "${String(type)}" must be one of ${[...BACKUP_TYPES].join(', ')}`
   );
 }
 

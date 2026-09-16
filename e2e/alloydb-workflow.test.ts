@@ -357,7 +357,8 @@ describe('AlloyDB E2E: Raw HTTP API', () => {
 
   test('19. Restore a cluster from a missing backup - still mints an empty cluster', async () => {
     const restoredId = 'e2e-restored';
-    const response = await postJson(`${clustersPath}:restore?clusterId=${restoredId}`, {
+    const response = await postJson(`${clustersPath}:restore`, {
+      clusterId: restoredId,
       backupSource: {
         backupName: `projects/${project}/locations/${location}/backups/does-not-exist`,
       },

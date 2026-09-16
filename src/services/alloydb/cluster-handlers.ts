@@ -10,7 +10,14 @@ import type {
 import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import { parsePageSize } from '@/shared/utils/pagination.ts';
 import type { ClusterService } from './cluster-service.ts';
-import { parseBooleanFlag, readBody, readQueryString, respondWith } from './handler-support.ts';
+import {
+  parseBooleanFlag,
+  readBody,
+  readBodyBoolean,
+  readBodyString,
+  readQueryString,
+  respondWith,
+} from './handler-support.ts';
 import { AlloyDbError } from './types.ts';
 
 const RESOURCE_TYPE = 'Cluster';
@@ -88,20 +95,29 @@ export class ClusterHandlers {
     });
   }
 
+  /**
+   * Discovery `RestoreClusterRequest` puts `clusterId` and `validateOnly` on the
+   * JSON body (`@google-cloud/alloydb` and Terraform restore do too). Query
+   * values still win when both are sent, matching `clusters.create`.
+   */
   private handleRestore(req: RouteRequest): Promise<RouteResponse> {
     return respondWith(RESOURCE_TYPE, this.responseUtils, () => {
-      const clusterId = readQueryString(req.query.clusterId);
+      const body = readBody(req);
+      const clusterId = readQueryString(req.query.clusterId) ?? readBodyString(body.clusterId);
 
       if (clusterId === undefined) {
-        throw new AlloyDbError('INVALID_ARGUMENT', 'clusterId query parameter is required');
+        throw new AlloyDbError('INVALID_ARGUMENT', 'clusterId is required');
       }
 
       return this.service.restoreCluster(
         req.params.project ?? '',
         req.params.location ?? '',
         clusterId,
-        readBody(req),
-        { validateOnly: parseBooleanFlag(req.query.validateOnly) }
+        body,
+        {
+          validateOnly:
+            parseBooleanFlag(req.query.validateOnly) ?? readBodyBoolean(body.validateOnly),
+        }
       );
     });
   }
