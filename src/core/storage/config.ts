@@ -5,9 +5,9 @@
  * <p>The two vocabularies differ: a user configures `STORAGE_TYPE` and
  * `SQLITE_PATH`, while a provider is handed `{ type, database: { path } }`.
  * Nothing bridged them, so the configured path was silently dropped and every
- * storage type — including `sqlite` and `hybrid` — opened an anonymous
- * in-memory database that vanished on restart. This module is that bridge, in
- * one place, so the mapping is testable rather than buried in the entrypoint.
+ * durable storage type opened an anonymous in-memory database that vanished on
+ * restart. This module is that bridge, in one place, so the mapping is
+ * testable rather than buried in the entrypoint.
  */
 
 import type { StorageConfig, StorageType } from './types.js';

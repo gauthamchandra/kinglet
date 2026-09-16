@@ -76,7 +76,7 @@ export const DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOption
   enabled: true,
   portRangeStart: 5540,
   portRangeEnd: 5639,
-  storageType: 'hybrid',
+  storageType: 'sqlite',
   sqlitePath: './data/emulator.db',
   postgis: false,
 };

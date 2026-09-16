@@ -5,14 +5,16 @@
  * directly (unit tests) and also test policy resolution logic.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import type { EvaluationResult } from './armor/types.ts';
 import {
   buildRequestAttributesFromListenerRequest,
   handleArmorDecision,
   jsonParsingFromPolicy,
+  policyUsesAddressGroup,
   redirectTargetFromPolicy,
   selectPolicy,
+  startArmorListener,
   userIpRequestHeadersFromPolicy,
 } from './listener.ts';
 import { buildSecurityPolicySelfLink, type SecurityPolicyResponse } from './types.ts';
@@ -498,6 +500,147 @@ describe('buildRequestAttributesFromListenerRequest: SNI', () => {
   });
 });
 
+describe('buildRequestAttributesFromListenerRequest: WAF and Adaptive Protection', () => {
+  function input(headers: Record<string, string>) {
+    return {
+      method: 'GET',
+      path: '/path',
+      query: '',
+      headers,
+      tcpPeer: '127.0.0.1',
+      body: '',
+      scheme: 'http',
+      userIpRequestHeaders: [],
+    };
+  }
+
+  const exampleMatch = 'protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack';
+
+  test('parses X-Kinglet-Waf-Match into wafMatches', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': exampleMatch })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.wafMatches).toEqual([
+      {
+        ruleSet: 'protocolattack-v33-stable',
+        signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+      },
+    ]);
+  });
+
+  test('splits comma-joined WAF matches and strips the kinglet header', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({
+        'x-kinglet-waf-match':
+          'protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack, sqli-v33-stable/owasp-crs-v030301-id942100-sqli',
+      })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.wafMatches).toEqual([
+      {
+        ruleSet: 'protocolattack-v33-stable',
+        signatureId: 'owasp-crs-v030301-id921110-protocolattack',
+      },
+      { ruleSet: 'sqli-v33-stable', signatureId: 'owasp-crs-v030301-id942100-sqli' },
+    ]);
+    expect(result.attributes.request.headers['x-kinglet-waf-match']).toBeUndefined();
+  });
+
+  test('empty WAF header is no matches', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': '  ' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.wafMatches).toEqual([]);
+  });
+
+  test('returns error for a rule-set-only WAF header', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': 'protocolattack-v33-stable' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Waf-Match value: protocolattack-v33-stable',
+    });
+  });
+
+  test('returns error for a WAF header with a sensitivity segment', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': `${exampleMatch}/1` })
+    );
+
+    expect(result).toEqual({
+      error: `Invalid X-Kinglet-Waf-Match value: ${exampleMatch}/1`,
+    });
+  });
+
+  test('returns error for an empty WAF piece', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-waf-match': `${exampleMatch},` })
+    );
+
+    expect(result).toEqual({
+      error: `Invalid X-Kinglet-Waf-Match value: ${exampleMatch},`,
+    });
+  });
+
+  test('parses Adaptive Protection true/false and strips the header', () => {
+    const enabled = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-adaptive-protection': 'TRUE' })
+    );
+    const disabled = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-adaptive-protection': 'false' })
+    );
+
+    if ('error' in enabled) {
+      throw new Error(`Expected success, got error: ${enabled.error}`);
+    }
+
+    if ('error' in disabled) {
+      throw new Error(`Expected success, got error: ${disabled.error}`);
+    }
+
+    expect(enabled.attributes.adaptiveProtectionMatch).toBe(true);
+    expect(disabled.attributes.adaptiveProtectionMatch).toBe(false);
+    expect(enabled.attributes.request.headers['x-kinglet-adaptive-protection']).toBeUndefined();
+  });
+
+  test('empty Adaptive Protection header is unset', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-adaptive-protection': '' })
+    );
+
+    if ('error' in result) {
+      throw new Error(`Expected success, got error: ${result.error}`);
+    }
+
+    expect(result.attributes.adaptiveProtectionMatch).toBe(false);
+  });
+
+  test('returns error for a non-boolean Adaptive Protection value', () => {
+    const result = buildRequestAttributesFromListenerRequest(
+      input({ 'x-kinglet-adaptive-protection': 'yes' })
+    );
+
+    expect(result).toEqual({
+      error: 'Invalid X-Kinglet-Adaptive-Protection value: yes',
+    });
+  });
+});
+
 describe('buildRequestAttributesFromListenerRequest: XFF rewriting', () => {
   test('appends peer to existing X-Forwarded-For', () => {
     const result = buildRequestAttributesFromListenerRequest({
@@ -892,5 +1035,101 @@ describe('jsonParsing through the listener adapter', () => {
     expect(disabled.attributes.request.params.city).toBeUndefined();
     expect(enabled.attributes.request.params.city).toBe('NewYork');
     expect(enabled.attributes.request.params.n).toBe('1');
+  });
+});
+
+function makeListenerTestPolicy(
+  name: string,
+  rules: SecurityPolicyResponse['rules'] = []
+): SecurityPolicyResponse {
+  return {
+    kind: 'compute#securityPolicy',
+    id: `proj-${name}`,
+    creationTimestamp: '2026-01-01T00:00:00.000Z',
+    name,
+    selfLink: buildSecurityPolicySelfLink('proj', name),
+    fingerprint: 'abc',
+    rules,
+  };
+}
+
+describe('policyUsesAddressGroup', () => {
+  test('is false for SRC_IPS_V1-only policies', () => {
+    expect(
+      policyUsesAddressGroup(
+        makeListenerTestPolicy('path', [
+          {
+            priority: 2147483647,
+            action: 'allow',
+            match: { versionedExpr: 'SRC_IPS_V1', config: { srcIpRanges: ['*'] } },
+          },
+        ])
+      )
+    ).toBe(false);
+  });
+
+  test('is true when a rule calls evaluateAddressGroup', () => {
+    expect(
+      policyUsesAddressGroup(
+        makeListenerTestPolicy('ag', [
+          {
+            priority: 1000,
+            action: 'deny(403)',
+            match: { expr: { expression: "evaluateAddressGroup('g', origin.ip)" } },
+          },
+        ])
+      )
+    ).toBe(true);
+  });
+});
+
+describe('startArmorListener address-group loading', () => {
+  test('does not load groups when the policy has no evaluateAddressGroup rule', async () => {
+    const loadAddressGroups = mock(async (_project: string) => () => undefined);
+    const server = startArmorListener({
+      port: 0,
+      getPolicies: async () => [makeListenerTestPolicy('only')],
+      loadAddressGroups,
+    });
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.port}/public`);
+
+      expect(res.status).toBe(200);
+      expect(loadAddressGroups).not.toHaveBeenCalled();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test('loads groups when a rule uses evaluateAddressGroup', async () => {
+    const loadAddressGroups = mock(async (_project: string) => {
+      return (name: string) => (name === 'g' ? ['198.51.100.0/24'] : undefined);
+    });
+    const server = startArmorListener({
+      port: 0,
+      getPolicies: async () => [
+        makeListenerTestPolicy('ag', [
+          {
+            priority: 1000,
+            action: 'deny(403)',
+            match: { expr: { expression: "evaluateAddressGroup('g', origin.ip)" } },
+          },
+        ]),
+      ],
+      loadAddressGroups,
+    });
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.port}/public`, {
+        headers: { 'X-Kinglet-Origin-IP': '198.51.100.20' },
+      });
+
+      expect(res.status).toBe(403);
+      expect(loadAddressGroups).toHaveBeenCalledTimes(1);
+      expect(loadAddressGroups.mock.calls[0]?.[0]).toBe('proj');
+    } finally {
+      server.stop();
+    }
   });
 });

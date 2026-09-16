@@ -199,6 +199,8 @@ describe('buildRequestAttributes', () => {
     expect(empty.origin.tlsJa3Fingerprint).toBe('');
     expect(empty.origin.tlsJa4Fingerprint).toBe('');
     expect(empty.sni).toBe('');
+    expect(empty.wafMatches).toEqual([]);
+    expect(empty.adaptiveProtectionMatch).toBe(false);
     expect(supplied.origin.asn).toBe(15169);
     expect(supplied.origin.regionCode).toBe('US');
     expect(supplied.origin.tlsJa3Fingerprint).toBe('deadbeef');
@@ -284,6 +286,8 @@ describe('buildRequestAttributes', () => {
     expect(inspected.request.body).toBe('x'.repeat(32));
     expect(inspected.request.params.q).toBe('keep');
     expect(inspected.request.params.secret).toBeUndefined();
+    expect(inspected.wafMatches).toEqual(attrs.wafMatches);
+    expect(inspected.adaptiveProtectionMatch).toBe(false);
   });
 
   test('withInspectedBody keeps complete JSON keys inside a truncated prefix', () => {

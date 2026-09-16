@@ -229,6 +229,72 @@ export const ARMOR_EVALUATION_CASES: readonly ArmorEvaluationCase[] = [
     expectAction: 'allow',
     expectPriority: '1700',
   },
+  {
+    name: 'WAF opted-out signature does not match',
+    path: '/public',
+    originIp: '203.0.113.10',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Waf-Match': 'protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack',
+    },
+    expectStatus: 200,
+    expectAction: 'allow',
+    expectPriority: '2147483647',
+  },
+  {
+    name: 'WAF other signature in the same set denies',
+    path: '/public',
+    originIp: '203.0.113.10',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Waf-Match': 'protocolattack-v33-stable/owasp-crs-v030301-id921150-protocolattack',
+    },
+    expectStatus: 403,
+    expectAction: 'deny(403)',
+    expectPriority: '1800',
+  },
+  {
+    name: 'Adaptive Protection declared hit denies',
+    path: '/public',
+    originIp: '203.0.113.10',
+    headers: {
+      ...APP_HOST,
+      'X-Kinglet-Adaptive-Protection': 'true',
+    },
+    expectStatus: 403,
+    expectAction: 'deny(403)',
+    expectPriority: '1900',
+  },
+];
+
+export const ARMOR_ADDRESS_GROUP_EVALUATION_CASES: readonly ArmorEvaluationCase[] = [
+  {
+    name: 'address group hit',
+    path: '/public',
+    originIp: '198.51.100.21',
+    headers: APP_HOST,
+    expectStatus: 403,
+    expectAction: 'deny(403)',
+    expectPriority: '500',
+  },
+  {
+    name: 'address group exclusion falls through',
+    path: '/public',
+    originIp: '198.51.100.20',
+    headers: APP_HOST,
+    expectStatus: 403,
+    expectAction: 'deny(403)',
+    expectPriority: '1000',
+  },
+  {
+    name: 'address group miss uses default allow',
+    path: '/public',
+    originIp: '192.0.2.8',
+    headers: APP_HOST,
+    expectStatus: 200,
+    expectAction: 'allow',
+    expectPriority: '2147483647',
+  },
 ];
 
 export async function runArmorEvaluationCases(

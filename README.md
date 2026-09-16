@@ -17,7 +17,7 @@ The project is named after the [golden-crowned kinglet](https://en.wikipedia.org
 ## What kinglet does today
 
 - Emulates GCP REST APIs incrementally, service by service.
-- Runs as a single HTTP server (default port `8765`) backed by in-memory, SQLite, or hybrid storage.
+- Runs as a single HTTP server (default port `8765`) backed by in-memory or SQLite storage.
 - Targets **API fidelity**: if your code works against kinglet, it should work against real GCP.
 
 ## Quick start

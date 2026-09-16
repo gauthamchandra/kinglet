@@ -1,6 +1,6 @@
 resource "google_compute_security_policy" "example" {
   name        = "kinglet-validation-policy"
-  description = "Cloud Armor evaluation fixture: path, IP, header, query, method, preview, redirect, throttle, ASN/region, JA3, SNI, default allow"
+  description = "Cloud Armor evaluation fixture: path, IP, header, query, method, preview, redirect, throttle, ASN/region, JA3, SNI, WAF, Adaptive Protection, default allow"
 
   # 100 — path prefix deny
   rule {
@@ -247,6 +247,32 @@ resource "google_compute_security_policy" "example" {
       rate_limit_threshold {
         count        = 1
         interval_sec = 60
+      }
+    }
+  }
+
+  # 1800 — preconfigured WAF (listener override; kinglet does not inspect payloads)
+  rule {
+    action      = "deny(403)"
+    priority    = 1800
+    description = "Deny protocolattack except an opted-out signature"
+
+    match {
+      expr {
+        expression = "evaluatePreconfiguredWaf('protocolattack-v33-stable', {'opt_out_rule_ids': ['owasp-crs-v030301-id921110-protocolattack']})"
+      }
+    }
+  }
+
+  # 1900 — Adaptive Protection auto-deploy (listener override; not ML)
+  rule {
+    action      = "deny(403)"
+    priority    = 1900
+    description = "Deny a declared Adaptive Protection hit"
+
+    match {
+      expr {
+        expression = "evaluateAdaptiveProtectionAutoDeploy()"
       }
     }
   }

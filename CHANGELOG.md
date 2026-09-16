@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.0.0](https://github.com/gauthamchandra/kinglet/compare/v2.4.0...v3.0.0) (2026-09-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **storage:** STORAGE_TYPE=hybrid and CACHE_SIZE are no longer accepted. Set STORAGE_TYPE=sqlite (the default) instead; existing SQLite files are unaffected.
+
+### Features
+
+* **alloydb:** give AlloyDB a PGlite data plane ([#81](https://github.com/gauthamchandra/kinglet/issues/81)) ([bbb03b5](https://github.com/gauthamchandra/kinglet/commit/bbb03b5f9e3d23a31a3e5b5b8bc3db636ba279c7))
+* **compute:** evaluate Cloud Armor address groups from Network Security ([#93](https://github.com/gauthamchandra/kinglet/issues/93)) ([d075ac1](https://github.com/gauthamchandra/kinglet/commit/d075ac1b55c78cf66a49cc18e7b8337877d22cf7)), closes [#90](https://github.com/gauthamchandra/kinglet/issues/90)
+* **networksecurity:** emulate project-scoped address groups ([#91](https://github.com/gauthamchandra/kinglet/issues/91)) ([1c8e576](https://github.com/gauthamchandra/kinglet/commit/1c8e5764969cc1b3017607387ce193e5f1286825))
+
+
+### Code Refactoring
+
+* **storage:** drop hybrid mode; keep memory and sqlite ([#97](https://github.com/gauthamchandra/kinglet/issues/97)) ([993715d](https://github.com/gauthamchandra/kinglet/commit/993715d3dfe9b11a9afef65d3240abfbdc224fcf))
+
 ## [2.4.0](https://github.com/gauthamchandra/kinglet/compare/v2.3.0...v2.4.0) (2026-09-10)
 
 

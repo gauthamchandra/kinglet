@@ -58,7 +58,8 @@ export const TERRAFORM_VALIDATION_CASES = [
   },
   {
     id: 'armor',
-    description: 'Cloud Armor security policy with 18 rules plus evaluation-server smoke',
+    description:
+      'Cloud Armor security policy with WAF/AP header injection plus evaluation-server smoke',
     services: ['compute'],
     targets: ['google_compute_security_policy.example'],
   },
@@ -81,6 +82,15 @@ export const TERRAFORM_VALIDATION_CASES = [
       'google_alloydb_user.migrations',
       'google_alloydb_user.ai_agent',
       'google_alloydb_backup.on_demand',
+    ],
+  },
+  {
+    id: 'armor-address-group',
+    description: 'Cloud Armor evaluateAddressGroup against a Network Security address group',
+    services: ['compute', 'networksecurity'],
+    targets: [
+      'google_network_security_address_group.cloud_armor',
+      'google_compute_security_policy.address_group',
     ],
   },
 ] as const satisfies readonly TerraformValidationCase[];

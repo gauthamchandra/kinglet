@@ -7,13 +7,16 @@
 
 import type { Server } from 'bun';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { projectFromSecurityPolicySelfLink } from './address-group-lookup.ts';
 import { evaluate } from './armor/evaluate.ts';
+import { type AddressGroupLookup, expressionUsesAddressGroup } from './armor/expression.ts';
 import { buildRequestAttributes, isValidIp } from './armor/request.ts';
 import type {
   EvaluationResult,
   JsonParsing,
   RequestAttributeInput,
   SecurityPolicy,
+  WafSignatureMatch,
 } from './armor/types.ts';
 import type { SecurityPolicyResponse } from './types.ts';
 
@@ -25,6 +28,8 @@ const KINGLET_ORIGIN_REGION_CODE_HEADER = 'x-kinglet-origin-region-code';
 const KINGLET_ORIGIN_JA3_HEADER = 'x-kinglet-origin-ja3';
 const KINGLET_ORIGIN_JA4_HEADER = 'x-kinglet-origin-ja4';
 const KINGLET_ORIGIN_SNI_HEADER = 'x-kinglet-origin-sni';
+const KINGLET_WAF_MATCH_HEADER = 'x-kinglet-waf-match';
+const KINGLET_ADAPTIVE_PROTECTION_HEADER = 'x-kinglet-adaptive-protection';
 const KINGLET_REQUEST_HEADERS = new Set([
   KINGLET_ORIGIN_IP_HEADER,
   KINGLET_ORIGIN_ASN_HEADER,
@@ -32,6 +37,8 @@ const KINGLET_REQUEST_HEADERS = new Set([
   KINGLET_ORIGIN_JA3_HEADER,
   KINGLET_ORIGIN_JA4_HEADER,
   KINGLET_ORIGIN_SNI_HEADER,
+  KINGLET_WAF_MATCH_HEADER,
+  KINGLET_ADAPTIVE_PROTECTION_HEADER,
 ]);
 const MAX_ORIGIN_ASN = 4294967295;
 const JA3_FINGERPRINT_RE = /^[0-9a-fA-F]{32}$/;
@@ -122,6 +129,18 @@ export function buildRequestAttributesFromListenerRequest(
     return { error: sniResult.error };
   }
 
+  const wafResult = parseWafMatch(headers[KINGLET_WAF_MATCH_HEADER]);
+
+  if (!wafResult.ok) {
+    return { error: wafResult.error };
+  }
+
+  const adaptiveResult = parseAdaptiveProtection(headers[KINGLET_ADAPTIVE_PROTECTION_HEADER]);
+
+  if (!adaptiveResult.ok) {
+    return { error: adaptiveResult.error };
+  }
+
   const strippedHeaders: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(headers)) {
@@ -167,6 +186,14 @@ export function buildRequestAttributesFromListenerRequest(
 
   if (sniResult.sni != null) {
     requestInput.sni = sniResult.sni;
+  }
+
+  if (wafResult.matches.length > 0) {
+    requestInput.wafMatches = wafResult.matches;
+  }
+
+  if (adaptiveResult.match) {
+    requestInput.adaptiveProtectionMatch = true;
   }
 
   if (input.jsonParsing != null) {
@@ -270,6 +297,71 @@ function parseOriginSni(
   return { ok: true, sni: hostname.toLowerCase() };
 }
 
+function parseWafMatch(
+  raw: string | undefined
+): { ok: true; matches: WafSignatureMatch[] } | { ok: false; error: string } {
+  if (raw == null) {
+    return { ok: true, matches: [] };
+  }
+
+  const trimmed = raw.trim();
+
+  if (trimmed === '') {
+    return { ok: true, matches: [] };
+  }
+
+  const matches: WafSignatureMatch[] = [];
+
+  for (const piece of trimmed.split(',')) {
+    const token = piece.trim();
+
+    if (token === '') {
+      return { ok: false, error: `Invalid X-Kinglet-Waf-Match value: ${raw}` };
+    }
+
+    const parts = token.split('/');
+
+    if (parts.length !== 2) {
+      return { ok: false, error: `Invalid X-Kinglet-Waf-Match value: ${raw}` };
+    }
+
+    const ruleSet = parts[0]?.trim() ?? '';
+    const signatureId = parts[1]?.trim() ?? '';
+
+    if (ruleSet === '' || signatureId === '') {
+      return { ok: false, error: `Invalid X-Kinglet-Waf-Match value: ${raw}` };
+    }
+
+    matches.push({ ruleSet, signatureId });
+  }
+
+  return { ok: true, matches };
+}
+
+function parseAdaptiveProtection(
+  raw: string | undefined
+): { ok: true; match: boolean } | { ok: false; error: string } {
+  if (raw == null) {
+    return { ok: true, match: false };
+  }
+
+  const trimmed = raw.trim();
+
+  if (trimmed === '') {
+    return { ok: true, match: false };
+  }
+
+  if (/^true$/i.test(trimmed)) {
+    return { ok: true, match: true };
+  }
+
+  if (/^false$/i.test(trimmed)) {
+    return { ok: true, match: false };
+  }
+
+  return { ok: false, error: `Invalid X-Kinglet-Adaptive-Protection value: ${raw}` };
+}
+
 // ── Decision → HTTP response ──
 
 export interface ArmorDecision {
@@ -311,6 +403,30 @@ export function userIpRequestHeadersFromPolicy(policy: SecurityPolicyResponse): 
   }
 
   return headers.filter((header): header is string => typeof header === 'string');
+}
+
+export function policyUsesAddressGroup(policy: SecurityPolicyResponse): boolean {
+  return policy.rules.some(rule => {
+    const expression = expressionFromMatch(rule.match);
+
+    return expression != null && expressionUsesAddressGroup(expression);
+  });
+}
+
+function expressionFromMatch(match: unknown): string | undefined {
+  if (match == null || typeof match !== 'object') {
+    return undefined;
+  }
+
+  const expr = (match as { expr?: unknown }).expr;
+
+  if (expr == null || typeof expr !== 'object') {
+    return undefined;
+  }
+
+  const expression = (expr as { expression?: unknown }).expression;
+
+  return typeof expression === 'string' ? expression : undefined;
 }
 
 export function redirectTargetFromPolicy(
@@ -477,11 +593,12 @@ export interface ArmorListenerOptions {
   hostname?: string | undefined;
   defaultPolicyName?: string | undefined;
   getPolicies: () => Promise<SecurityPolicyResponse[]>;
+  loadAddressGroups?: (project: string) => Promise<AddressGroupLookup>;
   logger?: Logger;
 }
 
 export function startArmorListener(options: ArmorListenerOptions): Server {
-  const { port, defaultPolicyName, getPolicies, logger } = options;
+  const { port, defaultPolicyName, getPolicies, loadAddressGroups, logger } = options;
   const hostname = options.hostname ?? '127.0.0.1';
 
   const server = Bun.serve({
@@ -548,7 +665,16 @@ export function startArmorListener(options: ArmorListenerOptions): Server {
       }
 
       const policy = policyOrError as SecurityPolicy;
-      const result = evaluate(policy, adapterResult.attributes);
+      const project = projectFromSecurityPolicySelfLink(policyOrError.selfLink);
+      const lookupAddressGroup =
+        project != null && loadAddressGroups != null && policyUsesAddressGroup(policyOrError)
+          ? await loadAddressGroups(project)
+          : undefined;
+      const result = evaluate(
+        policy,
+        adapterResult.attributes,
+        lookupAddressGroup == null ? undefined : { lookupAddressGroup }
+      );
       const decision = handleArmorDecision(
         result,
         policyOrError.name,

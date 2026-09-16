@@ -247,15 +247,11 @@ describe('StorageManager', () => {
     });
   });
 
-  describe('Hybrid storage type', () => {
+  describe('SQLite storage type', () => {
     const config: StorageConfig = {
-      type: 'hybrid',
+      type: 'sqlite',
       database: {
         memory: true,
-      },
-      cache: {
-        maxSize: 100,
-        ttlSeconds: 60,
       },
     };
 
@@ -280,27 +276,26 @@ describe('StorageManager', () => {
       await manager.close();
     });
 
-    test('should initialize hybrid storage (SQLite + cache features)', async () => {
+    test('should initialize sqlite storage', async () => {
       const healthCheck = await manager.healthCheck();
 
       expect(healthCheck).toBe(true);
 
       const stats = await manager.getStats();
 
-      expect(stats.provider).toBe('hybrid');
+      expect(stats.provider).toBe('sqlite');
     });
 
-    test('should provide cache-aware operations', async () => {
+    test('should round-trip records through findById', async () => {
       const data = {
-        name: 'Hybrid Test',
-        email: 'hybrid@example.com',
+        name: 'SQLite Test',
+        email: 'sqlite@example.com',
         age: 28,
         active: true,
       };
 
       const created = await manager.create<TestRecord>('test_records', data);
 
-      // Multiple accesses should be efficient with caching
       const found1 = await manager.findById<TestRecord>('test_records', created.id);
       const found2 = await manager.findById<TestRecord>('test_records', created.id);
 
