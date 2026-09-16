@@ -59,6 +59,16 @@ export function parseBooleanFlag(raw: string | string[] | undefined): boolean | 
   return value.toLowerCase() === 'true' || value === '1';
 }
 
+/** Read a JSON body string field, treating empty as absent. */
+export function readBodyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Read a JSON body boolean field; non-booleans are treated as absent. */
+export function readBodyBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
 /**
  * Read a JSON request body as an object.
  *

@@ -51,6 +51,8 @@ export interface PostgresDataPlane {
 /** The user record the data plane needs to authenticate a connection. */
 export interface DataPlaneUser {
   password: string;
+  /** When true, the wire server challenges and then rejects every password. */
+  loginDisabled?: boolean;
 }
 
 export type LookupUser = (
@@ -390,7 +392,14 @@ export class DataPlaneManager implements PostgresDataPlane {
       };
     }
 
-    return { allowed: true, connection: { queue: open.queue, password: record.password } };
+    return {
+      allowed: true,
+      connection: {
+        queue: open.queue,
+        password: record.password,
+        ...(record.loginDisabled === true ? { loginDisabled: true } : {}),
+      },
+    };
   }
 }
 

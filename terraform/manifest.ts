@@ -70,6 +70,21 @@ export const TERRAFORM_VALIDATION_CASES = [
     targets: ['google_network_security_address_group.cloud_armor'],
   },
   {
+    id: 'alloydb',
+    description: 'AlloyDB cluster, primary, read pool, users, and on-demand backup',
+    services: ['alloydb'],
+    targets: [
+      'google_alloydb_cluster.app_db',
+      'google_alloydb_instance.primary',
+      'google_alloydb_instance.read_pool',
+      'google_alloydb_user.app_service',
+      'google_alloydb_user.app_service_ro',
+      'google_alloydb_user.migrations',
+      'google_alloydb_user.ai_agent',
+      'google_alloydb_backup.on_demand',
+    ],
+  },
+  {
     id: 'armor-address-group',
     description: 'Cloud Armor evaluateAddressGroup against a Network Security address group',
     services: ['compute', 'networksecurity'],

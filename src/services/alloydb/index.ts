@@ -9,10 +9,10 @@
  * actually connect to (see docs/adrs/013-cloudsql-pglite-data-plane.md — the
  * shared data plane lives under `@/shared/postgres-data-plane`).
  *
- * <p>Backups and every replication/maintenance custom verb (`promote`,
- * `failover`, `restore`, `switchover`, `upgrade`, `injectFault`, `restart`,
- * `createsecondary`, `export`, `import`, `restoreFromCloudSQL`) are
- * deliberately absent rather than stubbed; see the README for the full list.
+ * <p>Backup and restore are metadata stubs (persist + echo; no bytes, WAL, or
+ * replay). Replication/maintenance custom verbs (`promote`, `failover`,
+ * `switchover`, `upgrade`, `injectFault`, `restart`, `createsecondary`,
+ * `export`, `import`, `restoreFromCloudSQL`) stay deliberately absent.
  */
 
 import type { ComposableOperationsStore } from '@/core/gateway/composable-operations.ts';
@@ -39,6 +39,9 @@ import {
 import type { Logger } from '@/shared/utils/logger.ts';
 import { parsePageSize } from '@/shared/utils/pagination.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import { BackupHandlers } from './backup-handlers.ts';
+import { BackupRepository } from './backup-repository.ts';
+import { BackupService } from './backup-service.ts';
 import { ClusterHandlers } from './cluster-handlers.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import { ClusterService } from './cluster-service.ts';
@@ -50,6 +53,7 @@ import { LocationHandlers } from './location-handlers.ts';
 import {
   ALLOYDB_OPERATIONS_TABLE,
   AlloyDbError,
+  alloydbDataPlaneUser,
   buildDataPlaneInstanceKey,
   buildUserName,
   DEFAULT_DATABASE_NAME,
@@ -89,6 +93,7 @@ export class AlloyDbService {
   private clusterHandlers: ClusterHandlers | null = null;
   private instanceHandlers: InstanceHandlers | null = null;
   private userHandlers: UserHandlers | null = null;
+  private backupHandlers: BackupHandlers | null = null;
   private locationHandlers: LocationHandlers | null = null;
 
   constructor(storage: StorageManager, logger: Logger, dataPlaneOptions?: ServiceDataPlaneOptions) {
@@ -106,6 +111,7 @@ export class AlloyDbService {
     const clusters = new ClusterRepository(this.storage);
     const instances = new InstanceRepository(this.storage);
     const users = new UserRepository(this.storage);
+    const backups = new BackupRepository(this.storage);
     const operations = new OperationsStore(this.storage, {
       tableName: ALLOYDB_OPERATIONS_TABLE,
       apiTypePrefix: ALLOYDB_API_TYPE_PREFIX,
@@ -115,6 +121,7 @@ export class AlloyDbService {
       clusters.initialize(),
       instances.initialize(),
       users.initialize(),
+      backups.initialize(),
       operations.initialize(),
     ]);
 
@@ -134,7 +141,7 @@ export class AlloyDbService {
           buildUserName(project, parsed.location, parsed.clusterId, user)
         );
 
-        return record ? { password: record.password } : null;
+        return record ? alloydbDataPlaneUser(record.password) : null;
       }
     );
 
@@ -171,6 +178,10 @@ export class AlloyDbService {
       new UserService(users, clusters, clusterMutex),
       this.responseUtils
     );
+    this.backupHandlers = new BackupHandlers(
+      new BackupService(backups, clusters, operations, clusterMutex),
+      this.responseUtils
+    );
     this.locationHandlers = new LocationHandlers(this.responseUtils);
 
     if (this.dataPlaneOptions.enabled) {
@@ -192,6 +203,7 @@ export class AlloyDbService {
       !this.clusterHandlers ||
       !this.instanceHandlers ||
       !this.userHandlers ||
+      !this.backupHandlers ||
       !this.locationHandlers
     ) {
       throw new Error('AlloyDbService.getRoutes() called before initialize()');
@@ -201,6 +213,7 @@ export class AlloyDbService {
       ...this.buildOperationsRoutes(),
       ...this.instanceHandlers.getRoutes(),
       ...this.userHandlers.getRoutes(),
+      ...this.backupHandlers.getRoutes(),
       ...this.clusterHandlers.getRoutes(),
       ...this.locationHandlers.getRoutes(),
     ];

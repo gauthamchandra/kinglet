@@ -7,16 +7,16 @@ import { AlloyDbService, DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS } from './index.ts';
 
 /**
  * The full route table, transcribed from the discovery document's `flatPath` for
- * each of the 21 methods this service registers. Asserted verbatim rather than by
+ * each of the 27 methods this service registers. Asserted verbatim rather than by
  * count: a typo'd path is invisible to a count check and fatal to a real client.
  *
  * The generic locations.list/get pair is served once by the shared gateway routes
  * (src/core/gateway/location-routes.ts), not by this service — one owner per path,
  * per docs/adrs/009-shared-route-namespace.md.
  *
- * Deliberately absent (see the README): backups.*, clusters.createsecondary,
- * .promote, .switchover, .restore, .restoreFromCloudSQL, .export, .import,
- * .upgrade, instances.createsecondary, .failover, .injectFault, .restart.
+ * Deliberately absent (see the README): clusters.createsecondary, .promote,
+ * .switchover, .restoreFromCloudSQL, .export, .import, .upgrade,
+ * instances.createsecondary, .failover, .injectFault, .restart.
  */
 const EXPECTED_ROUTES: ReadonlyArray<{ id: string; method: HttpMethod; path: string }> = [
   // operations — registered first so the composed set can win the tie-break
@@ -97,7 +97,38 @@ const EXPECTED_ROUTES: ReadonlyArray<{ id: string; method: HttpMethod; path: str
     method: 'DELETE',
     path: '/v1/projects/:project/locations/:location/clusters/:cluster/users/:user',
   },
+  // backups — metadata stubs so terraform apply can persist google_alloydb_backup
+  {
+    id: 'alloydb.backups.create',
+    method: 'POST',
+    path: '/v1/projects/:project/locations/:location/backups',
+  },
+  {
+    id: 'alloydb.backups.list',
+    method: 'GET',
+    path: '/v1/projects/:project/locations/:location/backups',
+  },
+  {
+    id: 'alloydb.backups.get',
+    method: 'GET',
+    path: '/v1/projects/:project/locations/:location/backups/:backup',
+  },
+  {
+    id: 'alloydb.backups.patch',
+    method: 'PATCH',
+    path: '/v1/projects/:project/locations/:location/backups/:backup',
+  },
+  {
+    id: 'alloydb.backups.delete',
+    method: 'DELETE',
+    path: '/v1/projects/:project/locations/:location/backups/:backup',
+  },
   // clusters
+  {
+    id: 'alloydb.clusters.restore',
+    method: 'POST',
+    path: '/v1/projects/:project/locations/:location/clusters:restore',
+  },
   {
     id: 'alloydb.clusters.create',
     method: 'POST',
@@ -231,6 +262,7 @@ describe('initialize', () => {
     expect(tables).toContain('alloydb_clusters');
     expect(tables).toContain('alloydb_instances');
     expect(tables).toContain('alloydb_users');
+    expect(tables).toContain('alloydb_backups');
     expect(tables).toContain('alloydb_operations');
   });
 
@@ -250,8 +282,8 @@ describe('route table', () => {
     expect(actual).toEqual([...EXPECTED_ROUTES]);
   });
 
-  test('getRoutes_registersTwentyOneOfTheApis40Methods', () => {
-    expect(service.getRoutes()).toHaveLength(21);
+  test('getRoutes_registersTwentySevenOfTheApis40Methods', () => {
+    expect(service.getRoutes()).toHaveLength(27);
   });
 
   test('getRoutes_everyRouteIdIsPrefixedWithAlloydb', () => {
@@ -266,7 +298,7 @@ describe('route table', () => {
     for (const absentVerb of [
       ':promote',
       ':switchover',
-      ':restore',
+      ':restoreFromCloudSQL',
       ':failover',
       ':injectFault',
       ':restart',
@@ -274,7 +306,6 @@ describe('route table', () => {
       ':export',
       ':import',
       ':createsecondary',
-      'backups',
     ]) {
       expect(paths.some(path => path.includes(absentVerb))).toBe(false);
     }

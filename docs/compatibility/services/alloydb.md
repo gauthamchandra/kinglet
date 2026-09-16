@@ -5,7 +5,7 @@
 **Status:** Experimental
 **API version:** v1
 **Data plane:** PGlite (Postgres 18) in-process
-**Endpoint coverage:** 23/40 (57%)
+**Endpoint coverage:** 29/40 (73%)
 
 Cluster, instance, and user CRUD with LRO operations; each instance exposes a PGlite Postgres endpoint (per-instance storage — READ_POOL does not share PRIMARY data; only the postgres database exists).
 
@@ -13,11 +13,17 @@ Cluster, instance, and user CRUD with LRO operations; each instance exposes a PG
 
 - `GET` `v1/{+name}` — `projects.locations.get`
 - `GET` `v1/{+name}/locations` — `projects.locations.list`
+- `POST` `v1/{+parent}/backups` — `projects.locations.backups.create`
+- `DELETE` `v1/{+name}` — `projects.locations.backups.delete`
+- `GET` `v1/{+name}` — `projects.locations.backups.get`
+- `GET` `v1/{+parent}/backups` — `projects.locations.backups.list`
+- `PATCH` `v1/{+name}` — `projects.locations.backups.patch`
 - `POST` `v1/{+parent}/clusters` — `projects.locations.clusters.create`
 - `DELETE` `v1/{+name}` — `projects.locations.clusters.delete`
 - `GET` `v1/{+name}` — `projects.locations.clusters.get`
 - `GET` `v1/{+parent}/clusters` — `projects.locations.clusters.list`
 - `PATCH` `v1/{+name}` — `projects.locations.clusters.patch`
+- `POST` `v1/{+parent}/clusters:restore` — `projects.locations.clusters.restore`
 - `POST` `v1/{+parent}/instances` — `projects.locations.clusters.instances.create`
 - `DELETE` `v1/{+name}` — `projects.locations.clusters.instances.delete`
 - `GET` `v1/{+name}` — `projects.locations.clusters.instances.get`
@@ -37,16 +43,10 @@ Cluster, instance, and user CRUD with LRO operations; each instance exposes a PG
 
 ## Missing endpoints
 
-- `POST` `v1/{+parent}/backups` — `projects.locations.backups.create`
-- `DELETE` `v1/{+name}` — `projects.locations.backups.delete`
-- `GET` `v1/{+name}` — `projects.locations.backups.get`
-- `GET` `v1/{+parent}/backups` — `projects.locations.backups.list`
-- `PATCH` `v1/{+name}` — `projects.locations.backups.patch`
 - `POST` `v1/{+parent}/clusters:createsecondary` — `projects.locations.clusters.createsecondary`
 - `POST` `v1/{+name}:export` — `projects.locations.clusters.export`
 - `POST` `v1/{+name}:import` — `projects.locations.clusters.import`
 - `POST` `v1/{+name}:promote` — `projects.locations.clusters.promote`
-- `POST` `v1/{+parent}/clusters:restore` — `projects.locations.clusters.restore`
 - `POST` `v1/{+parent}/clusters:restoreFromCloudSQL` — `projects.locations.clusters.restoreFromCloudSQL`
 - `POST` `v1/{+name}:switchover` — `projects.locations.clusters.switchover`
 - `PATCH` `v1/{+name}:upgrade` — `projects.locations.clusters.upgrade`
