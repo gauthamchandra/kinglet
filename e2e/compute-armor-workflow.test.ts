@@ -18,6 +18,13 @@
  *  14. SNI throttle is per X-Kinglet-Origin-SNI
  *  15. Invalid X-Kinglet-Origin-SNI → 400
  *  16. Kinglet SNI header is stripped from CEL
+ *  17. WAF opt_out of the injected signature → default allow
+ *  18. WAF other signature in the same set → 403
+ *  19. Invalid X-Kinglet-Waf-Match → 400
+ *  20. Kinglet WAF header is stripped from CEL
+ *  21. X-Kinglet-Adaptive-Protection: true → 403
+ *  22. Invalid X-Kinglet-Adaptive-Protection → 400
+ *  23. Kinglet Adaptive Protection header is stripped from CEL
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -135,6 +142,22 @@ describe('Cloud Armor E2E: Security Policy CRUD', () => {
           description: 'Must never match: the listener strips this header before CEL',
         },
         {
+          priority: 55,
+          action: 'deny(403)',
+          match: {
+            expr: { expression: "has(request.headers['x-kinglet-waf-match'])" },
+          },
+          description: 'Must never match: the listener strips this header before CEL',
+        },
+        {
+          priority: 56,
+          action: 'deny(403)',
+          match: {
+            expr: { expression: "has(request.headers['x-kinglet-adaptive-protection'])" },
+          },
+          description: 'Must never match: the listener strips this header before CEL',
+        },
+        {
           priority: 1000,
           action: 'deny(403)',
           match: { expr: { expression: "request.path.startsWith('/admin')" } },
@@ -169,6 +192,23 @@ describe('Cloud Armor E2E: Security Policy CRUD', () => {
             enforceOnKey: 'SNI',
             rateLimitThreshold: { count: 1, intervalSec: 60 },
           },
+        },
+        {
+          priority: 2300,
+          action: 'deny(403)',
+          match: {
+            expr: {
+              expression:
+                "evaluatePreconfiguredWaf('protocolattack-v33-stable', {'opt_out_rule_ids': ['owasp-crs-v030301-id921110-protocolattack']})",
+            },
+          },
+          description: 'WAF protocolattack except the opted-out signature',
+        },
+        {
+          priority: 2400,
+          action: 'deny(403)',
+          match: { expr: { expression: 'evaluateAdaptiveProtectionAutoDeploy()' } },
+          description: 'Adaptive Protection auto-deploy declared hit',
         },
       ],
     });
@@ -397,6 +437,97 @@ describe('Cloud Armor E2E: Listener evaluation', () => {
       headers: {
         'X-Kinglet-Origin-IP': '203.0.113.10',
         'X-Kinglet-Origin-SNI': 'cdn.example.com',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2147483647');
+  });
+
+  test('17. WAF opted-out signature does not match', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Waf-Match':
+          'protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('allow');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2147483647');
+  });
+
+  test('18. WAF other signature in the same set → 403', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Waf-Match':
+          'protocolattack-v33-stable/owasp-crs-v030301-id921150-protocolattack',
+      },
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('deny(403)');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2300');
+  });
+
+  test('19. Invalid X-Kinglet-Waf-Match → 400, no evaluate', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Waf-Match': 'protocolattack-v33-stable',
+      },
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBeNull();
+  });
+
+  test('20. Kinglet WAF header is stripped from CEL', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Waf-Match':
+          'protocolattack-v33-stable/owasp-crs-v030301-id921110-protocolattack',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2147483647');
+  });
+
+  test('21. X-Kinglet-Adaptive-Protection: true → 403', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Adaptive-Protection': 'true',
+      },
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBe('deny(403)');
+    expect(res.headers.get('x-kinglet-enforced-priority')).toBe('2400');
+  });
+
+  test('22. Invalid X-Kinglet-Adaptive-Protection → 400, no evaluate', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Adaptive-Protection': 'yes',
+      },
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('x-kinglet-enforced-action')).toBeNull();
+  });
+
+  test('23. Kinglet Adaptive Protection header is stripped from CEL', async () => {
+    const res = await fetch(listenerUrl('/public'), {
+      headers: {
+        'X-Kinglet-Origin-IP': '203.0.113.10',
+        'X-Kinglet-Adaptive-Protection': 'false',
       },
     });
 

@@ -23,6 +23,7 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [014](014-cloud-armor-asn-region-headers.md) | Cloud Armor ASN, Region, TLS Fingerprint, and SNI Request Headers (addendum to 012) | Proposed |
 | [015](015-cloud-armor-evaluate-address-group.md) | Cloud Armor `evaluateAddressGroup` (addendum to 012) | Proposed |
 | [016](016-memory-and-sqlite-storage.md) | Memory and SQLite Storage Modes | Accepted |
+| [017](017-cloud-armor-waf-adaptive-headers.md) | Cloud Armor Preconfigured WAF and Adaptive Protection Request Headers (addendum to 012) | Proposed |
 
 ## A note on the project's former name
 

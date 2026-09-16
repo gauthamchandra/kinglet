@@ -58,7 +58,8 @@ export const TERRAFORM_VALIDATION_CASES = [
   },
   {
     id: 'armor',
-    description: 'Cloud Armor security policy with 18 rules plus evaluation-server smoke',
+    description:
+      'Cloud Armor security policy with WAF/AP header injection plus evaluation-server smoke',
     services: ['compute'],
     targets: ['google_compute_security_policy.example'],
   },

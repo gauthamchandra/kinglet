@@ -149,6 +149,8 @@ export function buildRequestAttributes(input: RequestAttributeInput): RequestAtt
       params,
     },
     sni: input.sni ?? '',
+    wafMatches: input.wafMatches ?? [],
+    adaptiveProtectionMatch: input.adaptiveProtectionMatch === true,
   };
 }
 

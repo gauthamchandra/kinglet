@@ -134,10 +134,17 @@ export interface HttpRequestAttributes {
   params: Record<string, unknown>;
 }
 
+export interface WafSignatureMatch {
+  ruleSet: string;
+  signatureId: string;
+}
+
 export interface RequestAttributes {
   origin: OriginAttributes;
   request: HttpRequestAttributes;
   sni: string;
+  wafMatches: readonly WafSignatureMatch[];
+  adaptiveProtectionMatch: boolean;
 }
 
 export interface RequestAttributeInput {
@@ -153,6 +160,8 @@ export interface RequestAttributeInput {
   tlsJa3Fingerprint?: string;
   tlsJa4Fingerprint?: string;
   sni?: string;
+  wafMatches?: readonly WafSignatureMatch[];
+  adaptiveProtectionMatch?: boolean;
   userIpRequestHeaders?: readonly string[];
   jsonParsing?: JsonParsing;
   params?: Record<string, unknown>;
