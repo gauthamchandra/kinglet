@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.0](https://github.com/gauthamchandra/kinglet/compare/v3.0.0...v3.1.0) (2026-09-16)
+
+
+### Features
+
+* **compute:** inject Cloud Armor WAF and Adaptive Protection matches ([#94](https://github.com/gauthamchandra/kinglet/issues/94)) ([2ef9c6e](https://github.com/gauthamchandra/kinglet/commit/2ef9c6e4088f487e8b5ddd5a03cbbdc451470fe3)), closes [#92](https://github.com/gauthamchandra/kinglet/issues/92)
+
 ## [3.0.0](https://github.com/gauthamchandra/kinglet/compare/v2.4.0...v3.0.0) (2026-09-14)
 
 
