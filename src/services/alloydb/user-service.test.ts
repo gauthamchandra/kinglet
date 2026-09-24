@@ -70,6 +70,28 @@ describe('createUser', () => {
     expect(user.userType).toBe(UserType.ALLOYDB_IAM_USER);
   });
 
+  test('createUser_returnsDatabaseRolesSortedAlphabetically', async () => {
+    const user = await service.createUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { databaseRoles: ['pg_write_all_data', 'alloydbsuperuser', 'pg_read_all_data'] },
+      {}
+    );
+
+    expect(user.databaseRoles).toEqual([
+      'alloydbsuperuser',
+      'pg_read_all_data',
+      'pg_write_all_data',
+    ]);
+    expect((await service.getUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID)).databaseRoles).toEqual([
+      'alloydbsuperuser',
+      'pg_read_all_data',
+      'pg_write_all_data',
+    ]);
+  });
+
   // `User.password` is input-only in the discovery document: stored for
   // data-plane auth, never returned.
   test('createUser_storesThePasswordWithoutEchoingIt', async () => {

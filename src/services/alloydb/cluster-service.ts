@@ -26,6 +26,7 @@ import {
   parseInstanceName,
   parseSpecJson,
   readInitialUser,
+  resolveInitialUser,
   UserType,
   userRequestToRecord,
 } from './types.ts';
@@ -97,7 +98,38 @@ export class ClusterService {
     validateNetworkConfiguration(body);
 
     return this.clusterMutex.runExclusively(buildClusterName(project, location, clusterId), () =>
-      this.createClusterExclusively(project, location, clusterId, body, options)
+      this.createClusterExclusively(project, location, clusterId, body, options, 'create')
+    );
+  }
+
+  /**
+   * Stub of `clusters:restore`. Accepts backup, PITR, and BackupDR wrappers
+   * (camelCase or terraform snake_case) and mints an empty cluster. No bytes
+   * are copied — a development container has nothing to replay.
+   */
+  async restoreCluster(
+    project: string,
+    location: string,
+    clusterId: string,
+    body: Record<string, unknown>,
+    options: ValidatableOptions
+  ): Promise<OperationResponse> {
+    const { cluster, restoreSources } = splitRestoreRequest(body);
+
+    this.validateClusterId(clusterId);
+    validateInitialUser(cluster);
+    validateNetworkConfiguration(cluster);
+
+    return this.clusterMutex.runExclusively(buildClusterName(project, location, clusterId), () =>
+      this.createClusterExclusively(
+        project,
+        location,
+        clusterId,
+        cluster,
+        options,
+        'restore',
+        restoreSources
+      )
     );
   }
 
@@ -106,7 +138,9 @@ export class ClusterService {
     location: string,
     clusterId: string,
     body: Record<string, unknown>,
-    options: ValidatableOptions
+    options: ValidatableOptions,
+    verb: string,
+    restoreSources?: Record<string, unknown>
   ): Promise<OperationResponse> {
     const name = buildClusterName(project, location, clusterId);
 
@@ -116,7 +150,14 @@ export class ClusterService {
 
     const record = clusterRequestToRecord(name, body);
 
-    return this.completeMutation(project, location, name, 'create', options, record, async () => {
+    if (restoreSources !== undefined && Object.keys(restoreSources).length > 0) {
+      const spec = parseSpecJson(record.spec);
+
+      Object.assign(spec, restoreSources);
+      record.spec = JSON.stringify(spec);
+    }
+
+    return this.completeMutation(project, location, name, verb, options, record, async () => {
       const created = await this.clusters.create(record);
 
       // The initial user is the cluster's first connectable role. Persist it as a
@@ -187,7 +228,7 @@ export class ClusterService {
       validateInitialUser(body);
       validateNetworkConfiguration(body);
 
-      return this.createClusterExclusively(project, location, clusterId, body, options);
+      return this.createClusterExclusively(project, location, clusterId, body, options, 'create');
     }
 
     const updates = buildClusterUpdates(existing, body, options.updateMask);
@@ -334,19 +375,7 @@ export class ClusterService {
     clusterId: string,
     body: Record<string, unknown>
   ): Promise<void> {
-    const { username, password } = readInitialUser(body);
-
-    // validateInitialUser has already required both, so neither is null here.
-    // Guarded rather than defaulted: an empty stored password is what tells the
-    // wire server to accept the user with no password at all, so it must never
-    // be the fallback. (ALLOYDB_IAM_USER is accepted as user metadata, but the
-    // wire server offers cleartext only — there is no IAM token login path.)
-    if (username === null || password === null) {
-      throw new AlloyDbError(
-        'INTERNAL',
-        `Cluster ${buildClusterName(project, location, clusterId)} reached user creation without a validated initialUser`
-      );
-    }
+    const { username, password } = resolveInitialUser(body);
 
     await this.users.create(
       userRequestToRecord(buildUserName(project, location, clusterId, username), {
@@ -440,31 +469,7 @@ function validateNetworkConfiguration(body: Record<string, unknown>): void {
 }
 
 function validateInitialUser(body: Record<string, unknown>): void {
-  const initialUser =
-    body.initialUser !== null && typeof body.initialUser === 'object'
-      ? (body.initialUser as Record<string, unknown>)
-      : undefined;
-
-  const username = initialUser?.user;
-  const password = initialUser?.password;
-
-  // Both are required on create — the username and the password for the initial
-  // postgres role. Inferred rather than stated outright: the discovery document
-  // marks `Cluster.initialUser` itself Required but puts no required flag on
-  // `UserPassword.user`/`.password`, and a cluster with neither has no way in.
-  // Flagged in the PR. The password is stored on the matching User row for
-  // data-plane auth and never returned on the cluster resource.
-  if (
-    typeof username !== 'string' ||
-    username.length === 0 ||
-    typeof password !== 'string' ||
-    password.length === 0
-  ) {
-    throw new AlloyDbError(
-      'INVALID_ARGUMENT',
-      'Cluster.initialUser is required and must carry both a "user" username and a "password"'
-    );
-  }
+  const { username } = resolveInitialUser(body);
 
   // The username becomes a User row of its own, so it has to satisfy the same id
   // rule users.create enforces. Without this, cluster create mints a user whose
@@ -476,6 +481,120 @@ function validateInitialUser(body: Record<string, unknown>): void {
       `Cluster.initialUser.user "${username}" must not contain "/"`
     );
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || typeof value !== 'object') return undefined;
+
+  return value as Record<string, unknown>;
+}
+
+function firstRecord(
+  body: Record<string, unknown>,
+  ...keys: string[]
+): Record<string, unknown> | undefined {
+  for (const key of keys) {
+    const record = asRecord(body[key]);
+
+    if (record !== undefined) return record;
+  }
+
+  return undefined;
+}
+
+function firstString(record: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+
+  return undefined;
+}
+
+/**
+ * Terraform 7.45 sends RestoreClusterRequest wrapper keys in snake_case;
+ * `@google-cloud/alloydb` and the discovery document use camelCase. Nested
+ * `cluster` stays camelCase in both.
+ */
+function splitRestoreRequest(body: Record<string, unknown>): {
+  cluster: Record<string, unknown>;
+  restoreSources: Record<string, unknown> | undefined;
+} {
+  const cluster = firstRecord(body, 'cluster') ?? body;
+  const restoreSources: Record<string, unknown> = {};
+
+  const backup = firstRecord(
+    body,
+    'backupSource',
+    'backup_source',
+    'restoreBackupSource',
+    'restore_backup_source'
+  );
+
+  if (backup !== undefined) {
+    const backupName = firstString(backup, 'backupName', 'backup_name');
+
+    restoreSources.backupSource = backupName === undefined ? {} : { backupName };
+  }
+
+  const continuous = firstRecord(
+    body,
+    'continuousBackupSource',
+    'continuous_backup_source',
+    'restoreContinuousBackupSource',
+    'restore_continuous_backup_source'
+  );
+
+  if (continuous !== undefined) {
+    const pointInTime = firstString(continuous, 'pointInTime', 'point_in_time');
+    const sourceCluster = firstString(continuous, 'cluster', 'clusterName', 'cluster_name');
+
+    // Discovery ContinuousBackupSource is camelCase only. Spreading the raw
+    // wrapper would keep Terraform snake_case keys such as `point_in_time`.
+    restoreSources.continuousBackupSource = {
+      ...(sourceCluster === undefined ? {} : { cluster: sourceCluster }),
+      ...(pointInTime === undefined ? {} : { pointInTime }),
+    };
+  }
+
+  const backupdr = firstRecord(
+    body,
+    'backupdrBackupSource',
+    'backupdr_backup_source',
+    'restoreBackupdrBackupSource',
+    'restore_backupdr_backup_source',
+    'restore_backupdr_backup'
+  );
+
+  if (backupdr !== undefined) {
+    const backupName = firstString(backupdr, 'backup');
+
+    restoreSources.backupdrBackupSource = backupName === undefined ? {} : { backup: backupName };
+  }
+
+  const backupdrPitr = firstRecord(
+    body,
+    'backupdrPitrSource',
+    'backupdr_pitr_source',
+    'restoreBackupdrPitrSource',
+    'restore_backupdr_pitr_source'
+  );
+
+  if (backupdrPitr !== undefined) {
+    const dataSource = firstString(backupdrPitr, 'dataSource', 'data_source');
+    const pointInTime = firstString(backupdrPitr, 'pointInTime', 'point_in_time');
+
+    restoreSources.backupdrPitrSource = {
+      ...(dataSource === undefined ? {} : { dataSource }),
+      ...(pointInTime === undefined ? {} : { pointInTime }),
+    };
+  }
+
+  return {
+    cluster,
+    restoreSources: Object.keys(restoreSources).length > 0 ? restoreSources : undefined,
+  };
 }
 
 /**

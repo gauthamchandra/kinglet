@@ -376,6 +376,26 @@ describe('PostgresWireServer', () => {
     expect(received[1]).toContain('SELECT 1');
   });
 
+  test('rejects every password when login is disabled', async () => {
+    const { queue } = makeFakeQueue();
+    const port = startServer(async () => ({
+      allowed: true,
+      connection: { queue, password: '', loginDisabled: true },
+    }));
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    client.send(buildPasswordMessage('kinglet-alloydb-login-disabled'));
+
+    const messages = await client.waitForMessages(2);
+    const error = messages[1];
+
+    expect(error?.tag).toBe('E');
+    expect(readErrorFields(error?.body ?? new Uint8Array(0)).C).toBe(SQLSTATE_INVALID_PASSWORD);
+  });
+
   test('rejects a wrong password with SQLSTATE 28P01', async () => {
     const { queue } = makeFakeQueue();
     const port = startServer(async () => allow(queue, 's3cret'));

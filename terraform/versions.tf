@@ -23,6 +23,7 @@ provider "google" {
   kms_custom_endpoint             = "${var.kinglet_endpoint}/v1/"
   workflows_custom_endpoint       = "${var.kinglet_endpoint}/v1/"
   compute_custom_endpoint         = "${var.kinglet_endpoint}/compute/v1/"
+  alloydb_custom_endpoint         = "${var.kinglet_endpoint}/v1/"
 
   # Avoid real oauth2.googleapis.com token exchange in CI/local harness runs.
   access_token = var.access_token
@@ -34,6 +35,7 @@ provider "google-beta" {
 
   # Trailing slash is required: the operation waiter concatenates BaseUrl + operation.name.
   network_security_custom_endpoint = "${var.kinglet_endpoint}/v1/"
+  alloydb_custom_endpoint          = "${var.kinglet_endpoint}/v1/"
 
   access_token = var.access_token
 }

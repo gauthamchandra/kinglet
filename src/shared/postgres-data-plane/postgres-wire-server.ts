@@ -93,6 +93,8 @@ export interface ResolvedConnection {
   queue: PGliteSessionQueue;
   /** The user's stored password; empty means the instance accepts them without one. */
   password: string;
+  /** Challenge, then reject every password — used when a stored secret is empty. */
+  loginDisabled?: boolean;
 }
 
 export interface ConnectionRejection {
@@ -549,7 +551,7 @@ export class PostgresWireServer {
 
     state.connection = resolution.connection;
 
-    if (resolution.connection.password !== '') {
+    if (resolution.connection.loginDisabled === true || resolution.connection.password !== '') {
       // Cleartext is the only method offered: SCRAM and MD5 both need the
       // stored verifier, and the admin API stores what the caller supplied.
       // The exchange never leaves loopback in the topologies this serves.
@@ -581,7 +583,7 @@ export class PostgresWireServer {
     // Body is one NUL-terminated string after the tag and length.
     const supplied = new TextDecoder().decode(frame.subarray(5, Math.max(5, frame.length - 1)));
 
-    if (supplied !== state.connection?.password) {
+    if (state.connection?.loginDisabled === true || supplied !== state.connection?.password) {
       this.fail(
         socket,
         SQLSTATE_INVALID_PASSWORD,

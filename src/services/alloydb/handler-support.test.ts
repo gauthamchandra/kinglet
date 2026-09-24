@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import { Logger } from '@/shared/utils/logger.ts';
-import { parseBooleanFlag, readQueryString, respondWith } from './handler-support.ts';
+import {
+  parseBooleanFlag,
+  readBodyBoolean,
+  readBodyString,
+  readQueryString,
+  respondWith,
+} from './handler-support.ts';
 import { AlloyDbError } from './types.ts';
 
 const responseUtils = new ResponseUtils(new StandardResponseFormatter(new Logger('test', 'error')));
@@ -98,5 +104,42 @@ describe('parseBooleanFlag', () => {
   // `?validateOnly` with no value is how URLSearchParams renders a bare flag.
   test('parseBooleanFlag_givenAValuelessFlag_treatsItAsTrue', () => {
     expect(parseBooleanFlag('')).toBe(true);
+  });
+});
+
+describe('readBodyString', () => {
+  test('readBodyString_givenANonEmptyString_returnsIt', () => {
+    expect(readBodyString('restored')).toBe('restored');
+  });
+
+  test.each([
+    undefined,
+    null,
+    '',
+    1,
+    true,
+    {},
+  ] as const)('readBodyString_givenNonStringOrEmpty_%p_returnsUndefined', value => {
+    expect(readBodyString(value)).toBeUndefined();
+  });
+});
+
+describe('readBodyBoolean', () => {
+  test.each([
+    [true, true],
+    [false, false],
+  ] as const)('readBodyBoolean_givenBoolean_%p_returns_%p', (value, expected) => {
+    expect(readBodyBoolean(value)).toBe(expected);
+  });
+
+  test.each([
+    'true',
+    1,
+    0,
+    null,
+    undefined,
+    {},
+  ] as const)('readBodyBoolean_givenNonBoolean_%p_returnsUndefined', value => {
+    expect(readBodyBoolean(value)).toBeUndefined();
   });
 });

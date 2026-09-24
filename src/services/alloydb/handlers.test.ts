@@ -15,6 +15,9 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
+import { BackupHandlers } from './backup-handlers.ts';
+import { BackupRepository } from './backup-repository.ts';
+import { BackupService } from './backup-service.ts';
 import { ClusterHandlers } from './cluster-handlers.ts';
 import { ClusterRepository } from './cluster-repository.ts';
 import { ClusterService } from './cluster-service.ts';
@@ -34,6 +37,7 @@ let clusterHandlers: ClusterHandlers;
 let instanceHandlers: InstanceHandlers;
 let instanceDataPlane: RecordingDataPlane;
 let userHandlers: UserHandlers;
+let backupHandlers: BackupHandlers;
 let locationHandlers: LocationHandlers;
 
 function request(overrides: Partial<RouteRequest> = {}): RouteRequest {
@@ -92,6 +96,7 @@ beforeEach(async () => {
   const clusters = new ClusterRepository(storage);
   const instances = new InstanceRepository(storage);
   const users = new UserRepository(storage);
+  const backups = new BackupRepository(storage);
   const operations = new OperationsStore(storage, {
     tableName: ALLOYDB_OPERATIONS_TABLE,
     apiTypePrefix: 'google.cloud.alloydb.v1',
@@ -101,6 +106,7 @@ beforeEach(async () => {
     clusters.initialize(),
     instances.initialize(),
     users.initialize(),
+    backups.initialize(),
     operations.initialize(),
   ]);
 
@@ -118,6 +124,10 @@ beforeEach(async () => {
     responseUtils
   );
   userHandlers = new UserHandlers(new UserService(users, clusters, clusterMutex), responseUtils);
+  backupHandlers = new BackupHandlers(
+    new BackupService(backups, clusters, operations, clusterMutex),
+    responseUtils
+  );
   locationHandlers = new LocationHandlers(responseUtils);
 });
 
@@ -127,6 +137,7 @@ describe('route ids', () => {
       ...clusterHandlers.getRoutes(),
       ...instanceHandlers.getRoutes(),
       ...userHandlers.getRoutes(),
+      ...backupHandlers.getRoutes(),
       ...locationHandlers.getRoutes(),
     ];
 
@@ -140,6 +151,7 @@ describe('route ids', () => {
       ...clusterHandlers.getRoutes(),
       ...instanceHandlers.getRoutes(),
       ...userHandlers.getRoutes(),
+      ...backupHandlers.getRoutes(),
       ...locationHandlers.getRoutes(),
     ].map(route => route.id);
 
@@ -183,15 +195,79 @@ describe('cluster handlers', () => {
     expect(errorOf(response).message).toContain('clusterId');
   });
 
-  test('create_withoutAnInitialUser_returns400', async () => {
+  test('create_withoutAnInitialUser_returns200', async () => {
     const response = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.create', {
       method: 'POST',
       query: { clusterId: 'c1' },
       body: { networkConfig: { network: 'projects/p/global/networks/default' } },
     });
 
+    expect(response.status).toBe(200);
+    expect(body(response).done).toBe(true);
+  });
+
+  test('restore_returns200WithARestoreOperation', async () => {
+    const response = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.restore', {
+      method: 'POST',
+      query: { clusterId: 'restored' },
+      body: {
+        backupSource: { backupName: 'projects/p/locations/us-central1/backups/b1' },
+        cluster: { networkConfig: { network: 'projects/p/global/networks/default' } },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(body(response).done).toBe(true);
+    expect((body(response).metadata as { verb: string }).verb).toBe('restore');
+  });
+
+  test('restore_withClusterIdInTheBody_returns200', async () => {
+    const response = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.restore', {
+      method: 'POST',
+      body: {
+        clusterId: 'from-body',
+        backupSource: { backupName: 'projects/p/locations/us-central1/backups/b1' },
+        cluster: { networkConfig: { network: 'projects/p/global/networks/default' } },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(body(response).done).toBe(true);
+
+    const fetched = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.get', {
+      params: { project: PROJECT, location: LOCATION, cluster: 'from-body' },
+    });
+
+    expect(fetched.status).toBe(200);
+  });
+
+  test('restore_withValidateOnlyInTheBody_persistsNothing', async () => {
+    const response = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.restore', {
+      method: 'POST',
+      body: {
+        clusterId: 'dry-run',
+        validateOnly: true,
+        cluster: { networkConfig: { network: 'projects/p/global/networks/default' } },
+      },
+    });
+
+    expect(response.status).toBe(200);
+
+    const fetched = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.get', {
+      params: { project: PROJECT, location: LOCATION, cluster: 'dry-run' },
+    });
+
+    expect(fetched.status).toBe(404);
+  });
+
+  test('restore_withoutClusterIdInQueryOrBody_returns400', async () => {
+    const response = await invoke(clusterHandlers.getRoutes(), 'alloydb.clusters.restore', {
+      method: 'POST',
+      body: { cluster: { networkConfig: { network: 'projects/p/global/networks/default' } } },
+    });
+
     expect(response.status).toBe(400);
-    expect(errorOf(response).status).toBe('INVALID_ARGUMENT');
+    expect(errorOf(response).message).toContain('clusterId');
   });
 
   test('create_withNoBodyAtAll_returns400RatherThanCrashing', async () => {
@@ -619,6 +695,90 @@ describe('user handlers', () => {
 
     expect(response.status).toBe(404);
     expect(errorOf(response).status).toBe('NOT_FOUND');
+  });
+});
+
+describe('backup handlers', () => {
+  const backupParams = { project: PROJECT, location: LOCATION, backup: 'b1' };
+  const clusterName = buildClusterName(PROJECT, LOCATION, 'c1');
+
+  async function createBackup(backupId = 'b1') {
+    return invoke(backupHandlers.getRoutes(), 'alloydb.backups.create', {
+      method: 'POST',
+      query: { backupId },
+      body: { clusterName, type: 'ON_DEMAND' },
+    });
+  }
+
+  test('create_returns200WithTheOperation', async () => {
+    await createCluster('c1');
+
+    const response = await createBackup();
+
+    expect(response.status).toBe(200);
+    expect(body(response).done).toBe(true);
+    expect((body(response).response as { sizeBytes: string }).sizeBytes).toBe('0');
+  });
+
+  test('create_withoutTheBackupIdQueryParameter_returns400', async () => {
+    const response = await invoke(backupHandlers.getRoutes(), 'alloydb.backups.create', {
+      method: 'POST',
+      body: { clusterName },
+    });
+
+    expect(response.status).toBe(400);
+    expect(errorOf(response).message).toContain('backupId');
+  });
+
+  test('create_withoutAParentCluster_returns404', async () => {
+    const response = await invoke(backupHandlers.getRoutes(), 'alloydb.backups.create', {
+      method: 'POST',
+      query: { backupId: 'b1' },
+      body: { clusterName: 'projects/p/locations/us-central1/clusters/missing' },
+    });
+
+    expect(response.status).toBe(404);
+    expect(errorOf(response).status).toBe('NOT_FOUND');
+  });
+
+  test('get_returnsTheBackupWithAStringSizeBytes', async () => {
+    await createCluster('c1');
+    await createBackup();
+
+    const response = await invoke(backupHandlers.getRoutes(), 'alloydb.backups.get', {
+      params: backupParams,
+    });
+
+    expect(response.status).toBe(200);
+    expect(body(response).name).toBe('projects/p/locations/us-central1/backups/b1');
+    expect(body(response).sizeBytes).toBe('0');
+    expect(body(response).type).toBe('ON_DEMAND');
+    expect(body(response).clusterName).toBe(clusterName);
+  });
+
+  test('list_keysTheResponseOnBackups', async () => {
+    await createCluster('c1');
+    await createBackup();
+
+    const response = await invoke(backupHandlers.getRoutes(), 'alloydb.backups.list', {
+      params: { project: PROJECT, location: LOCATION },
+    });
+
+    expect(body(response)).toHaveProperty('backups');
+    expect(body(response)).not.toHaveProperty('items');
+  });
+
+  test('delete_returns200WithTheOperation', async () => {
+    await createCluster('c1');
+    await createBackup();
+
+    const response = await invoke(backupHandlers.getRoutes(), 'alloydb.backups.delete', {
+      method: 'DELETE',
+      params: backupParams,
+    });
+
+    expect(response.status).toBe(200);
+    expect(body(response).done).toBe(true);
   });
 });
 
