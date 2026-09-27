@@ -5,6 +5,9 @@
  * handlers, and dispatch engine.
  */
 
+import path from 'node:path';
+import { getProtoPath } from 'google-proto-files';
+import type { GrpcServiceDefinition } from '@/core/gateway/grpc-server.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
@@ -13,6 +16,7 @@ import { LocationHandlers } from './location-handlers.ts';
 import { QueueHandlers } from './queue-handlers.ts';
 import { QueueRepository } from './queue-repository.ts';
 import { QueueService } from './queue-service.ts';
+import { CloudTasksGrpcHandlers } from './task-grpc-handlers.ts';
 import { TaskHandlers } from './task-handlers.ts';
 import { TaskRepository } from './task-repository.ts';
 import { TaskService } from './task-service.ts';
@@ -76,6 +80,34 @@ export class CloudTasksService {
     this.locationHandlers = new LocationHandlers(this.logger);
 
     this.logger.info('Cloud Tasks service initialized');
+  }
+
+  getGrpcServices(): GrpcServiceDefinition[] {
+    if (!this.queueService || !this.taskService) {
+      throw new Error('CloudTasksService not initialized. Call initialize() first.');
+    }
+
+    const handlers = new CloudTasksGrpcHandlers(this.queueService, this.taskService);
+
+    const protoPath = getProtoPath('cloud/tasks/v2/cloudtasks.proto');
+
+    // google-proto-files stores all Google API protos under its package root.
+    // proto-loader needs that root on the include path so that relative imports
+    // inside cloudtasks.proto (e.g. "google/api/annotations.proto") resolve.
+    // protoPath is under .../google-proto-files/google/cloud/tasks/v2/
+    // so we go up 4 levels to reach the package root.
+    const protoRoot = path.resolve(path.dirname(protoPath), '../../../..');
+
+    return [
+      {
+        name: 'CloudTasks',
+        protoPath,
+        packageName: 'google.cloud.tasks.v2',
+        serviceName: 'CloudTasks',
+        implementation: handlers.toServiceImplementation(),
+        includeDirs: [protoRoot],
+      },
+    ];
   }
 
   getRoutes(): RouteDefinition[] {

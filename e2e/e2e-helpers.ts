@@ -190,5 +190,6 @@ export function createFakeAuth(project: string) {
         fetch: (url: string, opts: RequestInit) => fetch(url, opts),
       }),
     getProjectId: () => Promise.resolve(project),
+    getUniverseDomain: () => Promise.resolve('googleapis.com'),
   };
 }
