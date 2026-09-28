@@ -5,7 +5,7 @@
 **Status:** Implemented
 **API version:** v1
 **Data plane:** PGlite (Postgres 18) in-process
-**Endpoint coverage:** 20/80 (25%)
+**Endpoint coverage:** 20/85 (24%)
 
 Instance, database, and user admin API — PostgreSQL only; instances expose a real Postgres endpoint backed by PGlite.
 
@@ -94,6 +94,11 @@ Instance, database, and user admin API — PostgreSQL only; instances expose a r
 - `POST` `v1/projects/{project}/instances/{instance}/sslCerts` — `sslCerts.insert`
 - `GET` `v1/projects/{project}/instances/{instance}/sslCerts` — `sslCerts.list`
 - `GET` `v1/projects/{project}/tiers` — `tiers.list`
+- `GET` `v1/projects/{project}/instances/{instance}/workloadCaptures` — `workloadCaptures.list`
+- `POST` `v1/projects/{project}/instances/{instance}/workloadCaptures:start` — `workloadCaptures.start`
+- `POST` `v1/projects/{project}/instances/{instance}/workloadCaptures/{workloadId}:startReplay` — `workloadCaptures.startReplay`
+- `POST` `v1/projects/{project}/instances/{instance}/workloadCaptures:stop` — `workloadCaptures.stop`
+- `POST` `v1/projects/{project}/instances/{instance}/workloadCaptures/{workloadId}:stopReplay` — `workloadCaptures.stopReplay`
 
 ## IAM endpoints (deferred)
 
