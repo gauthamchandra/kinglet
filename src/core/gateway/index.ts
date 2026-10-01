@@ -2,9 +2,6 @@
  * API Gateway module exports
  */
 
-// gRPC-REST transcoding bridge
-export * from './grpc-rest-bridge.ts';
-
 // gRPC Server infrastructure
 export * from './grpc-server.ts';
 
