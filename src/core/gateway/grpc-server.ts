@@ -118,7 +118,7 @@ export class GrpcServer {
    */
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const bindAddress = `0.0.0.0:${this.config.grpcPort}`;
+      const bindAddress = `127.0.0.1:${this.config.grpcPort}`;
 
       this.server.bindAsync(bindAddress, grpc.ServerCredentials.createInsecure(), (error, port) => {
         if (error) {
