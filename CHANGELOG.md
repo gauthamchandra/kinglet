@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/gauthamchandra/kinglet/compare/v3.1.0...v3.2.0) (2026-10-01)
+
+
+### Features
+
+* **alloydb:** terraform support for cluster, instance, user, and backup ([#95](https://github.com/gauthamchandra/kinglet/issues/95)) ([a5e4d40](https://github.com/gauthamchandra/kinglet/commit/a5e4d40f40c99c60d6ea92c3e6e46f5232124fde))
+
 ## [3.1.0](https://github.com/gauthamchandra/kinglet/compare/v3.0.0...v3.1.0) (2026-09-16)
 
 
