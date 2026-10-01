@@ -581,5 +581,271 @@ describe('CloudTasksGrpcHandlers', () => {
 
       expect(viewArg).toBe('FULL');
     });
+
+    test('protoDurationToStr preserves full nanosecond precision', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/l/queues/q',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.getQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({ name: 'projects/p/locations/l/queues/q' });
+      const callback = makeCallback();
+
+      await handlers.getQueue(call, callback as Parameters<typeof handlers.getQueue>[1]);
+
+      type ProtoQueue = {
+        retryConfig: {
+          minBackoff: { seconds: string; nanos: number };
+          maxBackoff: { seconds: string; nanos: number };
+        };
+      };
+      const result = (callback as ReturnType<typeof mock>).mock.calls[0] as [null, ProtoQueue];
+      const minBackoff = result[1].retryConfig.minBackoff;
+
+      expect(minBackoff.seconds).toBe('0');
+      expect(minBackoff.nanos).toBe(100_000_000);
+    });
+
+    test('protoDurationToStr preserves all 9 nanosecond digits (no truncation)', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/l/queues/q',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '15.000000500s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.getQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({ name: 'projects/p/locations/l/queues/q' });
+      const callback = makeCallback();
+
+      await handlers.getQueue(call, callback as Parameters<typeof handlers.getQueue>[1]);
+
+      type ProtoQueue = {
+        retryConfig: { minBackoff: { seconds: string; nanos: number } };
+      };
+      const result = (callback as ReturnType<typeof mock>).mock.calls[0] as [null, ProtoQueue];
+      const minBackoff = result[1].retryConfig.minBackoff;
+
+      expect(minBackoff.seconds).toBe('15');
+      expect(minBackoff.nanos).toBe(500);
+    });
+  });
+
+  describe('createQueue', () => {
+    test('rejects queue.name that belongs to a different parent', async () => {
+      const call = makeCall({
+        parent: 'projects/p/locations/us-central1',
+        queue: {
+          name: 'projects/other/locations/us-central1/queues/my-queue',
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createQueue(call, callback as Parameters<typeof handlers.createQueue>[1]);
+
+      const [err] = (callback as ReturnType<typeof mock>).mock.calls[0] as [grpc.ServiceError];
+
+      expect(err.code).toBe(grpc.status.INVALID_ARGUMENT);
+    });
+
+    test('accepts queue.name matching the parent', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/us-central1/queues/my-queue',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.createQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({
+        parent: 'projects/p/locations/us-central1',
+        queue: {
+          name: 'projects/p/locations/us-central1/queues/my-queue',
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createQueue(call, callback as Parameters<typeof handlers.createQueue>[1]);
+
+      const [err] = (callback as ReturnType<typeof mock>).mock.calls[0] as [
+        grpc.ServiceError | null,
+      ];
+
+      expect(err).toBeNull();
+
+      const serviceCalls = (queueService.createQueue as ReturnType<typeof mock>).mock.calls;
+
+      expect((serviceCalls[0] as unknown[])[2]).toBe('my-queue');
+    });
+
+    test('omits zero-valued rate limit fields forwarded by proto-loader defaults', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/us-central1/queues/q',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.createQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({
+        parent: 'projects/p/locations/us-central1',
+        queue: {
+          name: 'projects/p/locations/us-central1/queues/q',
+          rateLimits: {
+            maxConcurrentDispatches: 5,
+            maxDispatchesPerSecond: 0,
+            maxBurstSize: 0,
+          },
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createQueue(call, callback as Parameters<typeof handlers.createQueue>[1]);
+
+      type CreateArgs = [string, string, string, Record<string, unknown>];
+      const [, , , body] = (queueService.createQueue as ReturnType<typeof mock>).mock
+        .calls[0] as CreateArgs;
+
+      const rl = body.rateLimits as Record<string, number> | undefined;
+
+      expect(rl).toBeDefined();
+      expect(rl?.maxConcurrentDispatches).toBe(5);
+      expect(rl?.maxDispatchesPerSecond).toBeUndefined();
+      expect(rl?.maxBurstSize).toBeUndefined();
+    });
+  });
+
+  describe('updateQueue', () => {
+    test('converts proto snake_case update mask paths to camelCase', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/l/queues/q',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.updateQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({
+        queue: {
+          name: 'projects/p/locations/l/queues/q',
+          rateLimits: { maxConcurrentDispatches: 10, maxDispatchesPerSecond: 0, maxBurstSize: 0 },
+        },
+        updateMask: { paths: ['rate_limits', 'retry_config'] },
+      });
+      const callback = makeCallback();
+
+      await handlers.updateQueue(call, callback as Parameters<typeof handlers.updateQueue>[1]);
+
+      type UpdateArgs = [string, Record<string, unknown>, string | undefined];
+      const [, , maskStr] = (queueService.updateQueue as ReturnType<typeof mock>).mock
+        .calls[0] as UpdateArgs;
+
+      expect(maskStr).toBe('rateLimits,retryConfig');
+    });
+
+    test('passes undefined mask when no paths provided', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/l/queues/q',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.updateQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({
+        queue: { name: 'projects/p/locations/l/queues/q' },
+        updateMask: { paths: [] },
+      });
+      const callback = makeCallback();
+
+      await handlers.updateQueue(call, callback as Parameters<typeof handlers.updateQueue>[1]);
+
+      type UpdateArgs = [string, Record<string, unknown>, string | undefined];
+      const [, , maskStr] = (queueService.updateQueue as ReturnType<typeof mock>).mock
+        .calls[0] as UpdateArgs;
+
+      expect(maskStr).toBeUndefined();
+    });
   });
 });

@@ -211,7 +211,7 @@ function protoDurationToStr(d: ProtoDuration | null | undefined): string | undef
     return `${secs}s`;
   }
 
-  const frac = String(nanos).padStart(9, '0').replace(/0+$/, '').substring(0, 3);
+  const frac = String(nanos).padStart(9, '0').replace(/0+$/, '');
 
   return `${secs}.${frac}s`;
 }
@@ -241,13 +241,23 @@ function normalizeGrpcHttpMethod(m: string | number | undefined): string | undef
 
 // ── Request transformation: proto → service layer ──
 
-function bytesToBase64(b: string | Buffer | null | undefined): string | undefined {
+function bytesToBase64(b: string | Uint8Array | null | undefined): string | undefined {
   if (!b) {
     return undefined;
   }
 
-  if (Buffer.isBuffer(b)) {
-    return b.length === 0 ? undefined : b.toString('base64');
+  if (b instanceof Uint8Array) {
+    if (b.length === 0) {
+      return undefined;
+    }
+
+    let binary = '';
+
+    for (const byte of b) {
+      binary += String.fromCharCode(byte);
+    }
+
+    return btoa(binary);
   }
 
   return b.length === 0 ? undefined : b;
@@ -267,7 +277,7 @@ function buildHttpRequestFromProto(hr: ProtoHttpRequest): Record<string, unknown
     obj.headers = hr.headers;
   }
 
-  const body = bytesToBase64(hr.body as string | Buffer | null | undefined);
+  const body = bytesToBase64(hr.body as string | Uint8Array | null | undefined);
 
   if (body) {
     obj.body = body;
@@ -305,7 +315,7 @@ function buildAppEngineHttpRequestFromProto(
     obj.headers = ae.headers;
   }
 
-  const body = bytesToBase64(ae.body as string | Buffer | null | undefined);
+  const body = bytesToBase64(ae.body as string | Uint8Array | null | undefined);
 
   if (body) {
     obj.body = body;
@@ -595,9 +605,22 @@ export class CloudTasksGrpcHandlers {
       let queueId: string;
 
       if (queue.name) {
-        const parts = queue.name.split('/');
+        if (queue.name.includes('/')) {
+          const expectedPrefix = `${parent}/queues/`;
 
-        queueId = parts[parts.length - 1] ?? '';
+          if (!queue.name.startsWith(expectedPrefix)) {
+            throw new TasksError(
+              'INVALID_ARGUMENT',
+              `queue.name "${queue.name}" does not belong to parent "${parent}"`
+            );
+          }
+
+          const parts = queue.name.split('/');
+
+          queueId = parts[parts.length - 1] ?? '';
+        } else {
+          queueId = queue.name;
+        }
       } else {
         throw new TasksError('INVALID_ARGUMENT', 'queue.name is required');
       }
@@ -617,7 +640,8 @@ export class CloudTasksGrpcHandlers {
   ): Promise<void> => {
     try {
       const { queue, updateMask } = call.request;
-      const updateMaskStr = updateMask?.paths?.join(',');
+      const paths = updateMask?.paths ?? [];
+      const updateMaskStr = paths.length > 0 ? convertUpdateMaskPaths(paths) : undefined;
       const body = buildQueueRequestBody(queue);
       const result = await this.queueService.updateQueue(queue.name, body, updateMaskStr);
 
@@ -806,6 +830,23 @@ export class CloudTasksGrpcHandlers {
   }
 }
 
+// ── Update mask path converter (proto snake_case → service camelCase) ──
+
+const PROTO_FIELD_TO_CAMEL: Record<string, string> = {
+  rate_limits: 'rateLimits',
+  retry_config: 'retryConfig',
+  stackdriver_logging_config: 'stackdriverLoggingConfig',
+  http_target: 'httpTarget',
+  app_engine_routing_override: 'appEngineRoutingOverride',
+  purge_time: 'purgeTime',
+  state: 'state',
+  name: 'name',
+};
+
+function convertUpdateMaskPaths(paths: string[]): string {
+  return paths.map(p => PROTO_FIELD_TO_CAMEL[p] ?? p).join(',');
+}
+
 // ── Queue request body builder ──
 
 function buildQueueRequestBody(queue: Record<string, unknown>): Record<string, unknown> {
@@ -814,11 +855,29 @@ function buildQueueRequestBody(queue: Record<string, unknown>): Record<string, u
   const rl = queue.rateLimits as ProtoRateLimits | null | undefined;
 
   if (rl) {
-    body.rateLimits = {
-      maxDispatchesPerSecond: rl.maxDispatchesPerSecond,
-      maxBurstSize: rl.maxBurstSize,
-      maxConcurrentDispatches: rl.maxConcurrentDispatches,
-    };
+    const rateLimits: Record<string, number> = {};
+
+    const maxDispatches = rl.maxDispatchesPerSecond;
+
+    if (maxDispatches != null && maxDispatches > 0) {
+      rateLimits.maxDispatchesPerSecond = maxDispatches;
+    }
+
+    const maxBurst = rl.maxBurstSize;
+
+    if (maxBurst != null && maxBurst > 0) {
+      rateLimits.maxBurstSize = maxBurst;
+    }
+
+    const maxConcurrent = rl.maxConcurrentDispatches;
+
+    if (maxConcurrent != null && maxConcurrent > 0) {
+      rateLimits.maxConcurrentDispatches = maxConcurrent;
+    }
+
+    if (Object.keys(rateLimits).length > 0) {
+      body.rateLimits = rateLimits;
+    }
   }
 
   const rc = queue.retryConfig as ProtoRetryConfig | null | undefined;
