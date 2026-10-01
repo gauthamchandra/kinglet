@@ -9,6 +9,8 @@
 
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { CloudTasksClient } from '@google-cloud/tasks';
+import * as grpc from '@grpc/grpc-js';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const INDEX_ENTRYPOINT = join(REPO_ROOT, 'src', 'index.ts');
@@ -88,6 +90,59 @@ describe('src/index.ts shutdown', () => {
 
     expect(exitCode).toBe(0);
   }, 10000);
+
+  test('grpc_tasksService_registeredOnConfiguredPort_andStopsCleanlyOnSigterm', async () => {
+    const httpPort = freePort();
+    const grpcPort = freePort();
+
+    const child = Bun.spawn(['bun', INDEX_ENTRYPOINT], {
+      cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        HTTP_PORT: String(httpPort),
+        GRPC_PORT: String(grpcPort),
+        SERVICES: 'tasks',
+        LOG_LEVEL: 'error',
+      },
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+
+    try {
+      const health = await waitForHealth<{ status?: string }>(httpPort);
+
+      expect(health?.status).toBe('ok');
+
+      const client = new CloudTasksClient({
+        apiEndpoint: '127.0.0.1',
+        port: grpcPort,
+        sslCreds: grpc.credentials.createInsecure(),
+        auth: {
+          fetch: (url: string, opts: RequestInit) => fetch(url, opts),
+          getClient: () =>
+            Promise.resolve({ fetch: (url: string, opts: RequestInit) => fetch(url, opts) }),
+          getProjectId: () => Promise.resolve('index-test-project'),
+          getUniverseDomain: () => Promise.resolve('googleapis.com'),
+        } as never,
+      });
+
+      try {
+        const [queues] = await client.listQueues({
+          parent: 'projects/index-test-project/locations/us-central1',
+        });
+
+        expect(Array.isArray(queues)).toBe(true);
+      } finally {
+        client.close();
+      }
+    } finally {
+      child.kill('SIGTERM');
+    }
+
+    const exitCode = await child.exited;
+
+    expect(exitCode).toBe(0);
+  }, 15000);
 
   test('health reports the Cloud Armor evaluation server when compute is enabled', async () => {
     const httpPort = freePort();
