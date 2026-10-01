@@ -266,4 +266,320 @@ describe('CloudTasksGrpcHandlers', () => {
       expect(callErr.code).toBe(grpc.status.UNIMPLEMENTED);
     });
   });
+
+  describe('pageSize normalization', () => {
+    test('listQueues with pageSize=0 passes undefined to queueService', async () => {
+      (queueService.listQueues as ReturnType<typeof mock>).mockResolvedValue({
+        queues: [],
+        nextPageToken: undefined,
+      });
+
+      const request = { parent: 'projects/p/locations/l', pageSize: 0 };
+      const call = makeCall(request);
+      const callback = makeCallback();
+
+      await handlers.listQueues(call, callback as Parameters<typeof handlers.listQueues>[1]);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      const callErr = firstCallArg0<null>(callback);
+
+      expect(callErr).toBeNull();
+
+      const serviceCalls = (queueService.listQueues as ReturnType<typeof mock>).mock.calls;
+
+      expect(serviceCalls.length).toBeGreaterThan(0);
+
+      const pageSizeArg = (serviceCalls[0] as unknown[])[2];
+
+      expect(pageSizeArg).toBeUndefined();
+    });
+
+    test('listTasks with pageSize=0 passes undefined to taskService', async () => {
+      (taskService.listTasks as ReturnType<typeof mock>).mockResolvedValue({
+        tasks: [],
+        nextPageToken: undefined,
+      });
+
+      const request = { parent: 'projects/p/locations/l/queues/q', pageSize: 0 };
+      const call = makeCall(request);
+      const callback = makeCallback();
+
+      await handlers.listTasks(call, callback as Parameters<typeof handlers.listTasks>[1]);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      const callErr = firstCallArg0<null>(callback);
+
+      expect(callErr).toBeNull();
+
+      const serviceCalls = (taskService.listTasks as ReturnType<typeof mock>).mock.calls;
+
+      expect(serviceCalls.length).toBeGreaterThan(0);
+
+      const pageSizeArg = (serviceCalls[0] as unknown[])[2];
+
+      expect(pageSizeArg).toBeUndefined();
+    });
+
+    test('listQueues with explicit pageSize passes it through', async () => {
+      (queueService.listQueues as ReturnType<typeof mock>).mockResolvedValue({
+        queues: [],
+        nextPageToken: undefined,
+      });
+
+      const request = { parent: 'projects/p/locations/l', pageSize: 25 };
+      const call = makeCall(request);
+      const callback = makeCallback();
+
+      await handlers.listQueues(call, callback as Parameters<typeof handlers.listQueues>[1]);
+
+      const serviceCalls = (queueService.listQueues as ReturnType<typeof mock>).mock.calls;
+
+      expect((serviceCalls[0] as unknown[])[2]).toBe(25);
+    });
+  });
+
+  describe('invalid resource name → INVALID_ARGUMENT', () => {
+    test('listQueues with malformed parent returns INVALID_ARGUMENT', async () => {
+      const request = { parent: 'bad-parent-format' };
+      const call = makeCall(request);
+      const callback = makeCallback();
+
+      await handlers.listQueues(call, callback as Parameters<typeof handlers.listQueues>[1]);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      const callErr = firstCallArg0<grpc.ServiceError>(callback);
+
+      expect(callErr.code).toBe(grpc.status.INVALID_ARGUMENT);
+    });
+
+    test('createQueue with malformed parent returns INVALID_ARGUMENT', async () => {
+      const request = {
+        parent: 'not-valid',
+        queue: { name: 'projects/p/locations/l/queues/q' },
+      };
+      const call = makeCall(request);
+      const callback = makeCallback();
+
+      await handlers.createQueue(call, callback as Parameters<typeof handlers.createQueue>[1]);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      const callErr = firstCallArg0<grpc.ServiceError>(callback);
+
+      expect(callErr.code).toBe(grpc.status.INVALID_ARGUMENT);
+    });
+
+    test('createTask with malformed parent returns INVALID_ARGUMENT', async () => {
+      const request = {
+        parent: 'not-valid',
+        task: { httpRequest: { url: 'http://localhost/callback' } },
+      };
+      const call = makeCall(request);
+      const callback = makeCallback();
+
+      await handlers.createTask(call, callback as Parameters<typeof handlers.createTask>[1]);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      const callErr = firstCallArg0<grpc.ServiceError>(callback);
+
+      expect(callErr.code).toBe(grpc.status.INVALID_ARGUMENT);
+    });
+  });
+
+  describe('conversion helpers (exercised through handlers)', () => {
+    test('taskResponseToProto converts ISO scheduleTime to proto Timestamp', async () => {
+      const fakeTask = {
+        name: 'projects/p/locations/l/queues/q/tasks/t',
+        scheduleTime: '2026-01-01T00:00:00.000Z',
+        createTime: '2026-01-01T00:00:00.000Z',
+        dispatchDeadline: '600s',
+        dispatchCount: 0,
+        responseCount: 0,
+        view: 'FULL',
+      };
+
+      (taskService.getTask as ReturnType<typeof mock>).mockResolvedValue(fakeTask);
+
+      const call = makeCall({ name: fakeTask.name });
+      const callback = makeCallback();
+
+      await handlers.getTask(call, callback as Parameters<typeof handlers.getTask>[1]);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      const callErr = firstCallArg0<null>(callback);
+
+      expect(callErr).toBeNull();
+
+      type ProtoTask = {
+        scheduleTime: { seconds: string; nanos: number };
+        dispatchDeadline: { seconds: string; nanos: number };
+      };
+      const result = (callback as unknown as MockCalls<[null, ProtoTask]>).mock.calls[0]?.[1];
+
+      expect(result?.scheduleTime.seconds).toBe('1767225600');
+      expect(result?.scheduleTime.nanos).toBe(0);
+      expect(result?.dispatchDeadline.seconds).toBe('600');
+      expect(result?.dispatchDeadline.nanos).toBe(0);
+    });
+
+    test('taskResponseToProto converts fractional duration correctly', async () => {
+      const fakeTask = {
+        name: 'projects/p/locations/l/queues/q/tasks/t',
+        scheduleTime: '2026-01-01T00:00:00.000Z',
+        createTime: '2026-01-01T00:00:00.000Z',
+        dispatchDeadline: '1.5s',
+        dispatchCount: 0,
+        responseCount: 0,
+        view: 'FULL',
+      };
+
+      (taskService.getTask as ReturnType<typeof mock>).mockResolvedValue(fakeTask);
+
+      const call = makeCall({ name: fakeTask.name });
+      const callback = makeCallback();
+
+      await handlers.getTask(call, callback as Parameters<typeof handlers.getTask>[1]);
+
+      type ProtoTask = { dispatchDeadline: { seconds: string; nanos: number } };
+      const result = (callback as unknown as MockCalls<[null, ProtoTask]>).mock.calls[0]?.[1];
+
+      expect(result?.dispatchDeadline.seconds).toBe('1');
+      expect(result?.dispatchDeadline.nanos).toBe(500000000);
+    });
+
+    test('createTask with Buffer body encodes to base64', async () => {
+      const fakeTask = {
+        name: 'projects/p/locations/l/queues/q/tasks/t',
+        scheduleTime: '2026-01-01T00:00:00.000Z',
+        createTime: '2026-01-01T00:00:00.000Z',
+        dispatchDeadline: '600s',
+        dispatchCount: 0,
+        responseCount: 0,
+        view: 'FULL',
+      };
+
+      (taskService.createTask as ReturnType<typeof mock>).mockResolvedValue(fakeTask);
+
+      const rawBody = Buffer.from('hello');
+      const request = {
+        parent: 'projects/p/locations/l/queues/q',
+        task: {
+          payloadType: 'httpRequest',
+          httpRequest: {
+            url: 'http://localhost/callback',
+            httpMethod: 'POST',
+            body: rawBody as unknown as string,
+          },
+        },
+      };
+
+      const call = makeCall(request);
+      const callback = makeCallback();
+
+      await handlers.createTask(call, callback as Parameters<typeof handlers.createTask>[1]);
+
+      const serviceCalls = (taskService.createTask as ReturnType<typeof mock>).mock.calls;
+
+      expect(serviceCalls.length).toBeGreaterThan(0);
+
+      type CreateBody = { task: { httpRequest: { body: string } } };
+      const body = (serviceCalls[0] as unknown[])[3] as CreateBody;
+
+      expect(body.task.httpRequest.body).toBe('aGVsbG8=');
+    });
+
+    test('createTask with numeric HTTP method 0 normalizes to POST', async () => {
+      const fakeTask = {
+        name: 'projects/p/locations/l/queues/q/tasks/t',
+        scheduleTime: '2026-01-01T00:00:00.000Z',
+        createTime: '2026-01-01T00:00:00.000Z',
+        dispatchDeadline: '600s',
+        dispatchCount: 0,
+        responseCount: 0,
+        view: 'FULL',
+      };
+
+      (taskService.createTask as ReturnType<typeof mock>).mockResolvedValue(fakeTask);
+
+      const request = {
+        parent: 'projects/p/locations/l/queues/q',
+        task: {
+          payloadType: 'httpRequest',
+          httpRequest: {
+            url: 'http://localhost/callback',
+            httpMethod: 0,
+          },
+        },
+      };
+
+      const call = makeCall(request);
+      const callback = makeCallback();
+
+      await handlers.createTask(call, callback as Parameters<typeof handlers.createTask>[1]);
+
+      const serviceCalls = (taskService.createTask as ReturnType<typeof mock>).mock.calls;
+
+      expect(serviceCalls.length).toBeGreaterThan(0);
+
+      type CreateBody = { task: { httpRequest: { httpMethod: string } } };
+      const body = (serviceCalls[0] as unknown[])[3] as CreateBody;
+
+      expect(body.task.httpRequest.httpMethod).toBe('POST');
+    });
+
+    test('normalizeResponseView collapses 0 and VIEW_UNSPECIFIED to undefined', async () => {
+      (taskService.getTask as ReturnType<typeof mock>).mockResolvedValue({
+        name: 'projects/p/locations/l/queues/q/tasks/t',
+        scheduleTime: '2026-01-01T00:00:00.000Z',
+        createTime: '2026-01-01T00:00:00.000Z',
+        dispatchDeadline: '600s',
+        dispatchCount: 0,
+        responseCount: 0,
+        view: 'BASIC',
+      });
+
+      const call = makeCall({ name: 'projects/p/locations/l/queues/q/tasks/t', responseView: '0' });
+      const callback = makeCallback();
+
+      await handlers.getTask(call, callback as Parameters<typeof handlers.getTask>[1]);
+
+      const serviceCalls = (taskService.getTask as ReturnType<typeof mock>).mock.calls;
+
+      expect(serviceCalls.length).toBeGreaterThan(0);
+
+      const viewArg = (serviceCalls[0] as unknown[])[1];
+
+      expect(viewArg).toBeUndefined();
+    });
+
+    test('normalizeResponseView maps FULL and "2" to FULL', async () => {
+      (taskService.getTask as ReturnType<typeof mock>).mockResolvedValue({
+        name: 'projects/p/locations/l/queues/q/tasks/t',
+        scheduleTime: '2026-01-01T00:00:00.000Z',
+        createTime: '2026-01-01T00:00:00.000Z',
+        dispatchDeadline: '600s',
+        dispatchCount: 0,
+        responseCount: 0,
+        view: 'FULL',
+      });
+
+      const call = makeCall({ name: 'projects/p/locations/l/queues/q/tasks/t', responseView: '2' });
+      const callback = makeCallback();
+
+      await handlers.getTask(call, callback as Parameters<typeof handlers.getTask>[1]);
+
+      const serviceCalls = (taskService.getTask as ReturnType<typeof mock>).mock.calls;
+
+      expect(serviceCalls.length).toBeGreaterThan(0);
+
+      const viewArg = (serviceCalls[0] as unknown[])[1];
+
+      expect(viewArg).toBe('FULL');
+    });
+  });
 });

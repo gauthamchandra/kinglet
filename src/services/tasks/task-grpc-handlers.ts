@@ -22,6 +22,17 @@ import type { TaskService } from './task-service.ts';
 import type { QueueResponse, RateLimits, TaskResponse, TaskRetryConfig } from './types.ts';
 import { parseQueueName } from './types.ts';
 
+function parseQueueNameSafe(name: string): ReturnType<typeof parseQueueName> {
+  try {
+    return parseQueueName(name);
+  } catch (err) {
+    throw new TasksError(
+      'INVALID_ARGUMENT',
+      err instanceof Error ? err.message : 'Invalid resource name'
+    );
+  }
+}
+
 // ── Proto message shapes (what proto-loader deserialises into JS) ──
 
 interface ProtoDuration {
@@ -543,12 +554,13 @@ export class CloudTasksGrpcHandlers {
   ): Promise<void> => {
     try {
       const { parent, pageSize, pageToken, filter } = call.request;
-      const { project, location } = parseQueueName(`${parent}/queues/__placeholder__`);
+      const { project, location } = parseQueueNameSafe(`${parent}/queues/__placeholder__`);
+      const effectivePageSize = pageSize != null && pageSize > 0 ? pageSize : undefined;
 
       const result = await this.queueService.listQueues(
         project,
         location,
-        pageSize,
+        effectivePageSize,
         pageToken,
         filter
       );
@@ -578,7 +590,7 @@ export class CloudTasksGrpcHandlers {
   ): Promise<void> => {
     try {
       const { parent, queue } = call.request;
-      const { project, location } = parseQueueName(`${parent}/queues/__placeholder__`);
+      const { project, location } = parseQueueNameSafe(`${parent}/queues/__placeholder__`);
 
       let queueId: string;
 
@@ -676,7 +688,8 @@ export class CloudTasksGrpcHandlers {
     try {
       const { parent, responseView, pageSize, pageToken } = call.request;
       const view = normalizeResponseView(responseView);
-      const result = await this.taskService.listTasks(parent, view, pageSize, pageToken);
+      const effectivePageSize = pageSize != null && pageSize > 0 ? pageSize : undefined;
+      const result = await this.taskService.listTasks(parent, view, effectivePageSize, pageToken);
 
       callback(null, listTasksResponseToProto(result));
     } catch (err) {
@@ -704,7 +717,7 @@ export class CloudTasksGrpcHandlers {
   ): Promise<void> => {
     try {
       const { parent, task, responseView } = call.request;
-      const parsed = parseQueueName(parent);
+      const parsed = parseQueueNameSafe(parent);
       const body = buildTaskRequestBody(task, responseView);
       const result = await this.taskService.createTask(
         parsed.project,
