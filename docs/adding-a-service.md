@@ -65,6 +65,10 @@ and `handlers.ts` can be tested with a mocked service. If you find yourself doin
 queries in a handler or formatting JSON responses in a service, the layering has broken and
 the tests will get harder to write — that is the signal, not a style preference.
 
+`src/architecture/architecture.test.ts` enforces the import graph: no cycles, handlers must
+not reach repositories or storage, services must not import handlers, repositories must not
+import services, and service folders must not import each other.
+
 ---
 
 ## Step by step

@@ -24,7 +24,7 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun run healthcheck` - Run health check script
 
 ### Testing
-- `bun test` - Run unit and integration tests (not e2e — see Testing Standards below)
+- `bun test` - Run unit and integration tests, including architecture rules (not e2e — see Testing Standards below)
 - `bun test --watch` - Run tests in watch mode
 - `bun test --coverage` - Run tests with coverage report
 - `bun run test:coverage:check` - Coverage report plus the 80% aggregate gate CI enforces
@@ -34,7 +34,7 @@ A high-performance local emulation environment for Google Cloud Platform service
 - `bun test terraform/terraform.test.ts -t "<id>"` - Same single-case filter without npm script
 
 ### Code Quality
-- `bun run lint` - Run Biome linter (+ tsc + knip)
+- `bun run lint` - Run Biome linter (+ tsc + knip + copy-paste alias check)
 - `bun run lint:fix` - Run Biome linter with auto-fix
 - `bun run format` - Format code with Biome
 - `bun run format:check` - Check formatting without writing
