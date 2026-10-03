@@ -32,10 +32,9 @@ body:
   - type: input
     id: discovery
     attributes:
-      label: Discovery document URL
+      label: Discovery document URL or proto path
+      description: For REST APIs, provide the discovery document URL. For gRPC-only gaps, a proto path or gRPC method name (e.g. google.cloud.tasks.v2.CloudTasks/GetQueue) is enough.
       placeholder: https://pubsub.googleapis.com/$discovery/rest?version=v1
-    validations:
-      required: true
 
   - type: textarea
     id: blocked
