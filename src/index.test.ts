@@ -93,7 +93,11 @@ describe('src/index.ts shutdown', () => {
 
   test('grpc_tasksService_registeredOnConfiguredPort_andStopsCleanlyOnSigterm', async () => {
     const httpPort = freePort();
-    const grpcPort = freePort();
+    let grpcPort = freePort();
+
+    while (grpcPort === httpPort) {
+      grpcPort = freePort();
+    }
 
     const child = Bun.spawn(['bun', INDEX_ENTRYPOINT], {
       cwd: REPO_ROOT,
