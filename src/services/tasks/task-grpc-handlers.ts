@@ -615,9 +615,16 @@ export class CloudTasksGrpcHandlers {
             );
           }
 
-          const parts = queue.name.split('/');
+          const queueIdFromName = queue.name.substring(expectedPrefix.length);
 
-          queueId = parts[parts.length - 1] ?? '';
+          if (!queueIdFromName || queueIdFromName.includes('/')) {
+            throw new TasksError(
+              'INVALID_ARGUMENT',
+              `queue.name "${queue.name}" is not a valid queue resource name`
+            );
+          }
+
+          queueId = queueIdFromName;
         } else {
           queueId = queue.name;
         }
@@ -844,7 +851,14 @@ const PROTO_FIELD_TO_CAMEL: Record<string, string> = {
 };
 
 function convertUpdateMaskPaths(paths: string[]): string {
-  return paths.map(p => PROTO_FIELD_TO_CAMEL[p] ?? p).join(',');
+  const camelPaths = paths.map(p => {
+    const dotIdx = p.indexOf('.');
+    const topLevel = dotIdx >= 0 ? p.substring(0, dotIdx) : p;
+
+    return PROTO_FIELD_TO_CAMEL[topLevel] ?? topLevel;
+  });
+
+  return [...new Set(camelPaths)].join(',');
 }
 
 // ── Queue request body builder ──
@@ -865,13 +879,13 @@ function buildQueueRequestBody(queue: Record<string, unknown>): Record<string, u
 
     const maxBurst = rl.maxBurstSize;
 
-    if (maxBurst != null && maxBurst > 0) {
+    if (maxBurst != null) {
       rateLimits.maxBurstSize = maxBurst;
     }
 
     const maxConcurrent = rl.maxConcurrentDispatches;
 
-    if (maxConcurrent != null && maxConcurrent > 0) {
+    if (maxConcurrent != null) {
       rateLimits.maxConcurrentDispatches = maxConcurrent;
     }
 

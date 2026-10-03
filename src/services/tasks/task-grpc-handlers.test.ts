@@ -465,7 +465,7 @@ describe('CloudTasksGrpcHandlers', () => {
 
       (taskService.createTask as ReturnType<typeof mock>).mockResolvedValue(fakeTask);
 
-      const rawBody = Buffer.from('hello');
+      const rawBody = new TextEncoder().encode('hello');
       const request = {
         parent: 'projects/p/locations/l/queues/q',
         task: {
@@ -766,7 +766,7 @@ describe('CloudTasksGrpcHandlers', () => {
       expect(rl).toBeDefined();
       expect(rl?.maxConcurrentDispatches).toBe(5);
       expect(rl?.maxDispatchesPerSecond).toBeUndefined();
-      expect(rl?.maxBurstSize).toBeUndefined();
+      expect(rl?.maxBurstSize).toBe(0);
     });
   });
 
@@ -846,6 +846,173 @@ describe('CloudTasksGrpcHandlers', () => {
         .calls[0] as UpdateArgs;
 
       expect(maskStr).toBeUndefined();
+    });
+
+    test('converts nested proto mask paths to top-level camelCase', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/l/queues/q',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.updateQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({
+        queue: {
+          name: 'projects/p/locations/l/queues/q',
+          rateLimits: { maxConcurrentDispatches: 10, maxDispatchesPerSecond: 0, maxBurstSize: 0 },
+        },
+        updateMask: { paths: ['rate_limits.max_concurrent_dispatches'] },
+      });
+      const callback = makeCallback();
+
+      await handlers.updateQueue(call, callback as Parameters<typeof handlers.updateQueue>[1]);
+
+      type UpdateArgs = [string, Record<string, unknown>, string | undefined];
+      const [, , maskStr] = (queueService.updateQueue as ReturnType<typeof mock>).mock
+        .calls[0] as UpdateArgs;
+
+      expect(maskStr).toBe('rateLimits');
+    });
+
+    test('deduplicates nested paths that share the same top-level field', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/l/queues/q',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.updateQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({
+        queue: {
+          name: 'projects/p/locations/l/queues/q',
+          rateLimits: { maxConcurrentDispatches: 10, maxDispatchesPerSecond: 5, maxBurstSize: 0 },
+        },
+        updateMask: {
+          paths: ['rate_limits.max_concurrent_dispatches', 'rate_limits.max_burst_size'],
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.updateQueue(call, callback as Parameters<typeof handlers.updateQueue>[1]);
+
+      type UpdateArgs = [string, Record<string, unknown>, string | undefined];
+      const [, , maskStr] = (queueService.updateQueue as ReturnType<typeof mock>).mock
+        .calls[0] as UpdateArgs;
+
+      expect(maskStr).toBe('rateLimits');
+    });
+  });
+
+  describe('createQueue - malformed name validation', () => {
+    test('rejects queue.name with extra path segments beyond the queue ID', async () => {
+      const call = makeCall({
+        parent: 'projects/p/locations/l',
+        queue: {
+          name: 'projects/p/locations/l/queues/valid/extra',
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createQueue(call, callback as Parameters<typeof handlers.createQueue>[1]);
+
+      const [err] = (callback as ReturnType<typeof mock>).mock.calls[0] as [grpc.ServiceError];
+
+      expect(err.code).toBe(grpc.status.INVALID_ARGUMENT);
+    });
+
+    test('rejects queue.name with trailing slash producing an empty ID', async () => {
+      const call = makeCall({
+        parent: 'projects/p/locations/l',
+        queue: {
+          name: 'projects/p/locations/l/queues/',
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createQueue(call, callback as Parameters<typeof handlers.createQueue>[1]);
+
+      const [err] = (callback as ReturnType<typeof mock>).mock.calls[0] as [grpc.ServiceError];
+
+      expect(err.code).toBe(grpc.status.INVALID_ARGUMENT);
+    });
+  });
+
+  describe('buildQueueRequestBody - zero-valued rate limit fields', () => {
+    test('omits zero maxDispatchesPerSecond but forwards zero maxBurstSize and maxConcurrentDispatches', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/us-central1/queues/q',
+        state: 'RUNNING',
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 0,
+          maxConcurrentDispatches: 0,
+        },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.createQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({
+        parent: 'projects/p/locations/us-central1',
+        queue: {
+          name: 'projects/p/locations/us-central1/queues/q',
+          rateLimits: {
+            maxDispatchesPerSecond: 0,
+            maxBurstSize: 0,
+            maxConcurrentDispatches: 0,
+          },
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createQueue(call, callback as Parameters<typeof handlers.createQueue>[1]);
+
+      type CreateArgs = [string, string, string, Record<string, unknown>];
+      const [, , , body] = (queueService.createQueue as ReturnType<typeof mock>).mock
+        .calls[0] as CreateArgs;
+
+      const rl = body.rateLimits as Record<string, number> | undefined;
+
+      expect(rl).toBeDefined();
+      expect(rl?.maxDispatchesPerSecond).toBeUndefined();
+      expect(rl?.maxBurstSize).toBe(0);
+      expect(rl?.maxConcurrentDispatches).toBe(0);
     });
   });
 });
