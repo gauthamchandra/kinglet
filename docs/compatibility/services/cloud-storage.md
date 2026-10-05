@@ -5,7 +5,7 @@
 **Status:** Experimental
 **API version:** v1
 **Data plane:** File-backed objects
-**Endpoint coverage:** 15/78 (19%)
+**Endpoint coverage:** 15/79 (19%)
 
 Bucket CRUD, object upload/download, copy, compose, and rewrite.
 
@@ -77,6 +77,7 @@ Bucket CRUD, object upload/download, copy, compose, and rewrite.
 - `POST` `b/{bucket}/o/bulkRestore` — `objects.bulkRestore`
 - `POST` `b/{bucket}/o/{sourceObject}/moveTo/o/{destinationObject}` — `objects.move`
 - `POST` `b/{bucket}/o/{object}/restore` — `objects.restore`
+- `GET` `b/{bucket}/o/{object}/viewFullContext` — `objects.viewFullContext`
 - `POST` `b/{bucket}/operations/{operationId}/advanceRelocateBucket` — `operations.advanceRelocateBucket`
 - `POST` `b/{bucket}/operations/{operationId}/cancel` — `operations.cancel`
 - `GET` `b/{bucket}/operations/{operationId}` — `operations.get`
