@@ -970,7 +970,11 @@ describe('CloudTasksGrpcHandlers', () => {
       const fakeQueue = {
         name: 'projects/p/locations/us-central1/queues/q',
         state: 'RUNNING',
-        rateLimits: { maxDispatchesPerSecond: 500, maxBurstSize: 100, maxConcurrentDispatches: 1000 },
+        rateLimits: {
+          maxDispatchesPerSecond: 500,
+          maxBurstSize: 100,
+          maxConcurrentDispatches: 1000,
+        },
         retryConfig: {
           maxAttempts: 3,
           maxRetryDuration: '0s',
