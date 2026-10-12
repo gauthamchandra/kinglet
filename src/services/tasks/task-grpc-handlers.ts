@@ -879,13 +879,13 @@ function buildQueueRequestBody(queue: Record<string, unknown>): Record<string, u
 
     const maxBurst = rl.maxBurstSize;
 
-    if (maxBurst != null && maxBurst > 0) {
+    if (maxBurst != null && maxBurst !== 0) {
       rateLimits.maxBurstSize = maxBurst;
     }
 
     const maxConcurrent = rl.maxConcurrentDispatches;
 
-    if (maxConcurrent != null && maxConcurrent > 0) {
+    if (maxConcurrent != null && maxConcurrent !== 0) {
       rateLimits.maxConcurrentDispatches = maxConcurrent;
     }
 

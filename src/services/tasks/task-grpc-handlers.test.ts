@@ -965,6 +965,53 @@ describe('CloudTasksGrpcHandlers', () => {
     });
   });
 
+  describe('buildQueueRequestBody - negative rate limit fields', () => {
+    test('forwards negative maxBurstSize to the service so it can return INVALID_ARGUMENT', async () => {
+      const fakeQueue = {
+        name: 'projects/p/locations/us-central1/queues/q',
+        state: 'RUNNING',
+        rateLimits: { maxDispatchesPerSecond: 500, maxBurstSize: 100, maxConcurrentDispatches: 1000 },
+        retryConfig: {
+          maxAttempts: 3,
+          maxRetryDuration: '0s',
+          minBackoff: '0.1s',
+          maxBackoff: '3600s',
+          maxDoublings: 16,
+        },
+        taskTtl: '604800s',
+        tombstoneTtl: '86400s',
+      };
+
+      (queueService.createQueue as ReturnType<typeof mock>).mockResolvedValue(fakeQueue);
+
+      const call = makeCall({
+        parent: 'projects/p/locations/us-central1',
+        queue: {
+          name: 'projects/p/locations/us-central1/queues/q',
+          rateLimits: {
+            maxDispatchesPerSecond: 0,
+            maxBurstSize: -1,
+            maxConcurrentDispatches: -1,
+          },
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createQueue(call, callback as Parameters<typeof handlers.createQueue>[1]);
+
+      type CreateArgs = [string, string, string, Record<string, unknown>];
+      const [, , , body] = (queueService.createQueue as ReturnType<typeof mock>).mock
+        .calls[0] as CreateArgs;
+
+      const rl = body.rateLimits as Record<string, number> | undefined;
+
+      expect(rl).toBeDefined();
+      expect(rl?.maxBurstSize).toBe(-1);
+      expect(rl?.maxConcurrentDispatches).toBe(-1);
+      expect(rl?.maxDispatchesPerSecond).toBeUndefined();
+    });
+  });
+
   describe('buildQueueRequestBody - zero-valued rate limit fields', () => {
     test('omits all zero-valued rate limit fields (proto-loader defaults cannot be distinguished from explicit zeros)', async () => {
       const fakeQueue = {
