@@ -766,7 +766,7 @@ describe('CloudTasksGrpcHandlers', () => {
       expect(rl).toBeDefined();
       expect(rl?.maxConcurrentDispatches).toBe(5);
       expect(rl?.maxDispatchesPerSecond).toBeUndefined();
-      expect(rl?.maxBurstSize).toBe(0);
+      expect(rl?.maxBurstSize).toBeUndefined();
     });
   });
 
@@ -966,7 +966,7 @@ describe('CloudTasksGrpcHandlers', () => {
   });
 
   describe('buildQueueRequestBody - zero-valued rate limit fields', () => {
-    test('omits zero maxDispatchesPerSecond but forwards zero maxBurstSize and maxConcurrentDispatches', async () => {
+    test('omits all zero-valued rate limit fields (proto-loader defaults cannot be distinguished from explicit zeros)', async () => {
       const fakeQueue = {
         name: 'projects/p/locations/us-central1/queues/q',
         state: 'RUNNING',
@@ -1009,10 +1009,7 @@ describe('CloudTasksGrpcHandlers', () => {
 
       const rl = body.rateLimits as Record<string, number> | undefined;
 
-      expect(rl).toBeDefined();
-      expect(rl?.maxDispatchesPerSecond).toBeUndefined();
-      expect(rl?.maxBurstSize).toBe(0);
-      expect(rl?.maxConcurrentDispatches).toBe(0);
+      expect(rl).toBeUndefined();
     });
   });
 });
