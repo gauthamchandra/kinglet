@@ -13,6 +13,8 @@ export interface GrpcServiceDefinition {
   packageName: string;
   serviceName: string;
   implementation: grpc.UntypedServiceImplementation;
+  /** Additional directories proto-loader searches for imported .proto files. */
+  includeDirs?: string[];
 }
 
 export class GrpcServer {
@@ -35,14 +37,22 @@ export class GrpcServer {
     try {
       this.logger.debug(`Registering gRPC service: ${serviceDefinition.name}`);
 
-      // Load the protocol buffer definition
-      const packageDefinition = protoLoader.loadSync(serviceDefinition.protoPath, {
-        keepCase: true,
+      // Load the protocol buffer definition.
+      // keepCase: false (default) converts snake_case proto field names to camelCase,
+      // which matches the existing service layer's expected field names.
+      const loaderOptions: protoLoader.Options = {
+        keepCase: false,
         longs: String,
         enums: String,
         defaults: true,
         oneofs: true,
-      });
+      };
+
+      if (serviceDefinition.includeDirs) {
+        loaderOptions.includeDirs = serviceDefinition.includeDirs;
+      }
+
+      const packageDefinition = protoLoader.loadSync(serviceDefinition.protoPath, loaderOptions);
 
       const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as unknown;
 
@@ -64,11 +74,13 @@ export class GrpcServer {
         );
       }
 
-      // Validate that the ServiceConstructor has a service property
+      // Validate that the ServiceConstructor has a service property.
+      // proto-loader returns service constructors as functions (not plain objects),
+      // so we accept both object and function types here.
       if (
-        typeof ServiceConstructor !== 'object' ||
+        (typeof ServiceConstructor !== 'object' && typeof ServiceConstructor !== 'function') ||
         ServiceConstructor === null ||
-        !('service' in ServiceConstructor)
+        !('service' in (ServiceConstructor as object))
       ) {
         throw new Error(
           `ServiceConstructor for ${serviceDefinition.serviceName} does not have a 'service' property. ` +
@@ -106,7 +118,7 @@ export class GrpcServer {
    */
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const bindAddress = `0.0.0.0:${this.config.grpcPort}`;
+      const bindAddress = `127.0.0.1:${this.config.grpcPort}`;
 
       this.server.bindAsync(bindAddress, grpc.ServerCredentials.createInsecure(), (error, port) => {
         if (error) {
@@ -116,7 +128,6 @@ export class GrpcServer {
           return;
         }
 
-        this.server.start();
         this.isRunning = true;
         this.logger.info(`gRPC server started on port ${port}`);
         resolve();

@@ -10,6 +10,7 @@ import {
   type ComposableOperationsStore,
   isComposedOperationsPath,
 } from '@/core/gateway/composable-operations.ts';
+import { GrpcServer } from '@/core/gateway/grpc-server.ts';
 import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
@@ -32,6 +33,7 @@ import { Logger } from '@/shared/utils/logger.ts';
 const logger = new Logger('Main');
 
 let server: Server | null = null;
+let grpcServer: GrpcServer | null = null;
 let storageManager: StorageManager | null = null;
 let schedulerService: SchedulerService | null = null;
 let tasksService: CloudTasksService | null = null;
@@ -303,6 +305,18 @@ async function main(): Promise<void> {
 
     logger.info(`kinglet started on port ${server.port}`);
 
+    // Start gRPC server and register any services that expose gRPC definitions.
+    grpcServer = new GrpcServer(config.server, new Logger('GrpcServer'));
+
+    if (tasksService) {
+      for (const def of tasksService.getGrpcServices()) {
+        grpcServer.registerService(def);
+      }
+    }
+
+    await grpcServer.start();
+    logger.info(`gRPC server started on port ${config.server.grpcPort}`);
+
     // Bind the Armor listener after the control-plane HTTP server so a
     // COMPUTE_LISTENER_PORT that matches HTTP_PORT cannot steal the port and
     // take the whole emulator down. start() also skips that reserved port.
@@ -367,6 +381,12 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
       server.stop();
       server = null;
       logger.info('HTTP server stopped');
+    }
+
+    if (grpcServer) {
+      await grpcServer.stop();
+      grpcServer = null;
+      logger.info('gRPC server stopped');
     }
 
     if (schedulerService) {
