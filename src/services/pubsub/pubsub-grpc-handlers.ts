@@ -264,6 +264,15 @@ interface ValidateMessageRequest {
   message?: Uint8Array | string;
 }
 
+interface StreamingPullRequest {
+  subscription?: string;
+  ackIds?: string[];
+  modifyDeadlineSeconds?: number[];
+  modifyDeadlineAckIds?: string[];
+  streamAckDeadlineSeconds?: number;
+  clientId?: string;
+}
+
 // ── Error mapping ──
 
 const PUBSUB_ERROR_TO_GRPC: Record<string, grpc.status> = {
@@ -287,13 +296,6 @@ function toGrpcError(err: unknown): grpc.ServiceError {
   }) as grpc.ServiceError;
 
   return grpcErr;
-}
-
-function unimplemented(methodName: string): grpc.ServiceError {
-  return Object.assign(new Error(`${methodName} not implemented`), {
-    code: grpc.status.UNIMPLEMENTED,
-    name: 'ServiceError',
-  }) as grpc.ServiceError;
 }
 
 // ── Data conversion utilities ──
@@ -1086,14 +1088,102 @@ export class PubSubGrpcHandlers {
     }
   };
 
-  // ── Subscriber: StreamingPull (UNIMPLEMENTED stub) ──
+  // ── Subscriber: StreamingPull ──
 
-  streamingPull = (call: grpc.ServerDuplexStream<unknown, unknown>): void => {
-    // Emit the error so the ServerDuplexStreamImpl's internal 'error' handler
-    // sets pendingStatus = UNIMPLEMENTED and calls end() → _final() →
-    // sendStatus() to the client, rather than using call.destroy() which
-    // marks the stream destroyed before _final() can run.
-    call.emit('error', unimplemented('StreamingPull'));
+  streamingPull = (call: grpc.ServerDuplexStream<StreamingPullRequest, unknown>): void => {
+    let subscriptionName = '';
+    let streamAckDeadlineSeconds = 10;
+    let cancelled = false;
+    let pollTimeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const stopPolling = () => {
+      cancelled = true;
+
+      if (pollTimeoutId !== undefined) {
+        clearTimeout(pollTimeoutId);
+        pollTimeoutId = undefined;
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      if (cancelled) {
+        return;
+      }
+
+      pollTimeoutId = setTimeout(() => {
+        void pollMessages();
+      }, 100);
+    };
+
+    const pollMessages = async () => {
+      if (cancelled || !subscriptionName) {
+        return;
+      }
+
+      try {
+        const result = await this.subscriptionService.pull(subscriptionName, {
+          maxMessages: 100,
+        });
+
+        if (result.receivedMessages.length > 0 && !cancelled) {
+          call.write({
+            receivedMessages: result.receivedMessages.map(receivedMessageToProto),
+          });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          stopPolling();
+          call.emit('error', toGrpcError(err));
+
+          return;
+        }
+      }
+
+      scheduleNextPoll();
+    };
+
+    call.on('data', (request: StreamingPullRequest) => {
+      if (!subscriptionName && request.subscription) {
+        subscriptionName = request.subscription;
+        streamAckDeadlineSeconds = request.streamAckDeadlineSeconds ?? 10;
+        scheduleNextPoll();
+      }
+
+      if (request.ackIds && request.ackIds.length > 0) {
+        void this.subscriptionService
+          .acknowledge(subscriptionName, { ackIds: request.ackIds })
+          .catch(() => {
+            // Ack errors in streaming pull are non-fatal
+          });
+      }
+
+      const modIds = request.modifyDeadlineAckIds ?? [];
+      const modSeconds = request.modifyDeadlineSeconds ?? [];
+
+      if (modIds.length > 0) {
+        void this.subscriptionService
+          .modifyAckDeadline(subscriptionName, {
+            ackIds: modIds,
+            ackDeadlineSeconds: modSeconds[0] ?? streamAckDeadlineSeconds,
+          })
+          .catch(() => {
+            // Deadline modification errors are non-fatal
+          });
+      }
+    });
+
+    call.on('cancelled', () => {
+      stopPolling();
+    });
+
+    call.on('end', () => {
+      stopPolling();
+      call.end();
+    });
+
+    call.on('error', () => {
+      stopPolling();
+    });
   };
 
   // ── Subscriber: ModifyPushConfig ──

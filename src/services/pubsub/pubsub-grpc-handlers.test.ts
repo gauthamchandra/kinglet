@@ -676,23 +676,157 @@ describe('PubSubGrpcHandlers', () => {
     });
   });
 
-  // ── Subscriber: StreamingPull (UNIMPLEMENTED stub) ──
+  // ── Subscriber: StreamingPull ──
 
   describe('StreamingPull', () => {
-    test('emits UNIMPLEMENTED error on the call stream', () => {
-      const emitted: (Error & { code?: number })[] = [];
+    test('delivers messages to the client stream', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [
+          {
+            ackId: 'ack-1',
+            message: {
+              messageId: 'msg-1',
+              data: 'aGVsbG8=',
+              attributes: {},
+              publishTime: '2026-01-01T00:00:00.000Z',
+            },
+          },
+        ],
+      });
+
+      const written: unknown[] = [];
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+
       const mockCall = {
-        emit: (_event: string, err: unknown) => {
-          emitted.push(err as Error & { code?: number });
+        write: (chunk: unknown) => {
+          written.push(chunk);
         },
-        on: mock(),
+        end: mock(),
+        emit: mock(),
+        on: (event: string, handler: (arg: unknown) => void) => {
+          if (!eventListeners[event]) {
+            eventListeners[event] = [];
+          }
+
+          eventListeners[event].push(handler);
+        },
         metadata: new grpc.Metadata(),
       } as unknown as grpc.ServerDuplexStream<unknown, unknown>;
 
       handlers.streamingPull(mockCall);
 
-      expect(emitted).toHaveLength(1);
-      expect(emitted[0]?.code).toBe(grpc.status.UNIMPLEMENTED);
+      // Simulate first client request with subscription name
+      const dataListeners = eventListeners.data ?? [];
+
+      for (const listener of dataListeners) {
+        listener({
+          subscription: 'projects/p/subscriptions/s',
+          streamAckDeadlineSeconds: 10,
+          ackIds: [],
+        });
+      }
+
+      // Wait for async poll to complete
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(subscriptionService.pull).toHaveBeenCalled();
+      expect(written.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('processes ack requests from the client', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+      (subscriptionService.acknowledge as ReturnType<typeof mock>).mockResolvedValue(undefined);
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+
+      const mockCall = {
+        write: mock(),
+        end: mock(),
+        emit: mock(),
+        on: (event: string, handler: (arg: unknown) => void) => {
+          if (!eventListeners[event]) {
+            eventListeners[event] = [];
+          }
+
+          eventListeners[event].push(handler);
+        },
+        metadata: new grpc.Metadata(),
+      } as unknown as grpc.ServerDuplexStream<unknown, unknown>;
+
+      handlers.streamingPull(mockCall);
+
+      const dataListeners = eventListeners.data ?? [];
+
+      // Initial request
+      for (const listener of dataListeners) {
+        listener({
+          subscription: 'projects/p/subscriptions/s',
+          streamAckDeadlineSeconds: 10,
+        });
+      }
+
+      // Ack request
+      for (const listener of dataListeners) {
+        listener({
+          subscription: 'projects/p/subscriptions/s',
+          ackIds: ['ack-id-1', 'ack-id-2'],
+        });
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      expect(subscriptionService.acknowledge).toHaveBeenCalled();
+    });
+
+    test('stops polling on cancellation', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+
+      const mockCall = {
+        write: mock(),
+        end: mock(),
+        emit: mock(),
+        on: (event: string, handler: (arg: unknown) => void) => {
+          if (!eventListeners[event]) {
+            eventListeners[event] = [];
+          }
+
+          eventListeners[event].push(handler);
+        },
+        metadata: new grpc.Metadata(),
+      } as unknown as grpc.ServerDuplexStream<unknown, unknown>;
+
+      handlers.streamingPull(mockCall);
+
+      const dataListeners = eventListeners.data ?? [];
+
+      for (const listener of dataListeners) {
+        listener({
+          subscription: 'projects/p/subscriptions/s',
+          streamAckDeadlineSeconds: 10,
+        });
+      }
+
+      // Simulate cancellation
+      const cancelListeners = eventListeners.cancelled ?? [];
+
+      for (const listener of cancelListeners) {
+        listener(undefined);
+      }
+
+      const callsBefore = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls.length;
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const callsAfter = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls.length;
+
+      // After cancellation, no more polls should happen
+      expect(callsAfter).toBe(callsBefore);
     });
   });
 
