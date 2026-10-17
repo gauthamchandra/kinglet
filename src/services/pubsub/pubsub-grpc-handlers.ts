@@ -1431,10 +1431,11 @@ export class PubSubGrpcHandlers {
       }
 
       try {
-        const result = await this.subscriptionService.pull(subscriptionName, {
-          maxMessages: 100,
-          ackDeadlineSeconds: streamAckDeadlineSeconds,
-        });
+        const result = await this.subscriptionService.pull(
+          subscriptionName,
+          { maxMessages: 100 },
+          streamAckDeadlineSeconds
+        );
 
         if (result.receivedMessages.length > 0 && !cancelled) {
           const canWrite = call.write({

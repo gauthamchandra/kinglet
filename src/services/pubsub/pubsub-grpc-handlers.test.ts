@@ -737,10 +737,11 @@ describe('PubSubGrpcHandlers', () => {
 
       fireEvent(eventListeners, 'cancelled');
 
-      expect(subscriptionService.pull).toHaveBeenCalledWith('projects/p/subscriptions/s', {
-        maxMessages: 100,
-        ackDeadlineSeconds: 10,
-      });
+      expect(subscriptionService.pull).toHaveBeenCalledWith(
+        'projects/p/subscriptions/s',
+        { maxMessages: 100 },
+        10
+      );
       expect((mockCall.write as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
         1
       );

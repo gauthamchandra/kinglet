@@ -283,16 +283,18 @@ export class SubscriptionService {
     return { messageIds };
   }
 
-  async pull(subscriptionName: string, body: unknown): Promise<PullResponse> {
+  async pull(
+    subscriptionName: string,
+    body: unknown,
+    ackDeadlineOverride?: number
+  ): Promise<PullResponse> {
     const pullBody = body as
       | {
           maxMessages?: number;
           returnImmediately?: boolean;
-          ackDeadlineSeconds?: number;
         }
       | undefined;
     const maxMessages = pullBody?.maxMessages ?? 100;
-    const ackDeadlineOverride = pullBody?.ackDeadlineSeconds;
 
     // Verify subscription exists
     const sub = await this.subRepo.getSubscriptionByName(subscriptionName);
