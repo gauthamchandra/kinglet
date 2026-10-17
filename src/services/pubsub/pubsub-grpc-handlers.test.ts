@@ -762,8 +762,8 @@ describe('PubSubGrpcHandlers', () => {
         streamAckDeadlineSeconds: 10,
       });
 
+      // Subsequent requests must NOT include the subscription field (real GCP rejects those).
       fireEvent(eventListeners, 'data', {
-        subscription: 'projects/p/subscriptions/s',
         ackIds: ['ack-id-1', 'ack-id-2'],
       });
 
@@ -863,6 +863,66 @@ describe('PubSubGrpcHandlers', () => {
       expect(mockCall.emit).toHaveBeenCalledWith(
         'error',
         expect.objectContaining({ code: grpc.status.NOT_FOUND })
+      );
+    });
+
+    test('emits INVALID_ARGUMENT when subscription is set on a subsequent request', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        ackIds: [],
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockCall.emit).toHaveBeenCalledWith(
+        'error',
+        expect.objectContaining({ code: grpc.status.INVALID_ARGUMENT })
+      );
+    });
+
+    test('stopActiveStreams ends all active streaming calls', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+
+      const eventListeners1: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall1 = makeMockCall(eventListeners1);
+      const eventListeners2: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall2 = makeMockCall(eventListeners2);
+
+      handlers.streamingPull(mockCall1);
+      handlers.streamingPull(mockCall2);
+
+      fireEvent(eventListeners1, 'data', {
+        subscription: 'projects/p/subscriptions/s1',
+        streamAckDeadlineSeconds: 10,
+      });
+      fireEvent(eventListeners2, 'data', {
+        subscription: 'projects/p/subscriptions/s2',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      handlers.stopActiveStreams();
+
+      expect((mockCall1.end as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
+        1
+      );
+      expect((mockCall2.end as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
+        1
       );
     });
   });

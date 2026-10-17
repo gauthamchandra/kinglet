@@ -812,6 +812,10 @@ export class PubSubGrpcHandlers {
   private snapshotService: SnapshotService;
   private schemaService: SchemaService;
 
+  private readonly activeStreamingCalls = new Set<
+    grpc.ServerDuplexStream<StreamingPullRequest, unknown>
+  >();
+
   constructor(
     topicService: TopicService,
     subscriptionService: SubscriptionService,
@@ -1332,7 +1336,21 @@ export class PubSubGrpcHandlers {
 
   // ── Subscriber: StreamingPull ──
 
+  /**
+   * Close all active StreamingPull calls so that GrpcServer.tryShutdown() can
+   * complete during service shutdown instead of blocking indefinitely.
+   */
+  stopActiveStreams(): void {
+    for (const call of this.activeStreamingCalls) {
+      call.end();
+    }
+
+    this.activeStreamingCalls.clear();
+  }
+
   streamingPull = (call: grpc.ServerDuplexStream<StreamingPullRequest, unknown>): void => {
+    this.activeStreamingCalls.add(call);
+
     let subscriptionName = '';
     let streamAckDeadlineSeconds = 10;
     let cancelled = false;
@@ -1424,6 +1442,20 @@ export class PubSubGrpcHandlers {
         subscriptionName = request.subscription;
         streamAckDeadlineSeconds = deadline;
         scheduleNextPoll();
+      } else if (request.subscription && request.subscription.length > 0) {
+        stopPolling();
+        this.activeStreamingCalls.delete(call);
+        call.emit(
+          'error',
+          toGrpcError(
+            new PubSubError(
+              'INVALID_ARGUMENT',
+              'subscription field must only be set on the first StreamingPull request'
+            )
+          )
+        );
+
+        return;
       }
 
       if (request.ackIds && request.ackIds.length > 0) {
@@ -1456,15 +1488,18 @@ export class PubSubGrpcHandlers {
 
     call.on('cancelled', () => {
       stopPolling();
+      this.activeStreamingCalls.delete(call);
     });
 
     call.on('end', () => {
       stopPolling();
+      this.activeStreamingCalls.delete(call);
       call.end();
     });
 
     call.on('error', () => {
       stopPolling();
+      this.activeStreamingCalls.delete(call);
     });
   };
 

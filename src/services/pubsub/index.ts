@@ -47,6 +47,7 @@ export class PubSubService {
   private schemaHandlers!: SchemaHandlers;
 
   private deliveryEngine!: DeliveryEngine;
+  private grpcHandlers: PubSubGrpcHandlers | null = null;
 
   constructor(storage: StorageManager, logger: Logger) {
     this.storage = storage;
@@ -130,13 +131,16 @@ export class PubSubService {
       throw new Error('PubSubService not initialized. Call initialize() first.');
     }
 
-    const handlers = new PubSubGrpcHandlers(
-      this.topicService,
-      this.subscriptionService,
-      this.snapshotService,
-      this.schemaService
-    );
+    if (!this.grpcHandlers) {
+      this.grpcHandlers = new PubSubGrpcHandlers(
+        this.topicService,
+        this.subscriptionService,
+        this.snapshotService,
+        this.schemaService
+      );
+    }
 
+    const handlers = this.grpcHandlers;
     const pubsubProtoPath = getProtoPath('pubsub/v1/pubsub.proto');
     const schemaProtoPath = getProtoPath('pubsub/v1/schema.proto');
 
@@ -181,6 +185,7 @@ export class PubSubService {
   }
 
   async stop(): Promise<void> {
+    this.grpcHandlers?.stopActiveStreams();
     await this.deliveryEngine.stop();
   }
 }
