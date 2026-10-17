@@ -120,7 +120,9 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
             }
 
             if (rm.ackId) {
-              call.write({ subscription: subscriptionName, ackIds: [rm.ackId] });
+              // Subsequent frames must NOT include the subscription field — real GCP
+              // (and this emulator) rejects follow-up frames that set subscription again.
+              call.write({ ackIds: [rm.ackId] });
             }
           }
 
@@ -218,6 +220,33 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
       });
 
       call.write({ streamAckDeadlineSeconds: 10 } as Parameters<typeof call.write>[0]);
+    });
+
+    expect(error.code).toBe(grpc.status.INVALID_ARGUMENT);
+  });
+
+  test('emits INVALID_ARGUMENT when subscription is set on a subsequent request frame', async () => {
+    const error = await new Promise<Error & { code?: number }>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Timeout: expected INVALID_ARGUMENT for duplicate subscription field'));
+      }, 3000);
+
+      const call = subscriberClient.streamingPull();
+
+      call.on('error', (err: Error & { code?: number }) => {
+        clearTimeout(timeoutId);
+        resolve(err);
+      });
+
+      call.write({ subscription: subscriptionName, streamAckDeadlineSeconds: 10 });
+
+      // A real client never sends subscription again after the first frame.
+      // Verify the emulator rejects it with INVALID_ARGUMENT.
+      setTimeout(() => {
+        call.write({
+          subscription: subscriptionName,
+        } as Parameters<typeof call.write>[0]);
+      }, 50);
     });
 
     expect(error.code).toBe(grpc.status.INVALID_ARGUMENT);
