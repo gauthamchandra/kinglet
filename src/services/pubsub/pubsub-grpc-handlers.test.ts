@@ -894,7 +894,7 @@ describe('PubSubGrpcHandlers', () => {
       );
     });
 
-    test('stopActiveStreams ends all active streaming calls', async () => {
+    test('stopActiveStreams ends all active streaming calls and stops the poll loop', async () => {
       (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
         receivedMessages: [],
       });
@@ -916,14 +916,29 @@ describe('PubSubGrpcHandlers', () => {
         streamAckDeadlineSeconds: 10,
       });
 
+      // Let at least one poll cycle run before stopping
+      await new Promise(resolve => setTimeout(resolve, 150));
+
       handlers.stopActiveStreams();
 
+      // Both call.end() must have been called
       expect((mockCall1.end as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
         1
       );
       expect((mockCall2.end as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
         1
       );
+
+      // Poll loop must be cancelled — no further pull() calls after stop
+      const pullCountAtStop = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls
+        .length;
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const pullCountAfterWait = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls
+        .length;
+
+      expect(pullCountAfterWait).toBe(pullCountAtStop);
     });
   });
 

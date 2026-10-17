@@ -87,8 +87,10 @@ beforeAll(async () => {
 afterAll(async () => {
   publisherClient.close();
   subscriberClient.close();
-  await grpcServer.stop();
+  // Stop active streams before the gRPC server so tryShutdown() is not
+  // blocked by open StreamingPull RPCs.
   await pubsubService.stop();
+  await grpcServer.stop();
   emulatorServer.stop();
 });
 

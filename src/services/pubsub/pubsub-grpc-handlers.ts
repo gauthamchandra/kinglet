@@ -824,9 +824,13 @@ export class PubSubGrpcHandlers {
   private snapshotService: SnapshotService;
   private schemaService: SchemaService;
 
-  private readonly activeStreamingCalls = new Set<
-    grpc.ServerDuplexStream<StreamingPullRequest, unknown>
-  >();
+  /**
+   * Per-stream stop closures.  Each entry sets `cancelled`, clears the poll
+   * timer, removes itself from this set, and calls `call.end()`.  Stored as
+   * closures (not raw call objects) so `stopActiveStreams()` can also stop the
+   * 100 ms poll loop, not just half-close the wire connection.
+   */
+  private readonly activeStreamStoppers = new Set<() => void>();
 
   constructor(
     topicService: TopicService,
@@ -1349,20 +1353,21 @@ export class PubSubGrpcHandlers {
   // ── Subscriber: StreamingPull ──
 
   /**
-   * Close all active StreamingPull calls so that GrpcServer.tryShutdown() can
-   * complete during service shutdown instead of blocking indefinitely.
+   * Stop every active StreamingPull — used during service shutdown so that
+   * GrpcServer.tryShutdown() is not blocked by open streaming RPCs.
+   *
+   * Each stopper cancels the poll loop (sets `cancelled`, clears the timer)
+   * and calls `call.end()` so the gRPC server sees the stream as finished.
    */
   stopActiveStreams(): void {
-    for (const call of this.activeStreamingCalls) {
-      call.end();
+    for (const stop of this.activeStreamStoppers) {
+      stop();
     }
 
-    this.activeStreamingCalls.clear();
+    this.activeStreamStoppers.clear();
   }
 
   streamingPull = (call: grpc.ServerDuplexStream<StreamingPullRequest, unknown>): void => {
-    this.activeStreamingCalls.add(call);
-
     let subscriptionName = '';
     let streamAckDeadlineSeconds = 10;
     let cancelled = false;
@@ -1377,6 +1382,16 @@ export class PubSubGrpcHandlers {
         pollTimeoutId = undefined;
       }
     };
+
+    // stopStream is stored in activeStreamStoppers so that stopActiveStreams()
+    // can cancel the poll loop and half-close the wire in one call.
+    const stopStream = () => {
+      stopPolling();
+      this.activeStreamStoppers.delete(stopStream);
+      call.end();
+    };
+
+    this.activeStreamStoppers.add(stopStream);
 
     const scheduleNextPoll = () => {
       if (cancelled || paused) {
@@ -1413,6 +1428,7 @@ export class PubSubGrpcHandlers {
       } catch (err) {
         if (!cancelled) {
           stopPolling();
+          this.activeStreamStoppers.delete(stopStream);
           call.emit('error', toGrpcError(err));
 
           return;
@@ -1456,7 +1472,7 @@ export class PubSubGrpcHandlers {
         scheduleNextPoll();
       } else if (request.subscription && request.subscription.length > 0) {
         stopPolling();
-        this.activeStreamingCalls.delete(call);
+        this.activeStreamStoppers.delete(stopStream);
         call.emit(
           'error',
           toGrpcError(
@@ -1500,18 +1516,18 @@ export class PubSubGrpcHandlers {
 
     call.on('cancelled', () => {
       stopPolling();
-      this.activeStreamingCalls.delete(call);
+      this.activeStreamStoppers.delete(stopStream);
     });
 
     call.on('end', () => {
       stopPolling();
-      this.activeStreamingCalls.delete(call);
+      this.activeStreamStoppers.delete(stopStream);
       call.end();
     });
 
     call.on('error', () => {
       stopPolling();
-      this.activeStreamingCalls.delete(call);
+      this.activeStreamStoppers.delete(stopStream);
     });
   };
 
