@@ -13,6 +13,32 @@ import {
   topicRequestToRecord,
 } from './types.ts';
 
+/**
+ * Merge a single sub-field for topic update masks (e.g. `schemaSettings.encoding`).
+ * Works identically to the subscription-service equivalent: reads the existing
+ * JSON blob, applies the sub-field from `incoming`, and stores back in `updates`.
+ */
+function applyNestedTopicSubUpdate(
+  topField: string,
+  subField: string,
+  incoming: Record<string, unknown>,
+  existing: Record<string, unknown>,
+  updates: Record<string, unknown>
+): void {
+  const baseStr =
+    topField in updates
+      ? (updates[topField] as string)
+      : ((existing[topField] as string | null | undefined) ?? null);
+
+  const base: Record<string, unknown> = baseStr
+    ? (JSON.parse(baseStr) as Record<string, unknown>)
+    : {};
+  const incomingObj = (incoming[topField] as Record<string, unknown> | undefined) ?? {};
+
+  base[subField] = incomingObj[subField];
+  updates[topField] = JSON.stringify(base);
+}
+
 export class TopicService {
   private repo: TopicRepository;
   private messageRepo: MessageRepository;
@@ -85,7 +111,29 @@ export class TopicService {
     if (updateMask) {
       const fields = updateMask.split(',').map(f => f.trim());
 
+      // For nested paths we need the existing record to merge only the sub-field.
+      const hasNestedPaths = fields.some(f => f.includes('.'));
+      let existingRecord: Record<string, unknown> | null = null;
+
+      if (hasNestedPaths) {
+        existingRecord = (await this.repo.getTopicByName(name)) as Record<string, unknown> | null;
+
+        if (!existingRecord) {
+          throw new PubSubError('NOT_FOUND', `Topic ${name} not found`, name);
+        }
+      }
+
       for (const field of fields) {
+        const dotIdx = field.indexOf('.');
+
+        if (dotIdx >= 0) {
+          const topField = field.substring(0, dotIdx);
+          const subField = field.substring(dotIdx + 1);
+
+          applyNestedTopicSubUpdate(topField, subField, topicData, existingRecord ?? {}, updates);
+          continue;
+        }
+
         switch (field) {
           case 'labels':
             updates.labels = topicData.labels ? JSON.stringify(topicData.labels) : null;

@@ -483,8 +483,11 @@ function durationStrToProto(
  * Normalise proto FieldMask paths (snake_case) to camelCase for the service
  * layer, which uses camelCase field names throughout.
  *
- * Only the top-level field name matters because the service layer treats the
- * mask as a set of top-level fields to update.
+ * Every dot-separated segment is converted independently so that nested paths
+ * such as `push_config.push_endpoint` become `pushConfig.pushEndpoint` rather
+ * than being truncated to just `pushConfig`.  The service layer then uses the
+ * full dotted path to merge only the named sub-field instead of overwriting
+ * the whole nested object.
  */
 const PROTO_FIELD_TO_CAMEL: Record<string, string> = {
   labels: 'labels',
@@ -495,22 +498,41 @@ const PROTO_FIELD_TO_CAMEL: Record<string, string> = {
   ingestion_data_source_settings: 'ingestionDataSourceSettings',
   ack_deadline_seconds: 'ackDeadlineSeconds',
   push_config: 'pushConfig',
+  bigquery_config: 'bigqueryConfig',
+  cloud_storage_config: 'cloudStorageConfig',
   retain_acked_messages: 'retainAckedMessages',
   expiration_policy: 'expirationPolicy',
   dead_letter_policy: 'deadLetterPolicy',
   retry_policy: 'retryPolicy',
   enable_exactly_once_delivery: 'enableExactlyOnceDelivery',
-  message_retention_duration_field: 'messageRetentionDuration',
   expire_time: 'expireTime',
+  push_endpoint: 'pushEndpoint',
+  oidc_token: 'oidcToken',
+  no_wrapper: 'noWrapper',
+  minimum_backoff: 'minimumBackoff',
+  maximum_backoff: 'maximumBackoff',
+  dead_letter_topic: 'deadLetterTopic',
+  max_delivery_attempts: 'maxDeliveryAttempts',
+  allowed_persistence_regions: 'allowedPersistenceRegions',
+  encoding: 'encoding',
+  schema: 'schema',
+  minimum_object_create_time: 'minimumObjectCreateTime',
+  max_duration: 'maxDuration',
 };
 
-function normaliseMaskPaths(paths: string[]): string {
-  const camelPaths = paths.map(p => {
-    const dotIdx = p.indexOf('.');
-    const topLevel = dotIdx >= 0 ? p.substring(0, dotIdx) : p;
+/**
+ * Convert a single snake_case token to camelCase using the explicit lookup
+ * table first, then falling back to a generic conversion.
+ */
+function snakeToCamel(segment: string): string {
+  return (
+    PROTO_FIELD_TO_CAMEL[segment] ??
+    segment.replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())
+  );
+}
 
-    return PROTO_FIELD_TO_CAMEL[topLevel] ?? topLevel;
-  });
+function normaliseMaskPaths(paths: string[]): string {
+  const camelPaths = paths.map(p => p.split('.').map(snakeToCamel).join('.'));
 
   return [...new Set(camelPaths)].join(',');
 }

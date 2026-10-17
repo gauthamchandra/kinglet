@@ -1117,6 +1117,37 @@ describe('PubSubGrpcHandlers', () => {
     });
   });
 
+  // ── UpdateSubscription: nested mask paths ──
+
+  describe('UpdateSubscription nested mask path', () => {
+    test('nested push_config.push_endpoint path passes dotted camelCase mask to service', async () => {
+      (subscriptionService.updateSubscription as ReturnType<typeof mock>).mockResolvedValue(
+        fakeSub
+      );
+
+      const call = makeCall({
+        subscription: {
+          name: 'projects/p/subscriptions/s',
+          pushConfig: { pushEndpoint: 'https://new.example.com/push' },
+        },
+        updateMask: { paths: ['push_config.push_endpoint'] },
+      });
+      const callback = makeCallback();
+
+      await handlers.updateSubscription(
+        call,
+        callback as Parameters<typeof handlers.updateSubscription>[1]
+      );
+
+      expect(firstCallArg0(callback)).toBeNull();
+
+      const [, body] = (subscriptionService.updateSubscription as ReturnType<typeof mock>).mock
+        .calls[0] as [string, { subscription: unknown; updateMask: string }];
+
+      expect(body.updateMask).toBe('pushConfig.pushEndpoint');
+    });
+  });
+
   // ── Conversion helpers ──
 
   describe('Conversion helpers', () => {
