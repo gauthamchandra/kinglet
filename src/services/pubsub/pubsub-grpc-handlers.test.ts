@@ -917,12 +917,10 @@ describe('PubSubGrpcHandlers', () => {
         streamAckDeadlineSeconds: 10,
       });
 
-      // Let at least one poll cycle run before stopping
       await new Promise(resolve => setTimeout(resolve, 150));
 
       handlers.stopActiveStreams();
 
-      // Both call.end() must have been called
       expect((mockCall1.end as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
         1
       );
@@ -930,7 +928,6 @@ describe('PubSubGrpcHandlers', () => {
         1
       );
 
-      // Poll loop must be cancelled — no further pull() calls after stop
       const pullCountAtStop = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls
         .length;
 
