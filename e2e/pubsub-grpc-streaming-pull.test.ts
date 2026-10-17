@@ -159,25 +159,84 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
     expect(received).toContain('streaming-msg-2');
   });
 
-  test('processes ack IDs sent during StreamingPull', async () => {
+  test('modifyDeadlineSeconds on stream causes the message to be redelivered on the same stream', async () => {
     await publisherClient.publish({
       topic: topicName,
-      messages: [{ data: Buffer.from('ack-test-msg') }],
+      messages: [{ data: Buffer.from('stream-nack-msg') }],
     });
 
-    const [pullResp] = await subscriberClient.pull({
-      subscription: subscriptionName,
-      maxMessages: 1,
-    });
-
-    const ackId = pullResp.receivedMessages?.[0]?.ackId;
-
-    expect(ackId).toBeTypeOf('string');
+    // Observe the re-delivery on the same open stream rather than via an external
+    // pull. This avoids the cancel/poll race: after the NACK (deadline=0) the stream's
+    // own poll loop picks the message up again within ~100 ms. Seeing two data events
+    // for the same message proves the stream's modifyDeadlineAckIds path worked.
+    let deliveryCount = 0;
+    let firstData: string | undefined;
+    let secondData: string | undefined;
 
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new Error('Timeout: ack via StreamingPull'));
-      }, 3000);
+        reject(new Error('Timeout: did not receive re-delivery within 5s'));
+      }, 5000);
+
+      const call = subscriberClient.streamingPull();
+
+      call.on('error', (err: Error & { code?: number }) => {
+        if (err.code === grpc.status.CANCELLED) return;
+
+        clearTimeout(timeoutId);
+        reject(err);
+      });
+
+      call.on(
+        'data',
+        (response: {
+          receivedMessages?: Array<{ ackId?: string; message?: { data?: Uint8Array } }>;
+        }) => {
+          const rm = response.receivedMessages?.[0];
+
+          if (rm?.ackId == null) return;
+
+          deliveryCount++;
+
+          if (deliveryCount === 1) {
+            firstData = Buffer.from(rm.message?.data ?? []).toString('utf-8');
+            // NACK: deadline=0 makes it immediately redeliverable on the next poll.
+            call.write({ modifyDeadlineAckIds: [rm.ackId], modifyDeadlineSeconds: [0] });
+          } else {
+            secondData = Buffer.from(rm.message?.data ?? []).toString('utf-8');
+            // ACK the re-delivered message to clean up, then close.
+            call.write({ ackIds: [rm.ackId] });
+            setTimeout(() => {
+              clearTimeout(timeoutId);
+              call.cancel();
+              resolve();
+            }, 50);
+          }
+        }
+      );
+
+      call.write({ subscription: subscriptionName, streamAckDeadlineSeconds: 60 });
+    });
+
+    expect(deliveryCount).toBeGreaterThanOrEqual(2);
+    expect(firstData).toBe('stream-nack-msg');
+    expect(secondData).toBe('stream-nack-msg');
+  });
+
+  test('ackIds on stream permanently acknowledges a message; subsequent NACK has no effect', async () => {
+    await publisherClient.publish({
+      topic: topicName,
+      messages: [{ data: Buffer.from('stream-ack-msg') }],
+    });
+
+    let capturedAckId: string | undefined;
+
+    // Receive the message via the stream, then ACK it.
+    // The stream leases it for 60 s; after the ACK it must be permanently gone.
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Timeout: StreamingPull did not deliver message within 5s'));
+      }, 5000);
 
       const call = subscriberClient.streamingPull();
 
@@ -186,20 +245,39 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
         reject(err);
       });
 
-      call.write({
-        subscription: subscriptionName,
-        streamAckDeadlineSeconds: 10,
-        ackIds: [ackId as string],
-      });
+      call.on(
+        'data',
+        (response: {
+          receivedMessages?: Array<{ ackId?: string; message?: { data?: Uint8Array } }>;
+        }) => {
+          const rm = response.receivedMessages?.[0];
 
-      setTimeout(() => {
-        clearTimeout(timeoutId);
-        call.cancel();
-        resolve();
-      }, 300);
+          if (rm?.ackId == null) return;
+
+          capturedAckId = rm.ackId;
+          call.write({ ackIds: [capturedAckId] });
+
+          setTimeout(() => {
+            clearTimeout(timeoutId);
+            call.cancel();
+            resolve();
+          }, 100);
+        }
+      );
+
+      call.write({ subscription: subscriptionName, streamAckDeadlineSeconds: 60 });
     });
 
-    // Confirm the message was acknowledged and does not re-appear
+    expect(capturedAckId).toBeTypeOf('string');
+
+    // Try to redeliver: modifyAckDeadline(deadline=0) on the already-acknowledged ID.
+    // Real GCP silently ignores stale ackIds; the message must not reappear.
+    await subscriberClient.modifyAckDeadline({
+      subscription: subscriptionName,
+      ackIds: [capturedAckId as string],
+      ackDeadlineSeconds: 0,
+    });
+
     const [recheckResp] = await subscriberClient.pull({
       subscription: subscriptionName,
       maxMessages: 1,
