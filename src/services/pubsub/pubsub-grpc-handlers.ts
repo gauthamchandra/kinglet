@@ -1162,8 +1162,25 @@ export class PubSubGrpcHandlers {
           return;
         }
 
+        const deadline = request.streamAckDeadlineSeconds ?? 0;
+
+        if (deadline < 10 || deadline > 600) {
+          stopPolling();
+          call.emit(
+            'error',
+            toGrpcError(
+              new PubSubError(
+                'INVALID_ARGUMENT',
+                `streamAckDeadlineSeconds must be between 10 and 600 seconds, got ${deadline}`
+              )
+            )
+          );
+
+          return;
+        }
+
         subscriptionName = request.subscription;
-        streamAckDeadlineSeconds = request.streamAckDeadlineSeconds ?? 10;
+        streamAckDeadlineSeconds = deadline;
         scheduleNextPoll();
       }
 

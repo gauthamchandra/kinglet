@@ -819,6 +819,30 @@ describe('PubSubGrpcHandlers', () => {
       expect(subscriptionService.pull).not.toHaveBeenCalled();
     });
 
+    test.each([
+      ['omitted (proto3 default 0)', 0],
+      ['below minimum (5)', 5],
+      ['above maximum (601)', 601],
+    ])('emits INVALID_ARGUMENT when streamAckDeadlineSeconds is %s', async (_label, deadline) => {
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: deadline,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockCall.emit).toHaveBeenCalledWith(
+        'error',
+        expect.objectContaining({ code: grpc.status.INVALID_ARGUMENT })
+      );
+      expect(subscriptionService.pull).not.toHaveBeenCalled();
+    });
+
     test('emits NOT_FOUND when subscription does not exist', async () => {
       (subscriptionService.pull as ReturnType<typeof mock>).mockRejectedValue(
         new PubSubError('NOT_FOUND', 'Subscription projects/p/subscriptions/missing not found')

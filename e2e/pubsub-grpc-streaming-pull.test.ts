@@ -217,8 +217,33 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
         resolve(err);
       });
 
-      // Send a request without a subscription field
       call.write({ streamAckDeadlineSeconds: 10 } as Parameters<typeof call.write>[0]);
+    });
+
+    expect(error.code).toBe(grpc.status.INVALID_ARGUMENT);
+  });
+
+  test.each([
+    ['0 (proto3 default for omitted field)', 0],
+    ['5 (below minimum)', 5],
+    ['601 (above maximum)', 601],
+  ])('emits INVALID_ARGUMENT when streamAckDeadlineSeconds is %s', async (_label, deadline) => {
+    const error = await new Promise<Error & { code?: number }>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Timeout: expected INVALID_ARGUMENT for deadline=${deadline}`));
+      }, 3000);
+
+      const call = subscriberClient.streamingPull();
+
+      call.on('error', (err: Error & { code?: number }) => {
+        clearTimeout(timeoutId);
+        resolve(err);
+      });
+
+      call.write({
+        subscription: subscriptionName,
+        streamAckDeadlineSeconds: deadline,
+      } as Parameters<typeof call.write>[0]);
     });
 
     expect(error.code).toBe(grpc.status.INVALID_ARGUMENT);
