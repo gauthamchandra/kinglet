@@ -415,13 +415,25 @@ function paginateItems<T>(
 
 /**
  * Convert a ProtoTimestamp to an ISO-8601 string for the service layer.
+ *
+ * proto-loader is loaded with `defaults: true`, so an omitted Timestamp field
+ * arrives as `{ seconds: '0', nanos: 0 }`.  Duration conversion already
+ * returns undefined for the zero value; mirror that here so omitted timestamps
+ * are not stored as `1970-01-01T00:00:00.000Z`.
  */
 function timestampToIso(ts: ProtoTimestamp | null | undefined): string | undefined {
-  if (!ts || !ts.seconds) {
+  if (!ts) {
     return undefined;
   }
 
-  const ms = Number.parseInt(ts.seconds, 10) * 1000 + Math.floor((ts.nanos ?? 0) / 1_000_000);
+  const secs = Number.parseInt(ts.seconds, 10);
+  const nanos = ts.nanos ?? 0;
+
+  if (secs === 0 && nanos === 0) {
+    return undefined;
+  }
+
+  const ms = secs * 1000 + Math.floor(nanos / 1_000_000);
 
   return new Date(ms).toISOString();
 }

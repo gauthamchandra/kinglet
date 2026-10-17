@@ -1132,6 +1132,16 @@ describe('PubSubGrpcHandlers', () => {
 
       expect(firstCallArg0(callback)).toBeNull();
 
+      // Assert the service received the string form (inbound proto → service conversion)
+      expect(subscriptionService.createSubscription).toHaveBeenCalledWith(
+        'p',
+        's',
+        expect.objectContaining({
+          cloudStorageConfig: expect.objectContaining({ maxDuration: '300s' }),
+        })
+      );
+
+      // Assert the response carries the proto Duration form (outbound service → proto conversion)
       const result = firstCallArg1<{
         cloudStorageConfig?: { maxDuration?: { seconds: string; nanos: number } };
       }>(callback);
@@ -1179,13 +1189,47 @@ describe('PubSubGrpcHandlers', () => {
       await handlers.createTopic(call, callback as Parameters<typeof handlers.createTopic>[1]);
 
       expect(firstCallArg0(callback)).toBeNull();
+
+      // Assert the service received the ISO string (inbound proto Timestamp → ISO conversion)
       expect(topicService.createTopic).toHaveBeenCalledWith(
         'p',
         't',
         expect.objectContaining({
           ingestionDataSourceSettings: {
             cloudStorage: expect.objectContaining({
-              minimumObjectCreateTime: expect.stringContaining('2024'),
+              minimumObjectCreateTime: '2024-01-01T00:00:00.000Z',
+            }),
+          },
+        })
+      );
+    });
+
+    test('createTopic drops zero-value minimumObjectCreateTime (proto-loader default)', async () => {
+      (topicService.createTopic as ReturnType<typeof mock>).mockResolvedValue(fakeTopic);
+
+      const call = makeCall({
+        name: 'projects/p/topics/t',
+        ingestionDataSourceSettings: {
+          cloudStorage: {
+            bucket: 'my-bucket',
+            // proto-loader fills unset Timestamp with { seconds: '0', nanos: 0 }
+            minimumObjectCreateTime: { seconds: '0', nanos: 0 },
+          },
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createTopic(call, callback as Parameters<typeof handlers.createTopic>[1]);
+
+      expect(firstCallArg0(callback)).toBeNull();
+
+      expect(topicService.createTopic).toHaveBeenCalledWith(
+        'p',
+        't',
+        expect.objectContaining({
+          ingestionDataSourceSettings: {
+            cloudStorage: expect.not.objectContaining({
+              minimumObjectCreateTime: expect.anything(),
             }),
           },
         })
