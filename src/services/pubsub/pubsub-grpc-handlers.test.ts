@@ -679,6 +679,34 @@ describe('PubSubGrpcHandlers', () => {
   // ── Subscriber: StreamingPull ──
 
   describe('StreamingPull', () => {
+    const fireEvent = (
+      listeners: Record<string, ((arg: unknown) => void)[]>,
+      event: string,
+      arg: unknown = undefined
+    ) => {
+      for (const handler of listeners[event] ?? []) {
+        handler(arg);
+      }
+    };
+
+    const makeMockCall = (
+      eventListeners: Record<string, ((arg: unknown) => void)[]>,
+      writeReturnValue = true
+    ) =>
+      ({
+        write: mock(() => writeReturnValue),
+        end: mock(),
+        emit: mock(),
+        on: (event: string, handler: (arg: unknown) => void) => {
+          if (!eventListeners[event]) {
+            eventListeners[event] = [];
+          }
+
+          eventListeners[event].push(handler);
+        },
+        metadata: new grpc.Metadata(),
+      }) as unknown as grpc.ServerDuplexStream<unknown, unknown>;
+
     test('delivers messages to the client stream', async () => {
       (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
         receivedMessages: [
@@ -694,43 +722,28 @@ describe('PubSubGrpcHandlers', () => {
         ],
       });
 
-      const written: unknown[] = [];
       const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
-
-      const mockCall = {
-        write: (chunk: unknown) => {
-          written.push(chunk);
-        },
-        end: mock(),
-        emit: mock(),
-        on: (event: string, handler: (arg: unknown) => void) => {
-          if (!eventListeners[event]) {
-            eventListeners[event] = [];
-          }
-
-          eventListeners[event].push(handler);
-        },
-        metadata: new grpc.Metadata(),
-      } as unknown as grpc.ServerDuplexStream<unknown, unknown>;
+      const mockCall = makeMockCall(eventListeners);
 
       handlers.streamingPull(mockCall);
 
-      // Simulate first client request with subscription name
-      const dataListeners = eventListeners.data ?? [];
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+        ackIds: [],
+      });
 
-      for (const listener of dataListeners) {
-        listener({
-          subscription: 'projects/p/subscriptions/s',
-          streamAckDeadlineSeconds: 10,
-          ackIds: [],
-        });
-      }
-
-      // Wait for async poll to complete
       await new Promise(resolve => setTimeout(resolve, 200));
 
-      expect(subscriptionService.pull).toHaveBeenCalled();
-      expect(written.length).toBeGreaterThanOrEqual(1);
+      fireEvent(eventListeners, 'cancelled');
+
+      expect(subscriptionService.pull).toHaveBeenCalledWith('projects/p/subscriptions/s', {
+        maxMessages: 100,
+        ackDeadlineSeconds: 10,
+      });
+      expect((mockCall.write as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
+        1
+      );
     });
 
     test('processes ack requests from the client', async () => {
@@ -740,44 +753,27 @@ describe('PubSubGrpcHandlers', () => {
       (subscriptionService.acknowledge as ReturnType<typeof mock>).mockResolvedValue(undefined);
 
       const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
-
-      const mockCall = {
-        write: mock(),
-        end: mock(),
-        emit: mock(),
-        on: (event: string, handler: (arg: unknown) => void) => {
-          if (!eventListeners[event]) {
-            eventListeners[event] = [];
-          }
-
-          eventListeners[event].push(handler);
-        },
-        metadata: new grpc.Metadata(),
-      } as unknown as grpc.ServerDuplexStream<unknown, unknown>;
+      const mockCall = makeMockCall(eventListeners);
 
       handlers.streamingPull(mockCall);
 
-      const dataListeners = eventListeners.data ?? [];
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
 
-      // Initial request
-      for (const listener of dataListeners) {
-        listener({
-          subscription: 'projects/p/subscriptions/s',
-          streamAckDeadlineSeconds: 10,
-        });
-      }
-
-      // Ack request
-      for (const listener of dataListeners) {
-        listener({
-          subscription: 'projects/p/subscriptions/s',
-          ackIds: ['ack-id-1', 'ack-id-2'],
-        });
-      }
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        ackIds: ['ack-id-1', 'ack-id-2'],
+      });
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      expect(subscriptionService.acknowledge).toHaveBeenCalled();
+      fireEvent(eventListeners, 'cancelled');
+
+      expect(subscriptionService.acknowledge).toHaveBeenCalledWith('projects/p/subscriptions/s', {
+        ackIds: ['ack-id-1', 'ack-id-2'],
+      });
     });
 
     test('stops polling on cancellation', async () => {
@@ -786,38 +782,16 @@ describe('PubSubGrpcHandlers', () => {
       });
 
       const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
-
-      const mockCall = {
-        write: mock(),
-        end: mock(),
-        emit: mock(),
-        on: (event: string, handler: (arg: unknown) => void) => {
-          if (!eventListeners[event]) {
-            eventListeners[event] = [];
-          }
-
-          eventListeners[event].push(handler);
-        },
-        metadata: new grpc.Metadata(),
-      } as unknown as grpc.ServerDuplexStream<unknown, unknown>;
+      const mockCall = makeMockCall(eventListeners);
 
       handlers.streamingPull(mockCall);
 
-      const dataListeners = eventListeners.data ?? [];
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
 
-      for (const listener of dataListeners) {
-        listener({
-          subscription: 'projects/p/subscriptions/s',
-          streamAckDeadlineSeconds: 10,
-        });
-      }
-
-      // Simulate cancellation
-      const cancelListeners = eventListeners.cancelled ?? [];
-
-      for (const listener of cancelListeners) {
-        listener(undefined);
-      }
+      fireEvent(eventListeners, 'cancelled');
 
       const callsBefore = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls.length;
 
@@ -825,8 +799,47 @@ describe('PubSubGrpcHandlers', () => {
 
       const callsAfter = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls.length;
 
-      // After cancellation, no more polls should happen
       expect(callsAfter).toBe(callsBefore);
+    });
+
+    test('emits INVALID_ARGUMENT when first request has no subscription', async () => {
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', { streamAckDeadlineSeconds: 10 });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockCall.emit).toHaveBeenCalledWith(
+        'error',
+        expect.objectContaining({ code: grpc.status.INVALID_ARGUMENT })
+      );
+      expect(subscriptionService.pull).not.toHaveBeenCalled();
+    });
+
+    test('emits NOT_FOUND when subscription does not exist', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockRejectedValue(
+        new PubSubError('NOT_FOUND', 'Subscription projects/p/subscriptions/missing not found')
+      );
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/missing',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(mockCall.emit).toHaveBeenCalledWith(
+        'error',
+        expect.objectContaining({ code: grpc.status.NOT_FOUND })
+      );
     });
   });
 

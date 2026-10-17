@@ -9,7 +9,7 @@
  * it doesn't depend on the high-level client's internal polling behaviour.
  */
 
-import { afterAll, beforeAll, describe, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import * as pubsubV1 from '@google-cloud/pubsub/build/src/v1/index.js';
 import * as grpc from '@grpc/grpc-js';
 import type { Server } from 'bun';
@@ -96,13 +96,13 @@ afterAll(async () => {
 
 describe('Cloud Pub/Sub E2E: StreamingPull', () => {
   test('delivers published messages over StreamingPull', async () => {
-    await new Promise<void>((resolve, reject) => {
+    const received: string[] = await new Promise<string[]>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         reject(new Error('Timeout: StreamingPull did not deliver messages within 5s'));
       }, 5000);
 
       const call = subscriberClient.streamingPull();
-      const received: string[] = [];
+      const msgs: string[] = [];
 
       call.on('error', (err: Error & { code?: number }) => {
         clearTimeout(timeoutId);
@@ -114,37 +114,26 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
         (response: {
           receivedMessages?: Array<{ ackId?: string; message?: { data?: Uint8Array } }>;
         }) => {
-          const msgs = response.receivedMessages ?? [];
-
-          for (const rm of msgs) {
+          for (const rm of response.receivedMessages ?? []) {
             if (rm.message?.data) {
-              received.push(Buffer.from(rm.message.data).toString('utf-8'));
+              msgs.push(Buffer.from(rm.message.data).toString('utf-8'));
             }
 
-            // Acknowledge
             if (rm.ackId) {
-              call.write({
-                subscription: subscriptionName,
-                ackIds: [rm.ackId],
-              });
+              call.write({ subscription: subscriptionName, ackIds: [rm.ackId] });
             }
           }
 
-          if (received.length >= 2) {
+          if (msgs.length >= 2) {
             clearTimeout(timeoutId);
             call.cancel();
-            resolve();
+            resolve(msgs);
           }
         }
       );
 
-      // Start the stream with the initial request
-      call.write({
-        subscription: subscriptionName,
-        streamAckDeadlineSeconds: 10,
-      });
+      call.write({ subscription: subscriptionName, streamAckDeadlineSeconds: 10 });
 
-      // Publish messages after a short delay so the stream is established
       setTimeout(async () => {
         try {
           await publisherClient.publish({
@@ -160,52 +149,78 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
         }
       }, 100);
     });
+
+    expect(received).toHaveLength(2);
+    expect(received).toContain('streaming-msg-1');
+    expect(received).toContain('streaming-msg-2');
   });
 
   test('processes ack IDs sent during StreamingPull', async () => {
-    // Publish a message first
     await publisherClient.publish({
       topic: topicName,
       messages: [{ data: Buffer.from('ack-test-msg') }],
     });
 
-    let ackId: string | undefined;
-
-    // Pull once to get an ack ID
     const [pullResp] = await subscriberClient.pull({
       subscription: subscriptionName,
       maxMessages: 1,
     });
 
-    ackId = pullResp.receivedMessages?.[0]?.ackId ?? undefined;
+    const ackId = pullResp.receivedMessages?.[0]?.ackId;
 
-    if (ackId) {
-      // Use StreamingPull to send the ack
-      await new Promise<void>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error('Timeout: ack via StreamingPull'));
-        }, 3000);
+    expect(ackId).toBeTypeOf('string');
 
-        const call = subscriberClient.streamingPull();
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Timeout: ack via StreamingPull'));
+      }, 3000);
 
-        call.on('error', (err: Error & { code?: number }) => {
-          clearTimeout(timeoutId);
-          reject(err);
-        });
+      const call = subscriberClient.streamingPull();
 
-        call.write({
-          subscription: subscriptionName,
-          streamAckDeadlineSeconds: 10,
-          ackIds: [ackId as string],
-        });
-
-        // Give the server time to process the ack
-        setTimeout(() => {
-          clearTimeout(timeoutId);
-          call.cancel();
-          resolve();
-        }, 300);
+      call.on('error', (err: Error & { code?: number }) => {
+        clearTimeout(timeoutId);
+        reject(err);
       });
-    }
+
+      call.write({
+        subscription: subscriptionName,
+        streamAckDeadlineSeconds: 10,
+        ackIds: [ackId as string],
+      });
+
+      setTimeout(() => {
+        clearTimeout(timeoutId);
+        call.cancel();
+        resolve();
+      }, 300);
+    });
+
+    // Confirm the message was acknowledged and does not re-appear
+    const [recheckResp] = await subscriberClient.pull({
+      subscription: subscriptionName,
+      maxMessages: 1,
+    });
+
+    expect(recheckResp.receivedMessages ?? []).toHaveLength(0);
+  });
+
+  test('emits INVALID_ARGUMENT when first request has no subscription', async () => {
+    const error = await new Promise<Error & { code?: number }>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Timeout: expected INVALID_ARGUMENT error within 3s'));
+      }, 3000);
+
+      const call = subscriberClient.streamingPull();
+
+      call.on('error', (err: Error & { code?: number }) => {
+        clearTimeout(timeoutId);
+        resolve(err);
+      });
+
+      // Send a request without a subscription field
+      call.write({ streamAckDeadlineSeconds: 10 } as Parameters<typeof call.write>[0]);
+    });
+
+    expect(error.code).toBe(grpc.status.INVALID_ARGUMENT);
   });
 });

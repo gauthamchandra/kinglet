@@ -1094,6 +1094,7 @@ export class PubSubGrpcHandlers {
     let subscriptionName = '';
     let streamAckDeadlineSeconds = 10;
     let cancelled = false;
+    let paused = false;
     let pollTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const stopPolling = () => {
@@ -1106,7 +1107,7 @@ export class PubSubGrpcHandlers {
     };
 
     const scheduleNextPoll = () => {
-      if (cancelled) {
+      if (cancelled || paused) {
         return;
       }
 
@@ -1116,19 +1117,26 @@ export class PubSubGrpcHandlers {
     };
 
     const pollMessages = async () => {
-      if (cancelled || !subscriptionName) {
+      if (cancelled || !subscriptionName || paused) {
         return;
       }
 
       try {
         const result = await this.subscriptionService.pull(subscriptionName, {
           maxMessages: 100,
+          ackDeadlineSeconds: streamAckDeadlineSeconds,
         });
 
         if (result.receivedMessages.length > 0 && !cancelled) {
-          call.write({
+          const canWrite = call.write({
             receivedMessages: result.receivedMessages.map(receivedMessageToProto),
           });
+
+          if (!canWrite) {
+            paused = true;
+
+            return;
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -1143,7 +1151,17 @@ export class PubSubGrpcHandlers {
     };
 
     call.on('data', (request: StreamingPullRequest) => {
-      if (!subscriptionName && request.subscription) {
+      if (!subscriptionName) {
+        if (!request.subscription) {
+          stopPolling();
+          call.emit(
+            'error',
+            toGrpcError(new PubSubError('INVALID_ARGUMENT', 'subscription must be provided'))
+          );
+
+          return;
+        }
+
         subscriptionName = request.subscription;
         streamAckDeadlineSeconds = request.streamAckDeadlineSeconds ?? 10;
         scheduleNextPoll();
@@ -1170,6 +1188,11 @@ export class PubSubGrpcHandlers {
             // Deadline modification errors are non-fatal
           });
       }
+    });
+
+    call.on('drain', () => {
+      paused = false;
+      scheduleNextPoll();
     });
 
     call.on('cancelled', () => {
