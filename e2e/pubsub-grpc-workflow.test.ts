@@ -4,9 +4,6 @@
  * Validates the native gRPC surface of the Cloud Pub/Sub emulator using the
  * official @google-cloud/pubsub client library (v1 sub-clients) without
  * fallback: 'rest'. This exercises the real gRPC code path through google-gax.
- *
- * Known gaps (expected to return UNIMPLEMENTED in this phase):
- *   - StreamingPull is UNIMPLEMENTED (fast-follow PR will add it).
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -474,33 +471,5 @@ describe('Cloud Pub/Sub E2E: gRPC — Cleanup', () => {
     const promise = publisherClient.getTopic({ topic: topicName });
 
     await expect(promise).rejects.toThrow();
-  });
-});
-
-describe('Cloud Pub/Sub E2E: gRPC — StreamingPull UNIMPLEMENTED', () => {
-  test('StreamingPull returns UNIMPLEMENTED', async () => {
-    // StreamingPull is a bidi-streaming RPC; the low-level client exposes it.
-    // We call it directly via the gRPC channel to verify UNIMPLEMENTED is returned.
-    await new Promise<void>((resolve, reject) => {
-      const call = subscriberClient.streamingPull();
-
-      call.on('error', (err: Error & { code?: number }) => {
-        if (err.code === grpc.status.UNIMPLEMENTED) {
-          resolve();
-        } else {
-          reject(
-            new Error(
-              `Expected UNIMPLEMENTED (${grpc.status.UNIMPLEMENTED}) but got code=${err.code}: ${err.message}`
-            )
-          );
-        }
-      });
-
-      // Send initial request to trigger the handler
-      call.write({
-        subscription: subscriptionName,
-        streamAckDeadlineSeconds: 10,
-      });
-    });
   });
 });
