@@ -37,6 +37,11 @@ interface ProtoTimestamp {
   nanos: number;
 }
 
+interface ProtoDuration {
+  seconds?: string | number;
+  nanos?: number;
+}
+
 interface ProtoFieldMask {
   paths?: string[];
 }
@@ -310,17 +315,7 @@ function bytesToBase64(b: Uint8Array | string | null | undefined): string | unde
   }
 
   if (b instanceof Uint8Array) {
-    if (b.length === 0) {
-      return undefined;
-    }
-
-    let binary = '';
-
-    for (const byte of b) {
-      binary += String.fromCharCode(byte);
-    }
-
-    return btoa(binary);
+    return b.length === 0 ? undefined : Buffer.from(b).toString('base64');
   }
 
   return b.length === 0 ? undefined : b;
@@ -335,14 +330,87 @@ function base64ToBytes(b64: string | null | undefined): Uint8Array | undefined {
     return undefined;
   }
 
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
+  return Buffer.from(b64, 'base64');
+}
 
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+/**
+ * Convert an incoming proto Duration object ({ seconds, nanos }) or an existing
+ * GCP duration string ("604800s") to the service layer's "Xs" string format.
+ * Returns undefined for zero/empty values so callers can skip forwarding them.
+ */
+function protoDurationToStr(d: ProtoDuration | string | null | undefined): string | undefined {
+  if (d == null) {
+    return undefined;
   }
 
-  return bytes;
+  if (typeof d === 'string') {
+    return d.endsWith('s') && d.length > 1 ? d : undefined;
+  }
+
+  const secs = typeof d.seconds === 'string' ? Number.parseInt(d.seconds, 10) : (d.seconds ?? 0);
+  const nanos = d.nanos ?? 0;
+
+  if (secs === 0 && nanos === 0) {
+    return undefined;
+  }
+
+  if (nanos === 0) {
+    return `${secs}s`;
+  }
+
+  const frac = String(nanos).padStart(9, '0').replace(/0+$/, '');
+
+  return `${secs}.${frac}s`;
+}
+
+/**
+ * Wrap a resource-name parse function so that malformed names produce
+ * INVALID_ARGUMENT instead of INTERNAL. The parse helpers throw a plain Error
+ * on bad names; toGrpcError() maps those to grpc.status.INTERNAL by default.
+ */
+function parseResourceName<T>(parseFn: () => T): T {
+  try {
+    return parseFn();
+  } catch (err) {
+    throw new PubSubError(
+      'INVALID_ARGUMENT',
+      err instanceof Error ? err.message : 'Invalid resource name'
+    );
+  }
+}
+
+/**
+ * Page a flat array of items using an opaque base64-encoded offset cursor,
+ * consistent with the service layer's own pagination tokens.
+ */
+function paginateItems<T>(
+  items: T[],
+  pageSize: number | undefined,
+  pageToken: string | undefined
+): { page: T[]; nextPageToken: string } {
+  const effectivePageSize = pageSize != null && pageSize > 0 ? pageSize : undefined;
+
+  let startIdx = 0;
+
+  if (pageToken) {
+    const decoded = parseInt(Buffer.from(pageToken, 'base64url').toString('utf-8'), 10);
+
+    if (!Number.isNaN(decoded) && decoded > 0) {
+      startIdx = decoded;
+    }
+  }
+
+  const page = effectivePageSize
+    ? items.slice(startIdx, startIdx + effectivePageSize)
+    : items.slice(startIdx);
+
+  const endIdx = startIdx + page.length;
+  const nextPageToken =
+    effectivePageSize != null && endIdx < items.length
+      ? Buffer.from(String(endIdx)).toString('base64url')
+      : '';
+
+  return { page, nextPageToken };
 }
 
 /**
@@ -464,6 +532,10 @@ function topicResponseToProto(t: TopicResponse): Record<string, unknown> {
     proto.messageStoragePolicy = t.messageStoragePolicy;
   }
 
+  if (t.ingestionDataSourceSettings) {
+    proto.ingestionDataSourceSettings = t.ingestionDataSourceSettings;
+  }
+
   if (t.state) {
     proto.state = t.state;
   }
@@ -494,6 +566,14 @@ function subscriptionResponseToProto(s: SubscriptionResponse): Record<string, un
 
   if (s.pushConfig) {
     proto.pushConfig = s.pushConfig;
+  }
+
+  if (s.bigqueryConfig) {
+    proto.bigqueryConfig = s.bigqueryConfig;
+  }
+
+  if (s.cloudStorageConfig) {
+    proto.cloudStorageConfig = s.cloudStorageConfig;
   }
 
   if (s.enableMessageOrdering) {
@@ -660,7 +740,7 @@ export class PubSubGrpcHandlers {
   ): Promise<void> => {
     try {
       const req = call.request;
-      const parsed = parseTopicName(req.name);
+      const parsed = parseResourceName(() => parseTopicName(req.name));
 
       // Extract only the fields the service layer understands and strip proto
       // default values (e.g. empty-string kmsKeyName, zero-Duration fields).
@@ -670,14 +750,15 @@ export class PubSubGrpcHandlers {
         body.labels = req.labels;
       }
 
-      // messageRetentionDuration from proto-loader is a Duration object when
-      // the client didn't set it; only forward it if it looks like an ISO/GCP
-      // duration string (ends with 's').
-      if (
-        typeof req.messageRetentionDuration === 'string' &&
-        req.messageRetentionDuration.endsWith('s')
-      ) {
-        body.messageRetentionDuration = req.messageRetentionDuration;
+      // messageRetentionDuration arrives as a Duration object from proto-loader
+      // when set, or as the zero Duration { seconds: '0', nanos: 0 } when omitted.
+      // protoDurationToStr converts both forms and returns undefined for the zero case.
+      const retentionDur = protoDurationToStr(
+        req.messageRetentionDuration as ProtoDuration | string | undefined
+      );
+
+      if (retentionDur) {
+        body.messageRetentionDuration = retentionDur;
       }
 
       if (typeof req.kmsKeyName === 'string' && req.kmsKeyName.length > 0) {
@@ -723,7 +804,18 @@ export class PubSubGrpcHandlers {
       const { topic, updateMask } = call.request;
       const paths = updateMask?.paths ?? [];
       const updateMaskStr = paths.length > 0 ? normaliseMaskPaths(paths) : undefined;
-      const body = { topic, updateMask: updateMaskStr };
+
+      // Normalize Duration fields: proto-loader delivers { seconds, nanos } objects;
+      // the service layer expects "Xs" strings.
+      const topicForService = { ...topic } as Record<string, unknown>;
+
+      if (topicForService.messageRetentionDuration != null) {
+        topicForService.messageRetentionDuration = protoDurationToStr(
+          topicForService.messageRetentionDuration as ProtoDuration | string
+        );
+      }
+
+      const body = { topic: topicForService, updateMask: updateMaskStr };
       const result = await this.topicService.updateTopic(topic.name, body);
 
       callback(null, topicResponseToProto(result));
@@ -813,13 +905,11 @@ export class PubSubGrpcHandlers {
     callback: grpc.sendUnaryData<unknown>
   ): Promise<void> => {
     try {
-      const { topic, pageToken } = call.request;
+      const { topic, pageSize, pageToken } = call.request;
       const result = await this.subscriptionService.listTopicSubscriptions(topic);
+      const { page, nextPageToken } = paginateItems(result.subscriptions, pageSize, pageToken);
 
-      callback(null, {
-        subscriptions: result.subscriptions,
-        nextPageToken: pageToken ?? '',
-      });
+      callback(null, { subscriptions: page, nextPageToken });
     } catch (err) {
       callback(toGrpcError(err));
     }
@@ -832,13 +922,11 @@ export class PubSubGrpcHandlers {
     callback: grpc.sendUnaryData<unknown>
   ): Promise<void> => {
     try {
-      const { topic } = call.request;
+      const { topic, pageSize, pageToken } = call.request;
       const result = await this.snapshotService.listTopicSnapshots(topic);
+      const { page, nextPageToken } = paginateItems(result.snapshots, pageSize, pageToken);
 
-      callback(null, {
-        snapshots: result.snapshots,
-        nextPageToken: '',
-      });
+      callback(null, { snapshots: page, nextPageToken });
     } catch (err) {
       callback(toGrpcError(err));
     }
@@ -867,7 +955,7 @@ export class PubSubGrpcHandlers {
   ): Promise<void> => {
     try {
       const req = call.request;
-      const parsed = parseSubscriptionName(req.name);
+      const parsed = parseResourceName(() => parseSubscriptionName(req.name));
 
       // Extract only the fields the service layer understands and strip proto
       // default values (e.g. zero ackDeadlineSeconds means "use default").
@@ -884,11 +972,13 @@ export class PubSubGrpcHandlers {
         body.retainAckedMessages = req.retainAckedMessages;
       }
 
-      if (
-        typeof req.messageRetentionDuration === 'string' &&
-        req.messageRetentionDuration.endsWith('s')
-      ) {
-        body.messageRetentionDuration = req.messageRetentionDuration;
+      // Duration fields arrive as { seconds, nanos } objects from proto-loader.
+      const retentionDur = protoDurationToStr(
+        req.messageRetentionDuration as ProtoDuration | string | undefined
+      );
+
+      if (retentionDur) {
+        body.messageRetentionDuration = retentionDur;
       }
 
       if (req.labels && Object.keys(req.labels).length > 0) {
@@ -917,9 +1007,10 @@ export class PubSubGrpcHandlers {
 
       if (req.expirationPolicy) {
         const ep = req.expirationPolicy as Record<string, unknown>;
+        const ttlStr = protoDurationToStr(ep.ttl as ProtoDuration | string | undefined);
 
-        if (ep.ttl && typeof ep.ttl === 'string' && ep.ttl.length > 0) {
-          body.expirationPolicy = req.expirationPolicy;
+        if (ttlStr) {
+          body.expirationPolicy = { ttl: ttlStr };
         }
       }
 
@@ -937,9 +1028,18 @@ export class PubSubGrpcHandlers {
 
       if (req.retryPolicy) {
         const rp = req.retryPolicy as Record<string, unknown>;
+        const minBackoff = protoDurationToStr(
+          rp.minimumBackoff as ProtoDuration | string | undefined
+        );
+        const maxBackoff = protoDurationToStr(
+          rp.maximumBackoff as ProtoDuration | string | undefined
+        );
 
-        if (rp.minimumBackoff || rp.maximumBackoff) {
-          body.retryPolicy = req.retryPolicy;
+        if (minBackoff ?? maxBackoff) {
+          body.retryPolicy = {
+            ...(minBackoff ? { minimumBackoff: minBackoff } : {}),
+            ...(maxBackoff ? { maximumBackoff: maxBackoff } : {}),
+          };
         }
       }
 
@@ -984,7 +1084,39 @@ export class PubSubGrpcHandlers {
       const { subscription, updateMask } = call.request;
       const paths = updateMask?.paths ?? [];
       const updateMaskStr = paths.length > 0 ? normaliseMaskPaths(paths) : undefined;
-      const body = { subscription, updateMask: updateMaskStr };
+
+      // Normalize Duration fields before passing to service layer.
+      const subForService = { ...subscription } as Record<string, unknown>;
+
+      if (subForService.messageRetentionDuration != null) {
+        subForService.messageRetentionDuration = protoDurationToStr(
+          subForService.messageRetentionDuration as ProtoDuration | string
+        );
+      }
+
+      if (subForService.expirationPolicy != null) {
+        const ep = subForService.expirationPolicy as Record<string, unknown>;
+        const ttlStr = protoDurationToStr(ep.ttl as ProtoDuration | string | undefined);
+
+        subForService.expirationPolicy = ttlStr ? { ttl: ttlStr } : null;
+      }
+
+      if (subForService.retryPolicy != null) {
+        const rp = subForService.retryPolicy as Record<string, unknown>;
+        const minBackoff = protoDurationToStr(
+          rp.minimumBackoff as ProtoDuration | string | undefined
+        );
+        const maxBackoff = protoDurationToStr(
+          rp.maximumBackoff as ProtoDuration | string | undefined
+        );
+
+        subForService.retryPolicy = {
+          ...(minBackoff ? { minimumBackoff: minBackoff } : {}),
+          ...(maxBackoff ? { maximumBackoff: maxBackoff } : {}),
+        };
+      }
+
+      const body = { subscription: subForService, updateMask: updateMaskStr };
       const result = await this.subscriptionService.updateSubscription(subscription.name, body);
 
       callback(null, subscriptionResponseToProto(result));
@@ -1078,7 +1210,11 @@ export class PubSubGrpcHandlers {
   ): Promise<void> => {
     try {
       const { subscription, maxMessages } = call.request;
-      const result = await this.subscriptionService.pull(subscription, { maxMessages });
+      // proto-loader fills unset int32 with 0; treat 0 the same as unset.
+      const effectiveMaxMessages = maxMessages != null && maxMessages > 0 ? maxMessages : undefined;
+      const result = await this.subscriptionService.pull(subscription, {
+        maxMessages: effectiveMaxMessages,
+      });
 
       callback(null, {
         receivedMessages: result.receivedMessages.map(receivedMessageToProto),
@@ -1291,7 +1427,7 @@ export class PubSubGrpcHandlers {
   ): Promise<void> => {
     try {
       const { name, subscription, labels } = call.request;
-      const parsed = parseSnapshotName(name);
+      const parsed = parseResourceName(() => parseSnapshotName(name));
       const result = await this.snapshotService.createSnapshot(parsed.project, parsed.snapshot, {
         subscription,
         labels,
