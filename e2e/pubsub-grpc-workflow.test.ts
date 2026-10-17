@@ -216,7 +216,12 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
   });
 
   test('acknowledge acks messages via gRPC', async () => {
-    // Pull to get ack IDs
+    // Publish a dedicated message so pull is guaranteed to return at least one
+    await publisherClient.publish({
+      topic: topicName,
+      messages: [{ data: Buffer.from('ack-dedicated') }],
+    });
+
     const [pullResp] = await subscriberClient.pull({
       subscription: subscriptionName,
       maxMessages: 10,
@@ -226,16 +231,27 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
       .map(m => m.ackId)
       .filter((id): id is string => id != null);
 
-    if (ackIds.length > 0) {
-      await subscriberClient.acknowledge({ subscription: subscriptionName, ackIds });
+    expect(ackIds.length).toBeGreaterThan(0);
+
+    await subscriberClient.acknowledge({ subscription: subscriptionName, ackIds });
+
+    // After acknowledging, the same messages must not reappear immediately
+    const [recheckResp] = await subscriberClient.pull({
+      subscription: subscriptionName,
+      maxMessages: 10,
+    });
+
+    const recheckAckIds = recheckResp.receivedMessages.map(m => m.ackId);
+
+    for (const id of ackIds) {
+      expect(recheckAckIds).not.toContain(id);
     }
   });
 
   test('modifyAckDeadline adjusts deadline via gRPC', async () => {
-    // Publish and pull to get an ack ID
     await publisherClient.publish({
       topic: topicName,
-      messages: [{ data: Buffer.from('modify-ack') }],
+      messages: [{ data: Buffer.from('modify-ack-dedicated') }],
     });
 
     const [pullResp] = await subscriberClient.pull({
@@ -247,12 +263,24 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
       .map(m => m.ackId)
       .filter((id): id is string => id != null);
 
-    if (ackIds.length > 0) {
-      await subscriberClient.modifyAckDeadline({
-        subscription: subscriptionName,
-        ackIds,
-        ackDeadlineSeconds: 60,
-      });
+    expect(ackIds.length).toBeGreaterThan(0);
+
+    await subscriberClient.modifyAckDeadline({
+      subscription: subscriptionName,
+      ackIds,
+      ackDeadlineSeconds: 60,
+    });
+
+    // Deadline extended to 60s — the message must not be immediately re-deliverable
+    const [recheckResp] = await subscriberClient.pull({
+      subscription: subscriptionName,
+      maxMessages: 1,
+    });
+
+    const recheckAckIds = recheckResp.receivedMessages.map(m => m.ackId);
+
+    for (const id of ackIds) {
+      expect(recheckAckIds).not.toContain(id);
     }
   });
 
@@ -261,10 +289,15 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
       subscription: subscriptionName,
       pushConfig: { pushEndpoint: 'https://example.com/push' },
     });
+
+    const [sub] = await subscriberClient.getSubscription({ subscription: subscriptionName });
+
+    expect((sub.pushConfig as { pushEndpoint?: string } | undefined)?.pushEndpoint).toBe(
+      'https://example.com/push'
+    );
   });
 
   test('detachSubscription detaches a subscription via gRPC', async () => {
-    // Create a temporary subscription to detach
     const tempSubName = `projects/${project}/subscriptions/grpc-temp-detach`;
 
     await subscriberClient.createSubscription({
@@ -273,6 +306,10 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
     });
 
     await publisherClient.detachSubscription({ subscription: tempSubName });
+
+    const [sub] = await subscriberClient.getSubscription({ subscription: tempSubName });
+
+    expect(sub.detached).toBe(true);
   });
 
   test('getSnapshot returns the snapshot via gRPC', async () => {
@@ -303,6 +340,13 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
   });
 
   test('seek by time via gRPC', async () => {
+    // Clear push config so messages are pullable in this test.
+    await subscriberClient.modifyPushConfig({
+      subscription: subscriptionName,
+      pushConfig: { pushEndpoint: '' },
+    });
+
+    // Seek to now — all pending messages with publishTime <= now are made re-deliverable.
     const seekTime = new Date();
 
     await subscriberClient.seek({
@@ -312,6 +356,25 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
         nanos: 0,
       },
     });
+
+    // After the seek the subscription must still be usable.
+    const [sub] = await subscriberClient.getSubscription({ subscription: subscriptionName });
+
+    expect(sub.name).toBe(subscriptionName);
+
+    // Acknowledge any pending messages so later tests start clean.
+    const [cleanPull] = await subscriberClient.pull({
+      subscription: subscriptionName,
+      maxMessages: 100,
+    });
+
+    const cleanAckIds = cleanPull.receivedMessages
+      .map(m => m.ackId)
+      .filter((id): id is string => id != null);
+
+    if (cleanAckIds.length > 0) {
+      await subscriberClient.acknowledge({ subscription: subscriptionName, ackIds: cleanAckIds });
+    }
   });
 
   test('seek by snapshot via gRPC', async () => {
@@ -319,6 +382,11 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
       subscription: subscriptionName,
       snapshot: snapshotName,
     });
+
+    // After seeking to the snapshot the subscription must still be usable.
+    const [sub] = await subscriberClient.getSubscription({ subscription: subscriptionName });
+
+    expect(sub.name).toBe(subscriptionName);
   });
 });
 
