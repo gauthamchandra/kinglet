@@ -503,6 +503,96 @@ function normaliseMaskPaths(paths: string[]): string {
   return [...new Set(camelPaths)].join(',');
 }
 
+/**
+ * Convert the service-layer `cloudStorageConfig` (which stores Duration as an
+ * "Xs" string) to the proto shape expected by gRPC clients.
+ */
+function convertCloudStorageConfigToProto(
+  config: Record<string, unknown>
+): Record<string, unknown> {
+  const result = { ...config };
+
+  if (typeof result.maxDuration === 'string') {
+    result.maxDuration = durationStrToProto(result.maxDuration) ?? result.maxDuration;
+  }
+
+  return result;
+}
+
+/**
+ * Normalise an inbound proto `cloudStorageConfig` (where `maxDuration` arrives
+ * as a `ProtoDuration` object) to the service-layer shape (duration strings).
+ */
+function normaliseCloudStorageConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...config };
+
+  if (result.maxDuration != null && typeof result.maxDuration !== 'string') {
+    const converted = protoDurationToStr(result.maxDuration as ProtoDuration | string | undefined);
+
+    if (converted) {
+      result.maxDuration = converted;
+    } else {
+      delete result.maxDuration;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Convert the service-layer `ingestionDataSourceSettings` (which stores
+ * Timestamps as ISO strings) to the proto shape expected by gRPC clients.
+ */
+function convertIngestionDataSourceSettingsToProto(
+  settings: Record<string, unknown>
+): Record<string, unknown> {
+  const result = { ...settings };
+
+  if (result.cloudStorage != null && typeof result.cloudStorage === 'object') {
+    const cs = { ...(result.cloudStorage as Record<string, unknown>) };
+
+    if (typeof cs.minimumObjectCreateTime === 'string') {
+      cs.minimumObjectCreateTime =
+        isoToTimestamp(cs.minimumObjectCreateTime) ?? cs.minimumObjectCreateTime;
+    }
+
+    result.cloudStorage = cs;
+  }
+
+  return result;
+}
+
+/**
+ * Normalise an inbound proto `ingestionDataSourceSettings` (where
+ * `cloudStorage.minimumObjectCreateTime` arrives as a `ProtoTimestamp` object)
+ * to the service-layer shape (ISO strings).
+ */
+function normaliseIngestionDataSourceSettings(
+  settings: Record<string, unknown>
+): Record<string, unknown> {
+  const result = { ...settings };
+
+  if (result.cloudStorage != null && typeof result.cloudStorage === 'object') {
+    const cs = { ...(result.cloudStorage as Record<string, unknown>) };
+
+    if (cs.minimumObjectCreateTime != null && typeof cs.minimumObjectCreateTime !== 'string') {
+      const converted = timestampToIso(
+        cs.minimumObjectCreateTime as ProtoTimestamp | null | undefined
+      );
+
+      if (converted) {
+        cs.minimumObjectCreateTime = converted;
+      } else {
+        delete cs.minimumObjectCreateTime;
+      }
+    }
+
+    result.cloudStorage = cs;
+  }
+
+  return result;
+}
+
 // ── Topic response conversion ──
 
 function topicResponseToProto(t: TopicResponse): Record<string, unknown> {
@@ -533,7 +623,9 @@ function topicResponseToProto(t: TopicResponse): Record<string, unknown> {
   }
 
   if (t.ingestionDataSourceSettings) {
-    proto.ingestionDataSourceSettings = t.ingestionDataSourceSettings;
+    proto.ingestionDataSourceSettings = convertIngestionDataSourceSettingsToProto(
+      t.ingestionDataSourceSettings
+    );
   }
 
   if (t.state) {
@@ -573,7 +665,7 @@ function subscriptionResponseToProto(s: SubscriptionResponse): Record<string, un
   }
 
   if (s.cloudStorageConfig) {
-    proto.cloudStorageConfig = s.cloudStorageConfig;
+    proto.cloudStorageConfig = convertCloudStorageConfigToProto(s.cloudStorageConfig);
   }
 
   if (s.enableMessageOrdering) {
@@ -783,7 +875,9 @@ export class PubSubGrpcHandlers {
       }
 
       if (req.ingestionDataSourceSettings) {
-        body.ingestionDataSourceSettings = req.ingestionDataSourceSettings;
+        body.ingestionDataSourceSettings = normaliseIngestionDataSourceSettings(
+          req.ingestionDataSourceSettings
+        );
       }
 
       const result = await this.topicService.createTopic(parsed.project, parsed.topic, body);
@@ -812,6 +906,12 @@ export class PubSubGrpcHandlers {
       if (topicForService.messageRetentionDuration != null) {
         topicForService.messageRetentionDuration = protoDurationToStr(
           topicForService.messageRetentionDuration as ProtoDuration | string
+        );
+      }
+
+      if (topicForService.ingestionDataSourceSettings != null) {
+        topicForService.ingestionDataSourceSettings = normaliseIngestionDataSourceSettings(
+          topicForService.ingestionDataSourceSettings as Record<string, unknown>
         );
       }
 
@@ -998,7 +1098,7 @@ export class PubSubGrpcHandlers {
       }
 
       if (req.cloudStorageConfig) {
-        body.cloudStorageConfig = req.cloudStorageConfig;
+        body.cloudStorageConfig = normaliseCloudStorageConfig(req.cloudStorageConfig);
       }
 
       if (req.enableMessageOrdering) {
@@ -1114,6 +1214,12 @@ export class PubSubGrpcHandlers {
           ...(minBackoff ? { minimumBackoff: minBackoff } : {}),
           ...(maxBackoff ? { maximumBackoff: maxBackoff } : {}),
         };
+      }
+
+      if (subForService.cloudStorageConfig != null) {
+        subForService.cloudStorageConfig = normaliseCloudStorageConfig(
+          subForService.cloudStorageConfig as Record<string, unknown>
+        );
       }
 
       const body = { subscription: subForService, updateMask: updateMaskStr };

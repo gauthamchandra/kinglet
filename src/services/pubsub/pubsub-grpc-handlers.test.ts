@@ -1045,6 +1045,123 @@ describe('PubSubGrpcHandlers', () => {
   // ── Conversion helpers ──
 
   describe('Conversion helpers', () => {
+    test('createSubscription converts cloudStorageConfig.maxDuration from proto Duration to string', async () => {
+      const fakeSubWithCloud = {
+        ...fakeSub,
+        cloudStorageConfig: { bucket: 'my-bucket', maxDuration: '300s' },
+      };
+
+      (subscriptionService.createSubscription as ReturnType<typeof mock>).mockResolvedValue(
+        fakeSubWithCloud
+      );
+
+      const call = makeCall({
+        name: 'projects/p/subscriptions/s',
+        topic: 'projects/p/topics/t',
+        cloudStorageConfig: {
+          bucket: 'my-bucket',
+          maxDuration: { seconds: '300', nanos: 0 },
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createSubscription(
+        call,
+        callback as Parameters<typeof handlers.createSubscription>[1]
+      );
+
+      expect(firstCallArg0(callback)).toBeNull();
+
+      const result = firstCallArg1<{
+        cloudStorageConfig?: { maxDuration?: { seconds: string; nanos: number } };
+      }>(callback);
+
+      expect(result.cloudStorageConfig?.maxDuration).toEqual({ seconds: '300', nanos: 0 });
+    });
+
+    test('getSubscription converts cloudStorageConfig.maxDuration from string to proto Duration in response', async () => {
+      (subscriptionService.getSubscription as ReturnType<typeof mock>).mockResolvedValue({
+        ...fakeSub,
+        cloudStorageConfig: { bucket: 'my-bucket', maxDuration: '300s' },
+      });
+
+      const call = makeCall({ subscription: 'projects/p/subscriptions/s' });
+      const callback = makeCallback();
+
+      await handlers.getSubscription(
+        call,
+        callback as Parameters<typeof handlers.getSubscription>[1]
+      );
+
+      expect(firstCallArg0(callback)).toBeNull();
+
+      const result = firstCallArg1<{
+        cloudStorageConfig?: { maxDuration?: { seconds: string; nanos: number } };
+      }>(callback);
+
+      expect(result.cloudStorageConfig?.maxDuration).toEqual({ seconds: '300', nanos: 0 });
+    });
+
+    test('createTopic converts ingestionDataSourceSettings.cloudStorage.minimumObjectCreateTime from proto Timestamp to ISO in inbound', async () => {
+      (topicService.createTopic as ReturnType<typeof mock>).mockResolvedValue(fakeTopic);
+
+      const call = makeCall({
+        name: 'projects/p/topics/t',
+        ingestionDataSourceSettings: {
+          cloudStorage: {
+            bucket: 'my-bucket',
+            minimumObjectCreateTime: { seconds: '1704067200', nanos: 0 },
+          },
+        },
+      });
+      const callback = makeCallback();
+
+      await handlers.createTopic(call, callback as Parameters<typeof handlers.createTopic>[1]);
+
+      expect(firstCallArg0(callback)).toBeNull();
+      expect(topicService.createTopic).toHaveBeenCalledWith(
+        'p',
+        't',
+        expect.objectContaining({
+          ingestionDataSourceSettings: {
+            cloudStorage: expect.objectContaining({
+              minimumObjectCreateTime: expect.stringContaining('2024'),
+            }),
+          },
+        })
+      );
+    });
+
+    test('getTopic converts ingestionDataSourceSettings.cloudStorage.minimumObjectCreateTime from ISO to proto Timestamp in response', async () => {
+      (topicService.getTopic as ReturnType<typeof mock>).mockResolvedValue({
+        ...fakeTopic,
+        ingestionDataSourceSettings: {
+          cloudStorage: {
+            bucket: 'my-bucket',
+            minimumObjectCreateTime: '2024-01-01T00:00:00.000Z',
+          },
+        },
+      });
+
+      const call = makeCall({ topic: 'projects/p/topics/t' });
+      const callback = makeCallback();
+
+      await handlers.getTopic(call, callback as Parameters<typeof handlers.getTopic>[1]);
+
+      expect(firstCallArg0(callback)).toBeNull();
+
+      const result = firstCallArg1<{
+        ingestionDataSourceSettings?: {
+          cloudStorage?: { minimumObjectCreateTime?: { seconds: string; nanos: number } };
+        };
+      }>(callback);
+
+      expect(result.ingestionDataSourceSettings?.cloudStorage?.minimumObjectCreateTime).toEqual({
+        seconds: '1704067200',
+        nanos: 0,
+      });
+    });
+
     test('toServiceImplementation returns object with all 35 method keys', () => {
       const impl = handlers.toServiceImplementation();
       const expectedPublisher = [
