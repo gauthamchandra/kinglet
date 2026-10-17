@@ -314,6 +314,12 @@ async function main(): Promise<void> {
       }
     }
 
+    if (pubsubService) {
+      for (const def of pubsubService.getGrpcServices()) {
+        grpcServer.registerService(def);
+      }
+    }
+
     await grpcServer.start();
     logger.info(`gRPC server started on port ${config.server.grpcPort}`);
 

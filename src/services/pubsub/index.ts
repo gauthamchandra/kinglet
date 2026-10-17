@@ -4,11 +4,15 @@
  * Wires together repositories, services, handlers, and engines.
  */
 
+import path from 'node:path';
+import { getProtoPath } from 'google-proto-files';
+import type { GrpcServiceDefinition } from '@/core/gateway/grpc-server.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { DeliveryEngine } from './delivery-engine.ts';
 import { MessageRepository } from './message-repository.ts';
+import { PubSubGrpcHandlers } from './pubsub-grpc-handlers.ts';
 import { SchemaHandlers } from './schema-handlers.ts';
 import { SchemaRepository } from './schema-repository.ts';
 import { SchemaService } from './schema-service.ts';
@@ -113,6 +117,62 @@ export class PubSubService {
       ...this.subscriptionHandlers.getRoutes(),
       ...this.snapshotHandlers.getRoutes(),
       ...this.schemaHandlers.getRoutes(),
+    ];
+  }
+
+  getGrpcServices(): GrpcServiceDefinition[] {
+    if (
+      !this.topicService ||
+      !this.subscriptionService ||
+      !this.snapshotService ||
+      !this.schemaService
+    ) {
+      throw new Error('PubSubService not initialized. Call initialize() first.');
+    }
+
+    const handlers = new PubSubGrpcHandlers(
+      this.topicService,
+      this.subscriptionService,
+      this.snapshotService,
+      this.schemaService
+    );
+
+    const pubsubProtoPath = getProtoPath('pubsub/v1/pubsub.proto');
+    const schemaProtoPath = getProtoPath('pubsub/v1/schema.proto');
+
+    // google-proto-files stores all Google API protos under its package root.
+    // proto-loader needs that root on the include path so relative imports inside
+    // pubsub.proto (e.g. "google/api/annotations.proto") resolve correctly.
+    // pubsubProtoPath is under .../google-proto-files/google/pubsub/v1/
+    // so we go up 3 levels to reach the package root (parent of `google/`).
+    const protoRoot = path.resolve(path.dirname(pubsubProtoPath), '../../..');
+    const impl = handlers.toServiceImplementation();
+
+    return [
+      {
+        name: 'Publisher',
+        protoPath: pubsubProtoPath,
+        packageName: 'google.pubsub.v1',
+        serviceName: 'Publisher',
+        implementation: impl,
+        includeDirs: [protoRoot],
+      },
+      {
+        name: 'Subscriber',
+        protoPath: pubsubProtoPath,
+        packageName: 'google.pubsub.v1',
+        serviceName: 'Subscriber',
+        implementation: impl,
+        includeDirs: [protoRoot],
+      },
+      {
+        name: 'SchemaService',
+        protoPath: schemaProtoPath,
+        packageName: 'google.pubsub.v1',
+        serviceName: 'SchemaService',
+        implementation: impl,
+        includeDirs: [protoRoot],
+      },
     ];
   }
 
