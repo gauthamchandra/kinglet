@@ -216,7 +216,7 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
   });
 
   test('acknowledge acks messages via gRPC', async () => {
-    // Publish a dedicated message so pull is guaranteed to return at least one
+    // Publish a dedicated message so pull is guaranteed to return one.
     await publisherClient.publish({
       topic: topicName,
       messages: [{ data: Buffer.from('ack-dedicated') }],
@@ -233,9 +233,18 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
 
     expect(ackIds.length).toBeGreaterThan(0);
 
+    // Acknowledge the messages.
     await subscriberClient.acknowledge({ subscription: subscriptionName, ackIds });
 
-    // After acknowledging, the same messages must not reappear immediately
+    // Expire any remaining lease so the message would be re-delivered if acknowledge
+    // had no effect.  A successfully acknowledged message must not reappear even
+    // when the ack deadline is forced to 0.
+    await subscriberClient.modifyAckDeadline({
+      subscription: subscriptionName,
+      ackIds,
+      ackDeadlineSeconds: 0,
+    });
+
     const [recheckResp] = await subscriberClient.pull({
       subscription: subscriptionName,
       maxMessages: 10,
@@ -265,23 +274,30 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
 
     expect(ackIds.length).toBeGreaterThan(0);
 
+    // Setting ackDeadlineSeconds to 0 immediately expires the lease.  The message
+    // must be re-delivered on the very next pull, proving the RPC took effect.
     await subscriberClient.modifyAckDeadline({
       subscription: subscriptionName,
       ackIds,
-      ackDeadlineSeconds: 60,
+      ackDeadlineSeconds: 0,
     });
 
-    // Deadline extended to 60s — the message must not be immediately re-deliverable
     const [recheckResp] = await subscriberClient.pull({
       subscription: subscriptionName,
       maxMessages: 1,
     });
 
-    const recheckAckIds = recheckResp.receivedMessages.map(m => m.ackId);
+    const recheckAckIds = recheckResp.receivedMessages
+      .map(m => m.ackId)
+      .filter((id): id is string => id != null);
 
-    for (const id of ackIds) {
-      expect(recheckAckIds).not.toContain(id);
-    }
+    expect(recheckAckIds.length).toBeGreaterThan(0);
+
+    // Clean up: acknowledge the re-delivered message.
+    await subscriberClient.acknowledge({
+      subscription: subscriptionName,
+      ackIds: recheckAckIds,
+    });
   });
 
   test('modifyPushConfig updates push config via gRPC', async () => {
@@ -340,53 +356,140 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
   });
 
   test('seek by time via gRPC', async () => {
-    // Clear push config so messages are pullable in this test.
-    await subscriberClient.modifyPushConfig({
-      subscription: subscriptionName,
-      pushConfig: { pushEndpoint: '' },
+    // Use a fresh subscription so no prior test state interferes.
+    const seekSubName = `projects/${project}/subscriptions/grpc-seek-time-sub`;
+
+    await subscriberClient.createSubscription({
+      name: seekSubName,
+      topic: topicName,
     });
 
-    // Seek to now — all pending messages with publishTime <= now are made re-deliverable.
-    const seekTime = new Date();
+    try {
+      // Publish a dedicated message.
+      await publisherClient.publish({
+        topic: topicName,
+        messages: [{ data: Buffer.from('seek-time-test') }],
+      });
 
-    await subscriberClient.seek({
-      subscription: subscriptionName,
-      time: {
-        seconds: Math.floor(seekTime.getTime() / 1000).toString(),
-        nanos: 0,
-      },
-    });
+      // Pull it — now it is PENDING with a future ack deadline.
+      const [beforeSeekPull] = await subscriberClient.pull({
+        subscription: seekSubName,
+        maxMessages: 1,
+      });
 
-    // After the seek the subscription must still be usable.
-    const [sub] = await subscriberClient.getSubscription({ subscription: subscriptionName });
+      const pendingAckIds = beforeSeekPull.receivedMessages
+        .map(m => m.ackId)
+        .filter((id): id is string => id != null);
 
-    expect(sub.name).toBe(subscriptionName);
+      expect(pendingAckIds.length).toBeGreaterThan(0);
 
-    // Acknowledge any pending messages so later tests start clean.
-    const [cleanPull] = await subscriberClient.pull({
-      subscription: subscriptionName,
-      maxMessages: 100,
-    });
+      // Seek to slightly in the future so publishTime <= seekTime even when both
+      // fall within the same second (the gRPC Timestamp carries nanos, so
+      // millisecond precision is preserved).
+      const seekTime = new Date(Date.now() + 1000);
 
-    const cleanAckIds = cleanPull.receivedMessages
-      .map(m => m.ackId)
-      .filter((id): id is string => id != null);
+      await subscriberClient.seek({
+        subscription: seekSubName,
+        time: {
+          seconds: Math.floor(seekTime.getTime() / 1000).toString(),
+          nanos: (seekTime.getTime() % 1000) * 1_000_000,
+        },
+      });
 
-    if (cleanAckIds.length > 0) {
-      await subscriberClient.acknowledge({ subscription: subscriptionName, ackIds: cleanAckIds });
+      // The reset messages must reappear on the very next pull.
+      const [afterSeekPull] = await subscriberClient.pull({
+        subscription: seekSubName,
+        maxMessages: 1,
+      });
+
+      expect(afterSeekPull.receivedMessages.length).toBeGreaterThan(0);
+
+      // Clean up: acknowledge all re-delivered messages.
+      const cleanAckIds = afterSeekPull.receivedMessages
+        .map(m => m.ackId)
+        .filter((id): id is string => id != null);
+
+      if (cleanAckIds.length > 0) {
+        await subscriberClient.acknowledge({ subscription: seekSubName, ackIds: cleanAckIds });
+      }
+    } finally {
+      await subscriberClient.deleteSubscription({ subscription: seekSubName });
     }
   });
 
   test('seek by snapshot via gRPC', async () => {
-    await subscriberClient.seek({
-      subscription: subscriptionName,
-      snapshot: snapshotName,
+    // Use a fresh subscription so no prior test state interferes.
+    const seekSnapSubName = `projects/${project}/subscriptions/grpc-seek-snap-sub`;
+
+    await subscriberClient.createSubscription({
+      name: seekSnapSubName,
+      topic: topicName,
     });
 
-    // After seeking to the snapshot the subscription must still be usable.
-    const [sub] = await subscriberClient.getSubscription({ subscription: subscriptionName });
+    try {
+      // Publish a fresh message after the snapshot was created (so its publishTime
+      // is after the snapshot's creation time).
+      await publisherClient.publish({
+        topic: topicName,
+        messages: [{ data: Buffer.from('seek-snapshot-test') }],
+      });
 
-    expect(sub.name).toBe(subscriptionName);
+      const [beforePull] = await subscriberClient.pull({
+        subscription: seekSnapSubName,
+        maxMessages: 1,
+      });
+
+      const pendingAckIds = beforePull.receivedMessages
+        .map(m => m.ackId)
+        .filter((id): id is string => id != null);
+
+      expect(pendingAckIds.length).toBeGreaterThan(0);
+
+      // Seek to the snapshot (creationTime < message publishTime) — messages
+      // published after the snapshot are outside the seek range so the ackDeadline
+      // of the pending message is NOT reset; it remains leased.
+      await subscriberClient.seek({
+        subscription: seekSnapSubName,
+        snapshot: snapshotName,
+      });
+
+      // The pending message must not be immediately re-delivered because the seek
+      // did not reset its ackDeadline (it was published after the snapshot).
+      const [afterSeekPull] = await subscriberClient.pull({
+        subscription: seekSnapSubName,
+        maxMessages: 1,
+      });
+
+      const afterAckIds = afterSeekPull.receivedMessages
+        .map(m => m.ackId)
+        .filter((id): id is string => id != null);
+
+      for (const id of pendingAckIds) {
+        expect(afterAckIds).not.toContain(id);
+      }
+
+      // Clean up: expire the leased message and acknowledge it.
+      await subscriberClient.modifyAckDeadline({
+        subscription: seekSnapSubName,
+        ackIds: pendingAckIds,
+        ackDeadlineSeconds: 0,
+      });
+
+      const [cleanPull] = await subscriberClient.pull({
+        subscription: seekSnapSubName,
+        maxMessages: 1,
+      });
+
+      const cleanAckIds = cleanPull.receivedMessages
+        .map(m => m.ackId)
+        .filter((id): id is string => id != null);
+
+      if (cleanAckIds.length > 0) {
+        await subscriberClient.acknowledge({ subscription: seekSnapSubName, ackIds: cleanAckIds });
+      }
+    } finally {
+      await subscriberClient.deleteSubscription({ subscription: seekSnapSubName });
+    }
   });
 });
 
