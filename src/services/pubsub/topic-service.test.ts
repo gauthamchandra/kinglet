@@ -115,6 +115,45 @@ describe('TopicService', () => {
     await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
   });
 
+  test('updateTopic nested mask path merges sub-field, preserving siblings', async () => {
+    await service.createTopic('p', 't', {
+      schemaSettings: { schema: 'projects/p/schemas/s', encoding: 'JSON' },
+    });
+
+    const updated = await service.updateTopic('projects/p/topics/t', {
+      topic: { schemaSettings: { encoding: 'BINARY' } },
+      updateMask: 'schemaSettings.encoding',
+    });
+
+    expect(updated.schemaSettings?.encoding).toBe('BINARY');
+    expect(updated.schemaSettings?.schema).toBe('projects/p/schemas/s');
+  });
+
+  test('updateTopic three-level nested mask path updates leaf, preserving siblings', async () => {
+    await service.createTopic('p', 't', {
+      ingestionDataSourceSettings: {
+        cloudStorage: { bucket: 'my-bucket', minimumObjectCreateTime: '2024-01-01T00:00:00Z' },
+      },
+    });
+
+    const updated = await service.updateTopic('projects/p/topics/t', {
+      topic: {
+        ingestionDataSourceSettings: {
+          cloudStorage: { bucket: 'my-bucket', minimumObjectCreateTime: '2025-06-01T00:00:00Z' },
+        },
+      },
+      updateMask: 'ingestionDataSourceSettings.cloudStorage.minimumObjectCreateTime',
+    });
+
+    expect(
+      (updated.ingestionDataSourceSettings?.cloudStorage as Record<string, unknown>)
+        ?.minimumObjectCreateTime
+    ).toBe('2025-06-01T00:00:00Z');
+    expect(
+      (updated.ingestionDataSourceSettings?.cloudStorage as Record<string, unknown>)?.bucket
+    ).toBe('my-bucket');
+  });
+
   // ── deleteTopic ──
 
   test('deleteTopic deletes the topic', async () => {

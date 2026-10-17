@@ -23,9 +23,45 @@ import {
   subscriptionRecordToResponse,
 } from './types.ts';
 
+function getNestedValue(obj: Record<string, unknown>, segments: string[]): unknown {
+  let curr: unknown = obj;
+
+  for (const seg of segments) {
+    if (curr == null || typeof curr !== 'object') return undefined;
+
+    curr = (curr as Record<string, unknown>)[seg];
+  }
+
+  return curr;
+}
+
+function setNestedValue(obj: Record<string, unknown>, segments: string[], value: unknown): void {
+  if (segments.length === 0) return;
+
+  const leafKey = segments[segments.length - 1];
+
+  if (leafKey === undefined) return;
+
+  let curr = obj;
+
+  for (const key of segments.slice(0, -1)) {
+    if (curr[key] == null || typeof curr[key] !== 'object') {
+      curr[key] = {};
+    }
+
+    curr = curr[key] as Record<string, unknown>;
+  }
+
+  curr[leafKey] = value;
+}
+
 /**
  * Merge a single sub-field from `incoming` into the existing JSON blob for
  * `topField` in `existing`, writing the result into `updates`.
+ *
+ * `subField` may itself be a dotted path (e.g. `oidcToken.serviceAccountEmail`),
+ * in which case the value is read/written at the correct nested depth so that
+ * sibling fields at every level are preserved.
  *
  * If `updates[topField]` was already set by a previous nested-path entry for
  * the same parent, that intermediate value is used as the base instead of
@@ -47,9 +83,12 @@ function applyNestedSubUpdate(
   const base: Record<string, unknown> = baseStr
     ? (JSON.parse(baseStr) as Record<string, unknown>)
     : {};
-  const incomingObj = (incoming[topField] as Record<string, unknown> | undefined) ?? {};
 
-  base[subField] = incomingObj[subField];
+  const incomingTop = (incoming[topField] as Record<string, unknown> | undefined) ?? {};
+  const subSegments = subField.split('.');
+  const value = getNestedValue(incomingTop, subSegments);
+
+  setNestedValue(base, subSegments, value);
   updates[topField] = JSON.stringify(base);
 }
 

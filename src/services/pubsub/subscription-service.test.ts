@@ -201,6 +201,29 @@ describe('SubscriptionService', () => {
     expect(updated.retryPolicy?.maximumBackoff).toBe('300s');
   });
 
+  test('updateSubscription three-level nested mask path updates leaf, preserves siblings', async () => {
+    await service.createSubscription('p', 's', {
+      topic: 'projects/p/topics/t',
+      pushConfig: {
+        pushEndpoint: 'https://example.com/push',
+        oidcToken: { serviceAccountEmail: 'old@example.com', audience: 'my-audience' },
+      },
+    });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/s', {
+      subscription: {
+        pushConfig: {
+          oidcToken: { serviceAccountEmail: 'new@example.com', audience: 'my-audience' },
+        },
+      },
+      updateMask: 'pushConfig.oidcToken.serviceAccountEmail',
+    });
+
+    expect(updated.pushConfig?.oidcToken?.serviceAccountEmail).toBe('new@example.com');
+    expect(updated.pushConfig?.oidcToken?.audience).toBe('my-audience');
+    expect(updated.pushConfig?.pushEndpoint).toBe('https://example.com/push');
+  });
+
   // ── deleteSubscription ──
 
   test('deleteSubscription deletes the subscription', async () => {
