@@ -777,6 +777,43 @@ describe('PubSubGrpcHandlers', () => {
       });
     });
 
+    test('processes modifyDeadlineAckIds pairwise from the client', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+      (subscriptionService.modifyAckDeadline as ReturnType<typeof mock>).mockResolvedValue(
+        undefined
+      );
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      fireEvent(eventListeners, 'data', {
+        modifyDeadlineAckIds: ['ack-1', 'ack-2'],
+        modifyDeadlineSeconds: [0, 30],
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      fireEvent(eventListeners, 'cancelled');
+
+      expect(subscriptionService.modifyAckDeadline).toHaveBeenCalledWith(
+        'projects/p/subscriptions/s',
+        { ackIds: ['ack-1'], ackDeadlineSeconds: 0 }
+      );
+      expect(subscriptionService.modifyAckDeadline).toHaveBeenCalledWith(
+        'projects/p/subscriptions/s',
+        { ackIds: ['ack-2'], ackDeadlineSeconds: 30 }
+      );
+    });
+
     test('stops polling on cancellation', async () => {
       (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
         receivedMessages: [],

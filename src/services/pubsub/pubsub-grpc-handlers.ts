@@ -1520,15 +1520,20 @@ export class PubSubGrpcHandlers {
       const modIds = request.modifyDeadlineAckIds ?? [];
       const modSeconds = request.modifyDeadlineSeconds ?? [];
 
-      if (modIds.length > 0) {
-        void this.subscriptionService
-          .modifyAckDeadline(subscriptionName, {
-            ackIds: modIds,
-            ackDeadlineSeconds: modSeconds[0] ?? streamAckDeadlineSeconds,
-          })
-          .catch(() => {
-            // Deadline modification errors are non-fatal
-          });
+      for (let i = 0; i < modIds.length; i++) {
+        const ackId = modIds[i];
+        const deadline = modSeconds[i] ?? streamAckDeadlineSeconds;
+
+        if (ackId != null) {
+          void this.subscriptionService
+            .modifyAckDeadline(subscriptionName, {
+              ackIds: [ackId],
+              ackDeadlineSeconds: deadline,
+            })
+            .catch(() => {
+              // Deadline modification errors are non-fatal
+            });
+        }
       }
     });
 
