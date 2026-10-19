@@ -46,7 +46,6 @@ Bucket CRUD, object upload/download, copy, compose, and rewrite.
 - `POST` `b/{bucket}/lockRetentionPolicy` — `buckets.lockRetentionPolicy`
 - `POST` `b/{bucket}/relocate` — `buckets.relocate`
 - `POST` `b/{bucket}/restore` — `buckets.restore`
-- `POST` `channels/stop` — `channels.stop`
 - `DELETE` `b/{bucket}/defaultObjectAcl/{entity}` — `defaultObjectAccessControls.delete`
 - `GET` `b/{bucket}/defaultObjectAcl/{entity}` — `defaultObjectAccessControls.get`
 - `POST` `b/{bucket}/defaultObjectAcl` — `defaultObjectAccessControls.insert`
@@ -77,6 +76,7 @@ Bucket CRUD, object upload/download, copy, compose, and rewrite.
 - `POST` `b/{bucket}/o/bulkRestore` — `objects.bulkRestore`
 - `POST` `b/{bucket}/o/{sourceObject}/moveTo/o/{destinationObject}` — `objects.move`
 - `POST` `b/{bucket}/o/{object}/restore` — `objects.restore`
+- `GET` `b/{bucket}/o/{object}/viewFullContext` — `objects.viewFullContext`
 - `POST` `b/{bucket}/operations/{operationId}/advanceRelocateBucket` — `operations.advanceRelocateBucket`
 - `POST` `b/{bucket}/operations/{operationId}/cancel` — `operations.cancel`
 - `GET` `b/{bucket}/operations/{operationId}` — `operations.get`
