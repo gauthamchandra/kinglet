@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.0](https://github.com/gauthamchandra/kinglet/compare/v3.2.0...v3.3.0) (2026-10-19)
+
+
+### Features
+
+* **pubsub:** add native gRPC support for Publisher, Subscriber, SchemaService ([#105](https://github.com/gauthamchandra/kinglet/issues/105)) ([abf05ce](https://github.com/gauthamchandra/kinglet/commit/abf05ce7e933f4c7b218eb6018f9b9e36dbe9f66))
+
 ## [3.2.0](https://github.com/gauthamchandra/kinglet/compare/v3.1.0...v3.2.0) (2026-10-16)
 
 
