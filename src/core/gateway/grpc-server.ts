@@ -136,7 +136,11 @@ export class GrpcServer {
   }
 
   /**
-   * Stop the gRPC server
+   * Stop the gRPC server.
+   *
+   * Calls tryShutdown() for a graceful drain, but falls back to
+   * forceShutdown() after 5 s so a caller that forgot to close active streams
+   * beforehand cannot block the process indefinitely.
    */
   async stop(): Promise<void> {
     return new Promise(resolve => {
@@ -146,10 +150,16 @@ export class GrpcServer {
         return;
       }
 
+      const forceTimeout = setTimeout(() => {
+        this.logger.warn('gRPC server graceful shutdown timed out; forcing shutdown');
+        this.server.forceShutdown();
+      }, 5000);
+
       this.server.tryShutdown(error => {
+        clearTimeout(forceTimeout);
+
         if (error) {
           this.logger.warn('Error during gRPC server shutdown:', error);
-          // Force shutdown if graceful shutdown fails
           this.server.forceShutdown();
         }
 
