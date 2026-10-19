@@ -840,6 +840,47 @@ describe('PubSubGrpcHandlers', () => {
       expect(callsAfter).toBe(callsBefore);
     });
 
+    test('releases leases via modifyAckDeadline(0) when stream is cancelled mid-pull', async () => {
+      let resolvePull!: (value: { receivedMessages: { ackId: string }[] }) => void;
+
+      const pullPromise = new Promise<{ receivedMessages: { ackId: string }[] }>(resolve => {
+        resolvePull = resolve;
+      });
+
+      (subscriptionService.pull as ReturnType<typeof mock>).mockReturnValue(pullPromise);
+      (subscriptionService.modifyAckDeadline as ReturnType<typeof mock>).mockResolvedValue(
+        undefined
+      );
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      // scheduleNextPoll() delays 100 ms before the first call to pollMessages.
+      // Wait 150 ms so the poll is definitely in-flight (pull() awaiting).
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      // Cancel the stream while pull() is still awaiting.
+      fireEvent(eventListeners, 'cancelled');
+
+      // Now resolve pull() with messages — the stream is already cancelled.
+      resolvePull({ receivedMessages: [{ ackId: 'ack-leaked' }] });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(subscriptionService.modifyAckDeadline).toHaveBeenCalledWith(
+        'projects/p/subscriptions/s',
+        { ackIds: ['ack-leaked'], ackDeadlineSeconds: 0 }
+      );
+      expect(mockCall.write).not.toHaveBeenCalled();
+    });
+
     test('emits INVALID_ARGUMENT when first request has no subscription', async () => {
       const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
       const mockCall = makeMockCall(eventListeners);

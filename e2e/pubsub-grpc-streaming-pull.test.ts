@@ -107,6 +107,8 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
       const msgs: string[] = [];
 
       call.on('error', (err: Error & { code?: number }) => {
+        if (err.code === grpc.status.CANCELLED) return;
+
         clearTimeout(timeoutId);
         reject(err);
       });
@@ -241,6 +243,8 @@ describe('Cloud Pub/Sub E2E: StreamingPull', () => {
       const call = subscriberClient.streamingPull();
 
       call.on('error', (err: Error & { code?: number }) => {
+        if (err.code === grpc.status.CANCELLED) return;
+
         clearTimeout(timeoutId);
         reject(err);
       });

@@ -1437,6 +1437,19 @@ export class PubSubGrpcHandlers {
           streamAckDeadlineSeconds
         );
 
+        if (cancelled && result.receivedMessages.length > 0) {
+          void this.subscriptionService
+            .modifyAckDeadline(subscriptionName, {
+              ackIds: result.receivedMessages
+                .map(m => m.ackId)
+                .filter((id): id is string => id != null),
+              ackDeadlineSeconds: 0,
+            })
+            .catch(() => {});
+
+          return;
+        }
+
         if (result.receivedMessages.length > 0 && !cancelled) {
           const canWrite = call.write({
             receivedMessages: result.receivedMessages.map(receivedMessageToProto),
