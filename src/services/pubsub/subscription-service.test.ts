@@ -164,6 +164,66 @@ describe('SubscriptionService', () => {
     await expect(promise).rejects.toHaveProperty('code', 'NOT_FOUND');
   });
 
+  test('updateSubscription nested mask path merges sub-field, preserving siblings', async () => {
+    await service.createSubscription('p', 's', {
+      topic: 'projects/p/topics/t',
+      pushConfig: {
+        pushEndpoint: 'https://old.example.com/push',
+        attributes: { key: 'value' },
+      },
+    });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/s', {
+      subscription: {
+        pushConfig: { pushEndpoint: 'https://new.example.com/push' },
+      },
+      updateMask: 'pushConfig.pushEndpoint',
+    });
+
+    expect(updated.pushConfig?.pushEndpoint).toBe('https://new.example.com/push');
+    expect(updated.pushConfig?.attributes).toEqual({ key: 'value' });
+  });
+
+  test('updateSubscription multiple nested paths for same parent accumulate', async () => {
+    await service.createSubscription('p', 's', {
+      topic: 'projects/p/topics/t',
+      retryPolicy: { minimumBackoff: '10s', maximumBackoff: '600s' },
+    });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/s', {
+      subscription: {
+        retryPolicy: { minimumBackoff: '5s', maximumBackoff: '300s' },
+      },
+      updateMask: 'retryPolicy.minimumBackoff,retryPolicy.maximumBackoff',
+    });
+
+    expect(updated.retryPolicy?.minimumBackoff).toBe('5s');
+    expect(updated.retryPolicy?.maximumBackoff).toBe('300s');
+  });
+
+  test('updateSubscription three-level nested mask path updates leaf, preserves siblings', async () => {
+    await service.createSubscription('p', 's', {
+      topic: 'projects/p/topics/t',
+      pushConfig: {
+        pushEndpoint: 'https://example.com/push',
+        oidcToken: { serviceAccountEmail: 'old@example.com', audience: 'my-audience' },
+      },
+    });
+
+    const updated = await service.updateSubscription('projects/p/subscriptions/s', {
+      subscription: {
+        pushConfig: {
+          oidcToken: { serviceAccountEmail: 'new@example.com', audience: 'my-audience' },
+        },
+      },
+      updateMask: 'pushConfig.oidcToken.serviceAccountEmail',
+    });
+
+    expect(updated.pushConfig?.oidcToken?.serviceAccountEmail).toBe('new@example.com');
+    expect(updated.pushConfig?.oidcToken?.audience).toBe('my-audience');
+    expect(updated.pushConfig?.pushEndpoint).toBe('https://example.com/push');
+  });
+
   // ── deleteSubscription ──
 
   test('deleteSubscription deletes the subscription', async () => {

@@ -23,6 +23,75 @@ import {
   subscriptionRecordToResponse,
 } from './types.ts';
 
+function getNestedValue(obj: Record<string, unknown>, segments: string[]): unknown {
+  let curr: unknown = obj;
+
+  for (const seg of segments) {
+    if (curr == null || typeof curr !== 'object') return undefined;
+
+    curr = (curr as Record<string, unknown>)[seg];
+  }
+
+  return curr;
+}
+
+function setNestedValue(obj: Record<string, unknown>, segments: string[], value: unknown): void {
+  if (segments.length === 0) return;
+
+  const leafKey = segments[segments.length - 1];
+
+  if (leafKey === undefined) return;
+
+  let curr = obj;
+
+  for (const key of segments.slice(0, -1)) {
+    if (curr[key] == null || typeof curr[key] !== 'object') {
+      curr[key] = {};
+    }
+
+    curr = curr[key] as Record<string, unknown>;
+  }
+
+  curr[leafKey] = value;
+}
+
+/**
+ * Merge a single sub-field from `incoming` into the existing JSON blob for
+ * `topField` in `existing`, writing the result into `updates`.
+ *
+ * `subField` may itself be a dotted path (e.g. `oidcToken.serviceAccountEmail`),
+ * in which case the value is read/written at the correct nested depth so that
+ * sibling fields at every level are preserved.
+ *
+ * If `updates[topField]` was already set by a previous nested-path entry for
+ * the same parent, that intermediate value is used as the base instead of
+ * re-reading from `existing`, so multiple nested paths for the same parent
+ * field accumulate correctly.
+ */
+function applyNestedSubUpdate(
+  topField: string,
+  subField: string,
+  incoming: Record<string, unknown>,
+  existing: Record<string, unknown>,
+  updates: Record<string, unknown>
+): void {
+  const baseStr =
+    topField in updates
+      ? (updates[topField] as string)
+      : ((existing[topField] as string | null | undefined) ?? null);
+
+  const base: Record<string, unknown> = baseStr
+    ? (JSON.parse(baseStr) as Record<string, unknown>)
+    : {};
+
+  const incomingTop = (incoming[topField] as Record<string, unknown> | undefined) ?? {};
+  const subSegments = subField.split('.');
+  const value = getNestedValue(incomingTop, subSegments);
+
+  setNestedValue(base, subSegments, value);
+  updates[topField] = JSON.stringify(base);
+}
+
 export class SubscriptionService {
   private subRepo: SubscriptionRepository;
   private topicRepo: TopicRepository;
@@ -139,7 +208,35 @@ export class SubscriptionService {
     if (updateMask) {
       const fields = updateMask.split(',').map(f => f.trim());
 
+      // For nested paths (e.g. "pushConfig.pushEndpoint") we need the existing
+      // record so we can merge only the specified sub-field instead of replacing
+      // the whole nested object.
+      const hasNestedPaths = fields.some(f => f.includes('.'));
+      let existingRecord: Record<string, unknown> | null = null;
+
+      if (hasNestedPaths) {
+        existingRecord = (await this.subRepo.getSubscriptionByName(name)) as Record<
+          string,
+          unknown
+        > | null;
+
+        if (!existingRecord) {
+          throw new PubSubError('NOT_FOUND', `Subscription ${name} not found`, name);
+        }
+      }
+
       for (const field of fields) {
+        const dotIdx = field.indexOf('.');
+
+        if (dotIdx >= 0) {
+          // Nested path: merge the sub-field into the existing JSON value.
+          const topField = field.substring(0, dotIdx);
+          const subField = field.substring(dotIdx + 1);
+
+          applyNestedSubUpdate(topField, subField, subData, existingRecord ?? {}, updates);
+          continue;
+        }
+
         switch (field) {
           case 'ackDeadlineSeconds':
             if (subData.ackDeadlineSeconds != null) {
