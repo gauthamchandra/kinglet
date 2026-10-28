@@ -158,6 +158,10 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # release-please PRs only bump version metadata on top of an already-tested main commit.
+    # Skipping at the job level (rather than branches-ignore) still reports a `skipped` check
+    # run so the branch ruleset's required status checks are satisfied.
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
 
     steps:
       - name: Checkout code
@@ -203,6 +207,7 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
 
     steps:
       - name: Checkout code
@@ -233,6 +238,7 @@ jobs:
   terraform-e2e:
     name: Terraform validation
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release-please--')
 
     steps:
       - name: Checkout code
