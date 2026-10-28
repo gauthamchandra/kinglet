@@ -389,6 +389,13 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
       logger.info('HTTP server stopped');
     }
 
+    // Stop Pub/Sub streaming calls before the gRPC server so that
+    // tryShutdown() is not blocked by open StreamingPull RPCs.
+    if (pubsubService) {
+      await pubsubService.stop();
+      logger.info('Pub/Sub service stopped');
+    }
+
     if (grpcServer) {
       await grpcServer.stop();
       grpcServer = null;
@@ -403,11 +410,6 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     if (tasksService) {
       await tasksService.stop();
       logger.info('Tasks service stopped');
-    }
-
-    if (pubsubService) {
-      await pubsubService.stop();
-      logger.info('Pub/Sub service stopped');
     }
 
     if (cloudStorageService) {

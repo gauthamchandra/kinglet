@@ -676,23 +676,345 @@ describe('PubSubGrpcHandlers', () => {
     });
   });
 
-  // ── Subscriber: StreamingPull (UNIMPLEMENTED stub) ──
+  // ── Subscriber: StreamingPull ──
 
   describe('StreamingPull', () => {
-    test('emits UNIMPLEMENTED error on the call stream', () => {
-      const emitted: (Error & { code?: number })[] = [];
-      const mockCall = {
-        emit: (_event: string, err: unknown) => {
-          emitted.push(err as Error & { code?: number });
+    const fireEvent = (
+      listeners: Record<string, ((arg: unknown) => void)[]>,
+      event: string,
+      arg: unknown = undefined
+    ) => {
+      for (const handler of listeners[event] ?? []) {
+        handler(arg);
+      }
+    };
+
+    const makeMockCall = (
+      eventListeners: Record<string, ((arg: unknown) => void)[]>,
+      writeReturnValue = true
+    ) =>
+      ({
+        write: mock(() => writeReturnValue),
+        end: mock(),
+        emit: mock(),
+        on: (event: string, handler: (arg: unknown) => void) => {
+          if (!eventListeners[event]) {
+            eventListeners[event] = [];
+          }
+
+          eventListeners[event].push(handler);
         },
-        on: mock(),
         metadata: new grpc.Metadata(),
-      } as unknown as grpc.ServerDuplexStream<unknown, unknown>;
+      }) as unknown as grpc.ServerDuplexStream<unknown, unknown>;
+
+    test('delivers messages to the client stream', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [
+          {
+            ackId: 'ack-1',
+            message: {
+              messageId: 'msg-1',
+              data: 'aGVsbG8=',
+              attributes: {},
+              publishTime: '2026-01-01T00:00:00.000Z',
+            },
+          },
+        ],
+      });
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
 
       handlers.streamingPull(mockCall);
 
-      expect(emitted).toHaveLength(1);
-      expect(emitted[0]?.code).toBe(grpc.status.UNIMPLEMENTED);
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+        ackIds: [],
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      fireEvent(eventListeners, 'cancelled');
+
+      expect(subscriptionService.pull).toHaveBeenCalledWith(
+        'projects/p/subscriptions/s',
+        { maxMessages: 100 },
+        10
+      );
+      expect((mockCall.write as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
+        1
+      );
+    });
+
+    test('processes ack requests from the client', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+      (subscriptionService.acknowledge as ReturnType<typeof mock>).mockResolvedValue(undefined);
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      // Subsequent requests must NOT include the subscription field (real GCP rejects those).
+      fireEvent(eventListeners, 'data', {
+        ackIds: ['ack-id-1', 'ack-id-2'],
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      fireEvent(eventListeners, 'cancelled');
+
+      expect(subscriptionService.acknowledge).toHaveBeenCalledWith('projects/p/subscriptions/s', {
+        ackIds: ['ack-id-1', 'ack-id-2'],
+      });
+    });
+
+    test('processes modifyDeadlineAckIds pairwise from the client', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+      (subscriptionService.modifyAckDeadline as ReturnType<typeof mock>).mockResolvedValue(
+        undefined
+      );
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      fireEvent(eventListeners, 'data', {
+        modifyDeadlineAckIds: ['ack-1', 'ack-2'],
+        modifyDeadlineSeconds: [0, 30],
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      fireEvent(eventListeners, 'cancelled');
+
+      expect(subscriptionService.modifyAckDeadline).toHaveBeenCalledWith(
+        'projects/p/subscriptions/s',
+        { ackIds: ['ack-1'], ackDeadlineSeconds: 0 }
+      );
+      expect(subscriptionService.modifyAckDeadline).toHaveBeenCalledWith(
+        'projects/p/subscriptions/s',
+        { ackIds: ['ack-2'], ackDeadlineSeconds: 30 }
+      );
+    });
+
+    test('stops polling on cancellation', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      fireEvent(eventListeners, 'cancelled');
+
+      const callsBefore = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls.length;
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const callsAfter = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls.length;
+
+      expect(callsAfter).toBe(callsBefore);
+    });
+
+    test('releases leases via modifyAckDeadline(0) when stream is cancelled mid-pull', async () => {
+      let resolvePull!: (value: { receivedMessages: { ackId: string }[] }) => void;
+
+      const pullPromise = new Promise<{ receivedMessages: { ackId: string }[] }>(resolve => {
+        resolvePull = resolve;
+      });
+
+      (subscriptionService.pull as ReturnType<typeof mock>).mockReturnValue(pullPromise);
+      (subscriptionService.modifyAckDeadline as ReturnType<typeof mock>).mockResolvedValue(
+        undefined
+      );
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      // scheduleNextPoll() delays 100 ms before the first call to pollMessages.
+      // Wait 150 ms so the poll is definitely in-flight (pull() awaiting).
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      // Cancel the stream while pull() is still awaiting.
+      fireEvent(eventListeners, 'cancelled');
+
+      // Now resolve pull() with messages — the stream is already cancelled.
+      resolvePull({ receivedMessages: [{ ackId: 'ack-leaked' }] });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(subscriptionService.modifyAckDeadline).toHaveBeenCalledWith(
+        'projects/p/subscriptions/s',
+        { ackIds: ['ack-leaked'], ackDeadlineSeconds: 0 }
+      );
+      expect(mockCall.write).not.toHaveBeenCalled();
+    });
+
+    test('emits INVALID_ARGUMENT when first request has no subscription', async () => {
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', { streamAckDeadlineSeconds: 10 });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockCall.emit).toHaveBeenCalledWith(
+        'error',
+        expect.objectContaining({ code: grpc.status.INVALID_ARGUMENT })
+      );
+      expect(subscriptionService.pull).not.toHaveBeenCalled();
+    });
+
+    test.each([
+      ['omitted (proto3 default 0)', 0],
+      ['below minimum (5)', 5],
+      ['above maximum (601)', 601],
+    ])('emits INVALID_ARGUMENT when streamAckDeadlineSeconds is %s', async (_label, deadline) => {
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: deadline,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockCall.emit).toHaveBeenCalledWith(
+        'error',
+        expect.objectContaining({ code: grpc.status.INVALID_ARGUMENT })
+      );
+      expect(subscriptionService.pull).not.toHaveBeenCalled();
+    });
+
+    test('emits NOT_FOUND when subscription does not exist', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockRejectedValue(
+        new PubSubError('NOT_FOUND', 'Subscription projects/p/subscriptions/missing not found')
+      );
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/missing',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      expect(mockCall.emit).toHaveBeenCalledWith(
+        'error',
+        expect.objectContaining({ code: grpc.status.NOT_FOUND })
+      );
+    });
+
+    test('emits INVALID_ARGUMENT when subscription is set on a subsequent request', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+
+      const eventListeners: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall = makeMockCall(eventListeners);
+
+      handlers.streamingPull(mockCall);
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      fireEvent(eventListeners, 'data', {
+        subscription: 'projects/p/subscriptions/s',
+        ackIds: [],
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(mockCall.emit).toHaveBeenCalledWith(
+        'error',
+        expect.objectContaining({ code: grpc.status.INVALID_ARGUMENT })
+      );
+    });
+
+    test('stopActiveStreams ends all active streaming calls and stops the poll loop', async () => {
+      (subscriptionService.pull as ReturnType<typeof mock>).mockResolvedValue({
+        receivedMessages: [],
+      });
+
+      const eventListeners1: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall1 = makeMockCall(eventListeners1);
+      const eventListeners2: Record<string, ((arg: unknown) => void)[]> = {};
+      const mockCall2 = makeMockCall(eventListeners2);
+
+      handlers.streamingPull(mockCall1);
+      handlers.streamingPull(mockCall2);
+
+      fireEvent(eventListeners1, 'data', {
+        subscription: 'projects/p/subscriptions/s1',
+        streamAckDeadlineSeconds: 10,
+      });
+      fireEvent(eventListeners2, 'data', {
+        subscription: 'projects/p/subscriptions/s2',
+        streamAckDeadlineSeconds: 10,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      handlers.stopActiveStreams();
+
+      expect((mockCall1.end as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
+        1
+      );
+      expect((mockCall2.end as ReturnType<typeof mock>).mock.calls.length).toBeGreaterThanOrEqual(
+        1
+      );
+
+      const pullCountAtStop = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls
+        .length;
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const pullCountAfterWait = (subscriptionService.pull as ReturnType<typeof mock>).mock.calls
+        .length;
+
+      expect(pullCountAfterWait).toBe(pullCountAtStop);
     });
   });
 

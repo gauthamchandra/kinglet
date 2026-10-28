@@ -269,6 +269,15 @@ interface ValidateMessageRequest {
   message?: Uint8Array | string;
 }
 
+interface StreamingPullRequest {
+  subscription?: string;
+  ackIds?: string[];
+  modifyDeadlineSeconds?: number[];
+  modifyDeadlineAckIds?: string[];
+  streamAckDeadlineSeconds?: number;
+  clientId?: string;
+}
+
 // ── Error mapping ──
 
 const PUBSUB_ERROR_TO_GRPC: Record<string, grpc.status> = {
@@ -292,13 +301,6 @@ function toGrpcError(err: unknown): grpc.ServiceError {
   }) as grpc.ServiceError;
 
   return grpcErr;
-}
-
-function unimplemented(methodName: string): grpc.ServiceError {
-  return Object.assign(new Error(`${methodName} not implemented`), {
-    code: grpc.status.UNIMPLEMENTED,
-    name: 'ServiceError',
-  }) as grpc.ServiceError;
 }
 
 // ── Data conversion utilities ──
@@ -844,6 +846,14 @@ export class PubSubGrpcHandlers {
   private snapshotService: SnapshotService;
   private schemaService: SchemaService;
 
+  /**
+   * Per-stream stop closures.  Each entry sets `cancelled`, clears the poll
+   * timer, removes itself from this set, and calls `call.end()`.  Stored as
+   * closures (not raw call objects) so `stopActiveStreams()` can also stop the
+   * 100 ms poll loop, not just half-close the wire connection.
+   */
+  private readonly activeStreamStoppers = new Set<() => void>();
+
   constructor(
     topicService: TopicService,
     subscriptionService: SubscriptionService,
@@ -1362,14 +1372,204 @@ export class PubSubGrpcHandlers {
     }
   };
 
-  // ── Subscriber: StreamingPull (UNIMPLEMENTED stub) ──
+  // ── Subscriber: StreamingPull ──
 
-  streamingPull = (call: grpc.ServerDuplexStream<unknown, unknown>): void => {
-    // Emit the error so the ServerDuplexStreamImpl's internal 'error' handler
-    // sets pendingStatus = UNIMPLEMENTED and calls end() → _final() →
-    // sendStatus() to the client, rather than using call.destroy() which
-    // marks the stream destroyed before _final() can run.
-    call.emit('error', unimplemented('StreamingPull'));
+  /**
+   * Stop every active StreamingPull — used during service shutdown so that
+   * GrpcServer.tryShutdown() is not blocked by open streaming RPCs.
+   *
+   * Each stopper cancels the poll loop (sets `cancelled`, clears the timer)
+   * and calls `call.end()` so the gRPC server sees the stream as finished.
+   */
+  stopActiveStreams(): void {
+    for (const stop of this.activeStreamStoppers) {
+      stop();
+    }
+
+    this.activeStreamStoppers.clear();
+  }
+
+  streamingPull = (call: grpc.ServerDuplexStream<StreamingPullRequest, unknown>): void => {
+    let subscriptionName = '';
+    let streamAckDeadlineSeconds = 10;
+    let cancelled = false;
+    let paused = false;
+    let pollTimeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const stopPolling = () => {
+      cancelled = true;
+
+      if (pollTimeoutId !== undefined) {
+        clearTimeout(pollTimeoutId);
+        pollTimeoutId = undefined;
+      }
+    };
+
+    // stopStream is stored in activeStreamStoppers so that stopActiveStreams()
+    // can cancel the poll loop and half-close the wire in one call.
+    const stopStream = () => {
+      stopPolling();
+      this.activeStreamStoppers.delete(stopStream);
+      call.end();
+    };
+
+    this.activeStreamStoppers.add(stopStream);
+
+    const scheduleNextPoll = () => {
+      if (cancelled || paused) {
+        return;
+      }
+
+      pollTimeoutId = setTimeout(() => {
+        void pollMessages();
+      }, 100);
+    };
+
+    const pollMessages = async () => {
+      if (cancelled || !subscriptionName || paused) {
+        return;
+      }
+
+      try {
+        const result = await this.subscriptionService.pull(
+          subscriptionName,
+          { maxMessages: 100 },
+          streamAckDeadlineSeconds
+        );
+
+        if (cancelled && result.receivedMessages.length > 0) {
+          void this.subscriptionService
+            .modifyAckDeadline(subscriptionName, {
+              ackIds: result.receivedMessages
+                .map(m => m.ackId)
+                .filter((id): id is string => id != null),
+              ackDeadlineSeconds: 0,
+            })
+            .catch(() => {});
+
+          return;
+        }
+
+        if (result.receivedMessages.length > 0 && !cancelled) {
+          const canWrite = call.write({
+            receivedMessages: result.receivedMessages.map(receivedMessageToProto),
+          });
+
+          if (!canWrite) {
+            paused = true;
+
+            return;
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          stopPolling();
+          this.activeStreamStoppers.delete(stopStream);
+          call.emit('error', toGrpcError(err));
+
+          return;
+        }
+      }
+
+      scheduleNextPoll();
+    };
+
+    call.on('data', (request: StreamingPullRequest) => {
+      if (!subscriptionName) {
+        if (!request.subscription) {
+          stopPolling();
+          call.emit(
+            'error',
+            toGrpcError(new PubSubError('INVALID_ARGUMENT', 'subscription must be provided'))
+          );
+
+          return;
+        }
+
+        const deadline = request.streamAckDeadlineSeconds ?? 0;
+
+        if (deadline < 10 || deadline > 600) {
+          stopPolling();
+          call.emit(
+            'error',
+            toGrpcError(
+              new PubSubError(
+                'INVALID_ARGUMENT',
+                `streamAckDeadlineSeconds must be between 10 and 600 seconds, got ${deadline}`
+              )
+            )
+          );
+
+          return;
+        }
+
+        subscriptionName = request.subscription;
+        streamAckDeadlineSeconds = deadline;
+        scheduleNextPoll();
+      } else if (request.subscription && request.subscription.length > 0) {
+        stopPolling();
+        this.activeStreamStoppers.delete(stopStream);
+        call.emit(
+          'error',
+          toGrpcError(
+            new PubSubError(
+              'INVALID_ARGUMENT',
+              'subscription field must only be set on the first StreamingPull request'
+            )
+          )
+        );
+
+        return;
+      }
+
+      if (request.ackIds && request.ackIds.length > 0) {
+        void this.subscriptionService
+          .acknowledge(subscriptionName, { ackIds: request.ackIds })
+          .catch(() => {
+            // Ack errors in streaming pull are non-fatal
+          });
+      }
+
+      const modIds = request.modifyDeadlineAckIds ?? [];
+      const modSeconds = request.modifyDeadlineSeconds ?? [];
+
+      for (let i = 0; i < modIds.length; i++) {
+        const ackId = modIds[i];
+        const deadline = modSeconds[i] ?? streamAckDeadlineSeconds;
+
+        if (ackId != null) {
+          void this.subscriptionService
+            .modifyAckDeadline(subscriptionName, {
+              ackIds: [ackId],
+              ackDeadlineSeconds: deadline,
+            })
+            .catch(() => {
+              // Deadline modification errors are non-fatal
+            });
+        }
+      }
+    });
+
+    call.on('drain', () => {
+      paused = false;
+      scheduleNextPoll();
+    });
+
+    call.on('cancelled', () => {
+      stopPolling();
+      this.activeStreamStoppers.delete(stopStream);
+    });
+
+    call.on('end', () => {
+      stopPolling();
+      this.activeStreamStoppers.delete(stopStream);
+      call.end();
+    });
+
+    call.on('error', () => {
+      stopPolling();
+      this.activeStreamStoppers.delete(stopStream);
+    });
   };
 
   // ── Subscriber: ModifyPushConfig ──

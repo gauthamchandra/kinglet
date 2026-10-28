@@ -322,8 +322,17 @@ export class SubscriptionService {
     return { messageIds };
   }
 
-  async pull(subscriptionName: string, body: unknown): Promise<PullResponse> {
-    const pullBody = body as { maxMessages?: number; returnImmediately?: boolean } | undefined;
+  async pull(
+    subscriptionName: string,
+    body: unknown,
+    ackDeadlineOverride?: number
+  ): Promise<PullResponse> {
+    const pullBody = body as
+      | {
+          maxMessages?: number;
+          returnImmediately?: boolean;
+        }
+      | undefined;
     const maxMessages = pullBody?.maxMessages ?? 100;
 
     // Verify subscription exists
@@ -341,10 +350,12 @@ export class SubscriptionService {
       throw new PubSubError('FAILED_PRECONDITION', `Subscription ${subscriptionName} is detached`);
     }
 
+    const effectiveAckDeadlineSeconds = ackDeadlineOverride ?? sub.ackDeadlineSeconds;
+
     const receivedMessages = await this.messageRepo.pullMessages(
       subscriptionName,
       maxMessages,
-      sub.ackDeadlineSeconds
+      effectiveAckDeadlineSeconds
     );
 
     return { receivedMessages };
