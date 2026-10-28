@@ -6,7 +6,11 @@ This project uses [semantic versioning](https://semver.org/) with automated rele
 
 1. All commits to `main` must follow [Conventional Commits](https://www.conventionalcommits.org/) format (enforced by commitlint)
 2. When commits land on `main`, release-please automatically opens (or updates) a release PR with the proposed version bump and changelog
-3. A maintainer reviews and merges the release PR — this is the only manual step
+3. A maintainer reviews and merges the release PR — this is the only manual step.
+   The PR only bumps the version, changelog, and release-please manifest, so the
+   Test / E2E / Terraform / Docker jobs skip: that suite already ran when the
+   commits landed on `main`. Commitlint and DCO still run. Merging still runs
+   the full suite on `main` (and publishes the sha-tagged image).
 4. Merging the release PR automatically:
    - Creates a git tag (e.g., `v1.2.3`)
    - Publishes a GitHub Release with changelog notes
