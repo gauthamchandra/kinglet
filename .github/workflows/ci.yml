@@ -155,9 +155,17 @@ jobs:
 
           echo "All commits are signed off by a human."
 
+  # Release-please PRs only bump package.json, CHANGELOG.md, and the manifest.
+  # That code already ran this suite when the commits landed on main; re-running
+  # it just burns minutes and can flake-block the release (see #106). Gate at
+  # the job `if:`, not `on.paths-ignore` — a skipped required check reports
+  # success, but a workflow that never starts stays pending and blocks merge.
+  # Push events have an empty head_ref, so main still gets the full suite
+  # (and the sha-tagged image from build-docker).
   test:
     name: Test
     runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
 
     steps:
       - name: Checkout code
@@ -203,6 +211,7 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
 
     steps:
       - name: Checkout code
@@ -233,6 +242,7 @@ jobs:
   terraform-e2e:
     name: Terraform validation
     runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
 
     steps:
       - name: Checkout code
@@ -261,6 +271,7 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     needs: [test, e2e, terraform-e2e]
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     permissions:
       contents: read
       packages: write
