@@ -293,6 +293,16 @@ async function main(): Promise<void> {
       registerServiceRoutes(networkSecurityService.getRoutes());
     }
 
+    // /health answers as soon as this socket accepts, before the evaluation
+    // listener binds. Report Compute as enabled with started false until
+    // start() replaces this.
+    if (computeService != null) {
+      evaluationServerHealth = {
+        started: false,
+        bind: config.services.compute.listenerBind,
+      };
+    }
+
     server = Bun.serve({
       port: config.server.httpPort,
       fetch: request => router.route(request),
@@ -327,6 +337,14 @@ async function main(): Promise<void> {
     // COMPUTE_LISTENER_PORT that matches HTTP_PORT cannot steal the port and
     // take the whole emulator down. start() also skips that reserved port.
     if (computeService != null) {
+      // Test-only. Holds the not-yet-bound health body long enough for a
+      // client to observe it. Unset in normal runs.
+      const bindDelayMs = Number(process.env.KINGLET_TEST_ARMOR_BIND_DELAY_MS);
+
+      if (Number.isFinite(bindDelayMs) && bindDelayMs > 0) {
+        await Bun.sleep(bindDelayMs);
+      }
+
       const computeStart = computeService.start(server.port);
 
       evaluationServerHealth = {

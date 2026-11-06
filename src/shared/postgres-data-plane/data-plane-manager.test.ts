@@ -11,7 +11,9 @@ import { Logger } from '@/shared/utils/logger.ts';
 import type { DataPlaneManagerOptions, LookupUser } from './data-plane-manager.ts';
 import { DataPlaneManager, DisabledDataPlane } from './data-plane-manager.ts';
 
-const TEST_PORT_BASE = 46300;
+// Below the usual ephemeral range (32768–60999). A kernel-chosen client port
+// inside a 5-port window makes the exhaustion test fail on the fifth bind.
+const TEST_PORT_BASE = 20000;
 
 let nextRangeStart = TEST_PORT_BASE;
 let managers: DataPlaneManager[] = [];
