@@ -194,6 +194,10 @@ jobs:
       # is separate: scripts/check-coverage.ts reads the machine-readable lcov report, because
       # bunfig's own coverageThreshold is applied per-file and the text table it prints has no
       # stable format to parse.
+      #
+      # `--max-concurrency=10` (in the script) is half of Bun's default of 20. Coverage plus
+      # several PGlite databases, each about 1 GB, overlapped hard enough to exhaust the
+      # 16 GB ubuntu-latest VM.
       - name: Run tests with coverage
         run: bun run test:coverage:check
 
