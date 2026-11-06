@@ -19,7 +19,12 @@ const HEAVY_FILES = new Set([
 
 const ROOTS = ['src', 'test-utils', 'scripts'];
 
-async function collectTestFiles(): Promise<{ light: string[]; heavy: string[] }> {
+/** PGlite boots live in these files. They run in their own process. */
+export function isPgliteCoverageTest(path: string): boolean {
+  return path.startsWith('src/shared/postgres-data-plane/') || HEAVY_FILES.has(path);
+}
+
+export async function collectTestFiles(): Promise<{ light: string[]; heavy: string[] }> {
   const light: string[] = [];
   const heavy: string[] = [];
   const glob = new Glob('**/*.test.ts');
@@ -28,7 +33,7 @@ async function collectTestFiles(): Promise<{ light: string[]; heavy: string[] }>
     for await (const relative of glob.scan({ cwd: root, onlyFiles: true })) {
       const path = `${root}/${relative}`;
 
-      if (path.startsWith('src/shared/postgres-data-plane/') || HEAVY_FILES.has(path)) {
+      if (isPgliteCoverageTest(path)) {
         heavy.push(path);
       } else {
         light.push(path);
@@ -58,25 +63,31 @@ async function runSuite(label: string, files: string[]): Promise<string> {
   return Bun.file('coverage/lcov.info').text();
 }
 
-const { light, heavy } = await collectTestFiles();
+async function main(): Promise<void> {
+  const { light, heavy } = await collectTestFiles();
 
-if (light.length === 0 || heavy.length === 0) {
-  console.error('Expected both a main suite and a PGlite suite');
-  process.exit(1);
+  if (light.length === 0 || heavy.length === 0) {
+    console.error('Expected both a main suite and a PGlite suite');
+    process.exit(1);
+  }
+
+  await mkdir('coverage', { recursive: true });
+
+  const lightReport = await runSuite('main suite', light);
+  const heavyReport = await runSuite('PGlite suite', heavy);
+  const merged = mergeLcov([lightReport, heavyReport]);
+
+  await Bun.write('coverage/lcov.info', merged);
+
+  const gate = Bun.spawn(['bun', 'run', 'scripts/check-coverage.ts'], {
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  const gateExit = await gate.exited;
+
+  process.exit(gateExit ?? 1);
 }
 
-await mkdir('coverage', { recursive: true });
-
-const lightReport = await runSuite('main suite', light);
-const heavyReport = await runSuite('PGlite suite', heavy);
-const merged = mergeLcov([lightReport, heavyReport]);
-
-await Bun.write('coverage/lcov.info', merged);
-
-const gate = Bun.spawn(['bun', 'run', 'scripts/check-coverage.ts'], {
-  stdout: 'inherit',
-  stderr: 'inherit',
-});
-const gateExit = await gate.exited;
-
-process.exit(gateExit ?? 1);
+if (import.meta.main) {
+  await main();
+}
