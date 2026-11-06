@@ -47,7 +47,12 @@ export async function collectTestFiles(): Promise<{ light: string[]; heavy: stri
   return { light, heavy };
 }
 
-async function runSuite(label: string, files: string[]): Promise<string> {
+/** Bun's panic handler exits 132. A segfault is 139. Both are Bun/wasm crashes, not test failures. */
+export function shouldRetryCrashedSuite(exitCode: number, attempt: number): boolean {
+  return attempt === 1 && (exitCode === 132 || exitCode === 139);
+}
+
+async function runSuite(label: string, files: string[], attempt = 1): Promise<string> {
   console.log(`\n== ${label} (${files.length} files) ==`);
 
   const child = Bun.spawn(['bun', 'test', '--coverage', ...files], {
@@ -57,6 +62,12 @@ async function runSuite(label: string, files: string[]): Promise<string> {
   const exitCode = await child.exited;
 
   if (exitCode !== 0) {
+    if (shouldRetryCrashedSuite(exitCode ?? 1, attempt)) {
+      console.error(`${label} crashed (exit ${exitCode}); retrying once`);
+
+      return runSuite(label, files, attempt + 1);
+    }
+
     process.exit(exitCode ?? 1);
   }
 
