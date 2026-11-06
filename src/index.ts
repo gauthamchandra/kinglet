@@ -293,6 +293,16 @@ async function main(): Promise<void> {
       registerServiceRoutes(networkSecurityService.getRoutes());
     }
 
+    // /health answers as soon as this socket accepts, before the evaluation
+    // listener binds. Report Compute as enabled with started false until
+    // start() replaces this.
+    if (computeService != null) {
+      evaluationServerHealth = {
+        started: false,
+        bind: config.services.compute.listenerBind,
+      };
+    }
+
     server = Bun.serve({
       port: config.server.httpPort,
       fetch: request => router.route(request),

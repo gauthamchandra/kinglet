@@ -54,6 +54,50 @@ async function waitForHealth<T>(port: number, timeoutMs = 10_000): Promise<T | u
   return undefined;
 }
 
+type ArmorHealthPayload = {
+  status?: string;
+  kingletCloudArmorEvaluationServer?: {
+    started?: boolean;
+    port?: number;
+    bind?: string;
+  };
+};
+
+/**
+ * Sample /health until the evaluation listener reports started, keeping every
+ * 200 along the way. The control plane accepts traffic before that listener
+ * binds, so the first 200 is not the steady state.
+ */
+async function sampleHealthUntilArmorStarted(
+  port: number,
+  timeoutMs = 10_000
+): Promise<ArmorHealthPayload[]> {
+  const deadline = Date.now() + timeoutMs;
+  const samples: ArmorHealthPayload[] = [];
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/health`);
+
+      if (response.ok) {
+        const body = (await response.json()) as ArmorHealthPayload;
+
+        samples.push(body);
+
+        if (body.kingletCloudArmorEvaluationServer?.started === true) {
+          return samples;
+        }
+      }
+    } catch {
+      // still starting
+    }
+
+    await Bun.sleep(5);
+  }
+
+  return samples;
+}
+
 describe('src/index.ts shutdown', () => {
   test('uncaughtException_afterStartup_exitsNonZeroInsteadOfLookingLikeACleanStop', async () => {
     const child = Bun.spawn(['bun', '--preload', THROW_AFTER_STARTUP_FIXTURE, INDEX_ENTRYPOINT], {
@@ -168,21 +212,19 @@ describe('src/index.ts shutdown', () => {
     });
 
     try {
-      type HealthPayload = {
-        status?: string;
-        kingletCloudArmorEvaluationServer?: {
-          started?: boolean;
-          port?: number;
-          bind?: string;
-        };
-      };
-      const body = await waitForHealth<HealthPayload>(httpPort);
+      const samples = await sampleHealthUntilArmorStarted(httpPort);
 
-      expect(body).toBeDefined();
-      expect(body?.status).toBe('ok');
-      expect(body?.kingletCloudArmorEvaluationServer?.started).toBe(true);
-      expect(body?.kingletCloudArmorEvaluationServer?.port).toBe(evaluationPort);
-      expect(body?.kingletCloudArmorEvaluationServer?.bind).toBe('127.0.0.1');
+      expect(samples.length).toBeGreaterThan(0);
+
+      for (const sample of samples) {
+        expect(sample.status).toBe('ok');
+        expect(sample.kingletCloudArmorEvaluationServer?.bind).toBe('127.0.0.1');
+      }
+
+      const ready = samples[samples.length - 1];
+
+      expect(ready?.kingletCloudArmorEvaluationServer?.started).toBe(true);
+      expect(ready?.kingletCloudArmorEvaluationServer?.port).toBe(evaluationPort);
     } finally {
       child.kill('SIGTERM');
       await child.exited;

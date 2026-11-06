@@ -58,9 +58,10 @@ curl -s http://127.0.0.1:8765/health
 }
 ```
 
-`status: ok` only means the control plane is up. If Compute is enabled and
-`kingletCloudArmorEvaluationServer.started` is `false`, apply can succeed while
-evaluation is unreachable.
+`status: ok` only means the control plane is up. When Compute is enabled,
+`kingletCloudArmorEvaluationServer` is on every `/health` response, including
+while the listener is still binding. `started: false` means apply can succeed
+while evaluation is unreachable.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
