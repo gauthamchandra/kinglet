@@ -195,9 +195,10 @@ jobs:
       # bunfig's own coverageThreshold is applied per-file and the text table it prints has no
       # stable format to parse.
       #
-      # `--max-concurrency=10` (in the script) is half of Bun's default of 20. Coverage plus
-      # several PGlite databases, each about 1 GB, overlapped hard enough to exhaust the
-      # 16 GB ubuntu-latest VM.
+      # `--max-concurrency` only limits `test.concurrent` / `--concurrent`. This suite
+      # uses neither, and Bun 1.3.4 already runs files in one process. The coverage
+      # script runs PGlite tests in a second process so that wasm heap is not added
+      # to the rest of the suite.
       - name: Run tests with coverage
         run: bun run test:coverage:check
 
