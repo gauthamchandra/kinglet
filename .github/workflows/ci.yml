@@ -194,6 +194,11 @@ jobs:
       # is separate: scripts/check-coverage.ts reads the machine-readable lcov report, because
       # bunfig's own coverageThreshold is applied per-file and the text table it prints has no
       # stable format to parse.
+      #
+      # `--max-concurrency` only limits `test.concurrent` / `--concurrent`. This suite
+      # uses neither, and Bun 1.3.4 already runs files in one process. The coverage
+      # script runs PGlite tests in a second process so that wasm heap is not added
+      # to the rest of the suite.
       - name: Run tests with coverage
         run: bun run test:coverage:check
 
