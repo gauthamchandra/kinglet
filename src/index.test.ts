@@ -206,6 +206,7 @@ describe('src/index.ts shutdown', () => {
         MEMORYSTORE_DATA_PLANE: 'false',
         CLOUDSQL_DATA_PLANE: 'false',
         LOG_LEVEL: 'error',
+        KINGLET_TEST_ARMOR_BIND_DELAY_MS: '800',
       },
       stdout: 'ignore',
       stderr: 'ignore',
@@ -215,6 +216,9 @@ describe('src/index.ts shutdown', () => {
       const samples = await sampleHealthUntilArmorStarted(httpPort);
 
       expect(samples.length).toBeGreaterThan(0);
+      expect(
+        samples.some(sample => sample.kingletCloudArmorEvaluationServer?.started === false)
+      ).toBe(true);
 
       for (const sample of samples) {
         expect(sample.status).toBe('ok');
