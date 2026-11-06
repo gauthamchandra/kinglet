@@ -11,6 +11,27 @@ everything it also describes.
 Cursor reads this file natively. Cursor Bugbot does **not** — it reads only
 `.cursor/BUGBOT.md`, which carries the review-time versions of these rules.
 
+## Pull request follow-through
+
+After you open a pull request, stay with it until it is merged or closed. Do this
+without waiting to be asked.
+
+- Subscribe to that PR and to CI on its head branch. On GitHub that is
+  `subscribe_github_pr` (scope `pr`) and `subscribe_github_ci`. Do not poll.
+- When a review comment, Bugbot finding, Greptile comment, or CI failure arrives,
+  re-read the thread, fix what is valid, push to the same branch, and reply on
+  the thread. If the comment is wrong, reply with the evidence and leave the
+  code as it is.
+- Re-subscribe when a subscription expires and the PR is still open.
+- Do not merge, enable auto-merge, or resolve a review thread unless the human
+  asked for that.
+- This file only applies while an agent is already running. To wake an agent
+  when nobody is watching, add a Cursor Automation on this repository
+  (dashboard → Automations) with the GitHub triggers "PR review comment",
+  "PR review submitted", and "CI completed", starting from the
+  "Autofix PR review comments" template. Bugbot Autofix is a separate switch
+  and only covers Bugbot.
+
 ## kinglet
 
 A high-performance local emulation environment for Google Cloud Platform services, built with Bun and TypeScript. This project provides local development and testing capabilities for GCP services including Pub/Sub, Cloud Scheduler, Cloud Tasks, and Secret Manager.
