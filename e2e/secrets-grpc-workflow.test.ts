@@ -79,6 +79,22 @@ describe('Secret Manager E2E: gRPC', () => {
     });
 
     expect(regional.name).toBe('projects/grpc-project/locations/us-central1/secrets/db-password');
+
+    const [version] = await client.addSecretVersion({
+      parent: created.name,
+      payload: { data: Buffer.from('s3cret') },
+    });
+
+    expect(version.name).toBe('projects/grpc-project/secrets/db-password/versions/1');
+    expect(version.state).toBe('ENABLED');
+
+    const [accessed] = await client.accessSecretVersion({
+      name: `${created.name}/versions/latest`,
+    });
+
+    expect(Buffer.from(accessed.payload?.data ?? new Uint8Array()).toString()).toBe('s3cret');
+    expect(accessed.payload?.dataCrc32c).toBeDefined();
+    expect(version.clientSpecifiedPayloadChecksum).toBe(false);
   });
 
   test('duplicate create is ALREADY_EXISTS and list is UNIMPLEMENTED', async () => {

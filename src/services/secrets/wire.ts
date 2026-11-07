@@ -5,14 +5,17 @@
  */
 
 import type {
+  AccessedSecret,
   Cmek,
   Duration,
   Expiration,
+  PayloadInput,
   Replica,
   Replication,
   Rotation,
   SecretSpecInput,
   SecretType,
+  SecretVersionView,
   SecretView,
 } from './types.ts';
 import { SECRET_TYPE_BY_NUMBER, SecretManagerError } from './types.ts';
@@ -131,6 +134,45 @@ export function encodeSecret(secret: SecretView, dialect: WireDialect): WireMess
   }
 
   return body;
+}
+
+export function decodeAdd(
+  message: WireMessage,
+  dialect: WireDialect
+): { parentRaw: string; payload: PayloadInput } {
+  const parentRaw = readRequiredString(message.parent, 'parent');
+  const payload = asRecord(message.payload, 'payload');
+  const data = dialect.readBytes(payload.data);
+
+  if (data == null) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'payload.data is required');
+  }
+
+  return { parentRaw, payload: { data, crc32c: readChecksum(payload, dialect) } };
+}
+
+export function decodeVersion(message: WireMessage): string {
+  return readRequiredString(message.name, 'name');
+}
+
+export function encodeVersion(version: SecretVersionView, _dialect: WireDialect): WireMessage {
+  return {
+    name: version.name,
+    state: version.state,
+    createTime: _dialect.writeTimestamp(version.createTime),
+    etag: version.etag,
+    clientSpecifiedPayloadChecksum: version.clientSpecifiedPayloadChecksum,
+  };
+}
+
+export function encodeAccessed(accessed: AccessedSecret, dialect: WireDialect): WireMessage {
+  return {
+    name: accessed.name,
+    payload: {
+      data: dialect.writeBytes(accessed.data),
+      dataCrc32c: accessed.crc32c,
+    },
+  };
 }
 
 function readReplication(value: unknown): Replication | null {
@@ -527,6 +569,18 @@ function readProtoBytes(value: unknown): Uint8Array | null {
   }
 
   throw new SecretManagerError('INVALID_ARGUMENT', 'Expected bytes');
+}
+
+function readChecksum(payload: WireMessage, dialect: WireDialect): string | null {
+  if (dialect.kind === 'grpc' && payload._dataCrc32c !== 'dataCrc32c') {
+    return null;
+  }
+
+  if (payload.dataCrc32c == null || payload.dataCrc32c === '') {
+    return null;
+  }
+
+  return String(payload.dataCrc32c);
 }
 
 function readRequiredString(value: unknown, field: string): string {

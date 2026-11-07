@@ -2,7 +2,11 @@
  * Domain types for Secret Manager. No HTTP and no protobuf types.
  */
 
+import { crc32cString } from '@/shared/utils/crc32c.ts';
+
 export const SECRETS_TABLE = 'secretmanager_secrets';
+
+export const VERSIONS_TABLE = 'secretmanager_versions';
 
 const SECRET_ID_PATTERN = /^[A-Za-z0-9_-]{1,255}$/;
 
@@ -262,6 +266,126 @@ export function etagFromGeneration(generation: number): string {
   return String(generation);
 }
 
+const MAX_PAYLOAD_BYTES = 64 * 1024;
+
+export interface PayloadInput {
+  readonly data: Uint8Array;
+  readonly crc32c: string | null;
+}
+
+export interface CheckedPayload {
+  readonly dataBase64: string;
+  readonly crc32c: string;
+  readonly clientSpecified: boolean;
+}
+
+export type VersionSelector =
+  | { readonly kind: 'number'; readonly number: number }
+  | { readonly kind: 'latest' }
+  | { readonly kind: 'alias'; readonly alias: string };
+
+export interface SecretVersionLocator {
+  readonly secret: SecretName;
+  readonly selector: VersionSelector;
+}
+
+export interface SecretVersionView {
+  readonly name: string;
+  readonly state: 'ENABLED' | 'DISABLED' | 'DESTROYED';
+  readonly createTime: string;
+  readonly etag: string;
+  readonly clientSpecifiedPayloadChecksum: boolean;
+}
+
+export interface AccessedSecret {
+  readonly name: string;
+  readonly data: Uint8Array;
+  readonly crc32c: string;
+}
+
+export function parseSecretVersionLocator(raw: string): SecretVersionLocator {
+  const marker = '/versions/';
+  const index = raw.lastIndexOf(marker);
+
+  if (index <= 0) {
+    throw new SecretManagerError('INVALID_ARGUMENT', `Invalid version name '${raw}'`);
+  }
+
+  const secret = parseSecretName(raw.slice(0, index));
+  const segment = raw.slice(index + marker.length);
+
+  if (segment === 'latest') {
+    return { secret, selector: { kind: 'latest' } };
+  }
+
+  if (/^[1-9][0-9]*$/.test(segment)) {
+    return { secret, selector: { kind: 'number', number: Number(segment) } };
+  }
+
+  if (ALIAS_PATTERN.test(segment) && !RESERVED_ALIASES.has(segment)) {
+    return { secret, selector: { kind: 'alias', alias: segment } };
+  }
+
+  throw new SecretManagerError('INVALID_ARGUMENT', `Invalid version '${segment}'`);
+}
+
+export function formatSecretVersionName(secret: string, number: number): string {
+  return `${secret}/versions/${number}`;
+}
+
+export function admitPayload(input: PayloadInput): CheckedPayload {
+  if (input.data.byteLength > MAX_PAYLOAD_BYTES) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'Secret payload must be at most 64KiB');
+  }
+
+  const checksum = crc32cString(input.data);
+
+  if (input.crc32c != null && parseCrc32c(input.crc32c) !== Number(checksum)) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'dataCrc32c does not match the payload');
+  }
+
+  return {
+    dataBase64: Buffer.from(input.data).toString('base64'),
+    crc32c: checksum,
+    clientSpecified: input.crc32c != null,
+  };
+}
+
+export function resolveVersionNumber(
+  selector: VersionSelector,
+  newest: number | null,
+  aliases: Readonly<Record<string, number>>,
+  requestedName: string
+): number {
+  if (selector.kind === 'latest') {
+    if (newest == null) {
+      throw new SecretManagerError(
+        'NOT_FOUND',
+        `SecretVersion ${requestedName} not found`,
+        requestedName
+      );
+    }
+
+    return newest;
+  }
+
+  if (selector.kind === 'alias') {
+    const number = aliases[selector.alias];
+
+    if (number == null) {
+      throw new SecretManagerError(
+        'NOT_FOUND',
+        `SecretVersion ${requestedName} not found`,
+        requestedName
+      );
+    }
+
+    return number;
+  }
+
+  return selector.number;
+}
+
 function expireTimeFrom(expiration: Expiration, now: Date): string | null {
   if (expiration.kind === 'none') {
     return null;
@@ -287,4 +411,26 @@ function requiredSegment(value: string | undefined, field: string): string {
   }
 
   return value;
+}
+
+function parseCrc32c(raw: string): number {
+  if (!/^-?\d+$/.test(raw)) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'dataCrc32c must be a base-10 integer');
+  }
+
+  const value = Number(raw);
+
+  if (!Number.isSafeInteger(value)) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'dataCrc32c is out of range');
+  }
+
+  if (value >= 0 && value <= 0xffffffff) {
+    return value;
+  }
+
+  if (value >= -2147483648 && value <= -1) {
+    return value >>> 0;
+  }
+
+  throw new SecretManagerError('INVALID_ARGUMENT', 'dataCrc32c is out of range');
 }
