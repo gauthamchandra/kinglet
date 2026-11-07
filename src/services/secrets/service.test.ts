@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { crc32cString } from '@/shared/utils/crc32c.ts';
 import { SecretRepository } from './repository.ts';
 import { SecretManager } from './service.ts';
 import { SecretManagerError, secretNameIn } from './types.ts';
@@ -45,6 +46,46 @@ describe('SecretManager', () => {
 
     await expect(missing).rejects.toHaveProperty('code', 'NOT_FOUND');
   });
+
+  test('numbers versions from 1 and rejects a bad checksum', async () => {
+    const manager = await managerWith();
+    const name = secretNameIn({ project: 'demo', location: null }, 'db');
+
+    await manager.createSecret(name, input());
+
+    const first = await manager.addVersion(name, { data: utf8('a'), crc32c: null });
+    const second = await manager.addVersion(name, { data: utf8('b'), crc32c: null });
+
+    expect(first.name).toBe('projects/demo/secrets/db/versions/1');
+    expect(second.name).toBe('projects/demo/secrets/db/versions/2');
+    expect(first.clientSpecifiedPayloadChecksum).toBe(false);
+
+    const mismatch = manager.addVersion(name, { data: utf8('c'), crc32c: '1' });
+
+    await expect(mismatch).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+
+    const wrapped = manager.addVersion(name, {
+      data: utf8('b'),
+      crc32c: String(Number(crc32cString(utf8('b'))) + 2 ** 32),
+    });
+
+    await expect(wrapped).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+
+    const accessed = await manager.accessVersion(
+      { secret: name, selector: { kind: 'latest' } },
+      'projects/demo/secrets/db/versions/latest'
+    );
+
+    expect(Buffer.from(accessed.data).toString()).toBe('b');
+
+    const meta = await manager.getVersion(
+      { secret: name, selector: { kind: 'number', number: 1 } },
+      'projects/demo/secrets/db/versions/1'
+    );
+
+    expect(meta).not.toHaveProperty('data');
+    expect(meta.state).toBe('ENABLED');
+  });
 });
 
 async function managerWith(): Promise<SecretManager> {
@@ -72,4 +113,8 @@ function input() {
     versionDestroyTtl: null,
     secretType: 'ACCESS_KEY' as const,
   };
+}
+
+function utf8(value: string): Uint8Array {
+  return new Uint8Array(Buffer.from(value));
 }
