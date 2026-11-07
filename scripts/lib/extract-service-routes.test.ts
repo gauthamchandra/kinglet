@@ -12,10 +12,16 @@ describe('extractRoutesForService', () => {
     expect(routes.some(route => route.path === '/v1/projects/:project/locations')).toBe(true);
   });
 
-  test('returns an empty route list for planned services without routes', async () => {
+  test('extracts secret manager create and get routes plus shared locations', async () => {
     const routes = await extractRoutesForService('secret-manager');
+    const ids = routes.map(route => route.id);
 
-    expect(routes).toEqual([]);
+    expect(ids).toContain('projects.secrets.create');
+    expect(ids).toContain('projects.locations.secrets.create');
+    expect(ids).toContain('projects.secrets.get');
+    expect(ids).toContain('projects.locations.secrets.get');
+    expect(ids).toContain('locations.list');
+    expect(routes.some(route => route.path === '/v1/projects/:project/locations')).toBe(true);
   });
 
   test('throws when a registry service has no route extractor', async () => {

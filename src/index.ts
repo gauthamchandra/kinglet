@@ -25,6 +25,7 @@ import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { NetworkSecurityService } from '@/services/networksecurity/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
+import { SecretsService } from '@/services/secrets/index.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
@@ -46,6 +47,7 @@ let kmsService: CloudKmsService | null = null;
 let cloudSqlService: CloudSqlService | null = null;
 let computeService: ComputeService | null = null;
 let networkSecurityService: NetworkSecurityService | null = null;
+let secretsService: SecretsService | null = null;
 
 async function main(): Promise<void> {
   try {
@@ -128,7 +130,15 @@ async function main(): Promise<void> {
     }
 
     if (config.services.secrets.enabled) {
-      logger.info('Secret Manager service enabled (stub - not yet implemented)');
+      secretsService = new SecretsService(storageManager, new Logger('Secrets'));
+      await secretsService.initialize();
+
+      for (const route of secretsService.getRoutes()) {
+        router.addRoute(route);
+      }
+
+      secretsService.start();
+      logger.info('Secret Manager service enabled and started');
     }
 
     if (config.services.storage.enabled) {
@@ -330,6 +340,12 @@ async function main(): Promise<void> {
       }
     }
 
+    if (secretsService) {
+      for (const def of secretsService.getGrpcServices()) {
+        grpcServer.registerService(def);
+      }
+    }
+
     await grpcServer.start();
     logger.info(`gRPC server started on port ${config.server.grpcPort}`);
 
@@ -468,6 +484,11 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     if (networkSecurityService) {
       await networkSecurityService.stop();
       logger.info('Network Security service stopped');
+    }
+
+    if (secretsService) {
+      await secretsService.stop();
+      logger.info('Secret Manager service stopped');
     }
 
     if (storageManager) {
