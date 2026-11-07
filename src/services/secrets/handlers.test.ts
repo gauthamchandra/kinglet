@@ -28,12 +28,18 @@ describe('secret manager RPC table', () => {
     const ids = routes.map(route => route.id).sort();
 
     expect(ids).toEqual([
+      'projects.locations.secrets.addVersion',
       'projects.locations.secrets.create',
       'projects.locations.secrets.get',
+      'projects.locations.secrets.versions.access',
+      'projects.locations.secrets.versions.get',
+      'projects.secrets.addVersion',
       'projects.secrets.create',
       'projects.secrets.get',
+      'projects.secrets.versions.access',
+      'projects.secrets.versions.get',
     ]);
-    expect(routes).toHaveLength(4);
+    expect(routes).toHaveLength(10);
   });
 
   test('deferred RPCs return gRPC UNIMPLEMENTED', async () => {
