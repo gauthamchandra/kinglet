@@ -387,6 +387,20 @@ describe('Cloud SQL data plane e2e', () => {
     await pool.end();
   });
 
+  test('CREATE DATABASE inside a transaction aborts it, so COMMIT rolls the insert back', async () => {
+    const sql = connect(instancePort, 'postgres');
+
+    await sql.unsafe('CREATE TABLE keep (id int)');
+    await sql.unsafe('BEGIN');
+    await sql.unsafe('INSERT INTO keep VALUES (1)');
+    await expect(run(sql, 'CREATE DATABASE aborted_db')).rejects.toThrow(
+      /cannot run inside a transaction block/
+    );
+    await sql.unsafe('COMMIT');
+
+    expect(await rows(sql, 'SELECT count(*)::int AS n FROM keep')).toEqual([{ n: 0 }]);
+  });
+
   test('two connections can each run a transaction against the same database', async () => {
     const first = connect(instancePort, 'postgres');
     const second = connect(instancePort, 'postgres');

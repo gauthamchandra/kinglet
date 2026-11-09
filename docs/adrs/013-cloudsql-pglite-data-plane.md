@@ -181,8 +181,13 @@ answers "does my Terraform work?" but not "does my application code work?".
   accepted and ignored. Any other `TEMPLATE`, `TABLESPACE`, and the other
   server options are rejected with SQLSTATE `0A000`. `DROP DATABASE ... FORCE`
   is rejected. `DROP` of the database the connection is using returns
-  `55006`. Another session using that database is disconnected the same way
-  `databases.delete` disconnects it. Extended-protocol `Parse`/`Bind`/`Execute`
+  `55006`. A connection whose own database has already been dropped is closed
+  if it then issues `CREATE DATABASE` or `DROP DATABASE`, so it cannot change
+  a sibling. Inside an open transaction the statement returns `25001` and
+  aborts that transaction, so a later `COMMIT` rolls back. A statement in an
+  already-aborted transaction returns `25P02`. Another session using the
+  dropped database loses its backend the same way `databases.delete` does.
+  Extended-protocol `Parse`/`Bind`/`Execute`
   is not intercepted, so drivers that always use it (node-postgres, psycopg3)
   still get PGlite's error. `pg_database` on the connected PGlite does not
   list sibling databases; connect-by-name uses the instance's database set.

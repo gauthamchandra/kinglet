@@ -570,6 +570,33 @@ describe('SqlAdminService', () => {
       );
     });
 
+    test('closes a connection whose database is already gone instead of changing another', async () => {
+      await service.executeSimpleQuery('CREATE DATABASE app', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+      await service.deleteDatabase('p1', 'db-a', 'app');
+
+      const outcome = await service.executeSimpleQuery('CREATE DATABASE other', {
+        instanceKey: 'p1/db-a',
+        database: 'app',
+        transactionStatus: 'I',
+      });
+
+      expect(outcome).toEqual({
+        handled: true,
+        error: {
+          sqlState: '57P01',
+          message: 'terminating connection due to administrator command',
+          fatal: true,
+        },
+      });
+      expect((await service.listDatabases('p1', 'db-a')).items.map(item => item.name)).toEqual([
+        'postgres',
+      ]);
+      expect(dataPlane.calls).not.toContain('openDatabase:p1/db-a/other');
+    });
+
     test('does not create a database for a statement it does not recognize', async () => {
       const outcome = await service.executeSimpleQuery('CREATE DATABASE foo; DROP TABLE users', {
         ...idle,

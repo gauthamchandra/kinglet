@@ -132,7 +132,7 @@ export interface SimpleQueryContext {
 export type SimpleQueryOutcome =
   | { handled: false }
   | { handled: true; commandTag: string }
-  | { handled: true; error: { sqlState: string; message: string } };
+  | { handled: true; error: { sqlState: string; message: string; fatal?: boolean } };
 
 export type SimpleQueryHandler = (
   sql: string,
@@ -748,6 +748,22 @@ export class PostgresWireServer {
 
     if (!outcome.handled) return false;
 
+    if ('error' in outcome && outcome.error.fatal === true) {
+      this.fail(socket, outcome.error.sqlState, outcome.error.message);
+
+      return true;
+    }
+
+    // An error inside an open transaction aborts it. Postgres then reports
+    // ReadyForQuery as 'E', and a later COMMIT rolls the transaction back.
+    // The failing statement sent to the backend is not the client's statement,
+    // so its error stays off the socket.
+    if ('error' in outcome && state.transactionStatus === 'T') {
+      await this.abortOpenTransaction(state);
+    }
+
+    if (state.phase === 'closed') return true;
+
     // Severity ERROR, and the socket stays up. fail() is FATAL and closes,
     // which is the startup path; a rejected CREATE DATABASE is not that.
     if ('error' in outcome) {
@@ -761,6 +777,20 @@ export class PostgresWireServer {
     return true;
   }
 
+  private async abortOpenTransaction(state: ConnectionState): Promise<void> {
+    const connection = state.connection;
+
+    if (!connection) return;
+
+    try {
+      await connection.queue.enqueue(state.id, ABORT_TRANSACTION_QUERY, data => {
+        noteTransactionStatus(state, data);
+      });
+    } catch {
+      // The backend is already gone. The SQL error is still returned below.
+    }
+  }
+
   private async releaseConnection(state: ConnectionState): Promise<void> {
     const connection = state.connection;
 
@@ -772,6 +802,10 @@ export class PostgresWireServer {
     await connection?.queue.detach(state.id);
   }
 }
+
+// Division by zero is enough to put an open transaction into the aborted
+// state. The client never sees this statement.
+const ABORT_TRANSACTION_QUERY = buildBackendMessage('Q', new TextEncoder().encode('SELECT 1/0\0'));
 
 function decodeSimpleQuery(frame: Uint8Array): string | null {
   if (frame.length < 6 || frame[frame.length - 1] !== 0) return null;

@@ -87,8 +87,18 @@ describe('recognizeDatabaseStatement', () => {
     });
     expect(recognizeDatabaseStatement('DROP DATABASE app', 'E')).toEqual({
       action: 'error',
-      sqlState: '25001',
-      message: 'DROP DATABASE cannot run inside a transaction block',
+      sqlState: '25P02',
+      message: 'current transaction is aborted, commands ignored until end of transaction block',
+    });
+  });
+
+  test('a nested block comment does not hide the real database name', () => {
+    expect(
+      recognizeDatabaseStatement('DROP DATABASE /* outer /* inner */ victim -- */ intended', IDLE)
+    ).toEqual({
+      action: 'drop',
+      name: 'intended',
+      ifExists: false,
     });
   });
 

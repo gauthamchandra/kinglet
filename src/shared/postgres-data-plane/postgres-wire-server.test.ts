@@ -746,8 +746,23 @@ describe('PostgresWireServer', () => {
     client.close();
   });
 
-  test('keeps the socket open when a simple-query statement fails and echoes the transaction status', async () => {
-    const { queue, received } = makeFakeQueue(0x54);
+  test('aborts an open transaction when a simple-query statement fails, and keeps the socket open', async () => {
+    const received: string[] = [];
+    const queue = {
+      enqueue: async (
+        _connectionId: string,
+        bytes: Uint8Array,
+        onData: (data: Uint8Array) => void
+      ) => {
+        const text = new TextDecoder().decode(bytes).replace(/\0/g, '·');
+
+        received.push(text);
+        const status = text.includes('1/0') ? 0x45 : 0x54;
+
+        onData(buildTaggedMessage('Z', new Uint8Array([status])));
+      },
+      detach: async () => {},
+    };
     const handleSimpleQuery: SimpleQueryHandler = async sql => {
       if (!sql.startsWith('CREATE DATABASE')) return { handled: false };
 
@@ -759,7 +774,10 @@ describe('PostgresWireServer', () => {
         },
       };
     };
-    const port = startServer(async () => allow(queue, ''), handleSimpleQuery);
+    const port = startServer(
+      async () => allow(queue as unknown as PGliteSessionQueue, ''),
+      handleSimpleQuery
+    );
     const client = await TestClient.connect(port);
 
     client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
@@ -778,7 +796,8 @@ describe('PostgresWireServer', () => {
       C: '25001',
     });
     expect(ready?.tag).toBe('Z');
-    expect(ready?.body[0]).toBe(0x54);
+    expect(ready?.body[0]).toBe(0x45);
+    expect(received.some(entry => entry.includes('1/0'))).toBe(true);
     expect(received.some(entry => entry.includes('CREATE DATABASE'))).toBe(false);
 
     client.send(buildQueryMessage('SELECT 1'));

@@ -67,11 +67,19 @@ export function recognizeDatabaseStatement(
 
   if (recognized.action === 'forward') return FORWARD;
 
-  if (transactionStatus !== 'I') {
+  if (transactionStatus === 'T') {
     return {
       action: 'error',
       sqlState: '25001',
       message: `${verb} DATABASE cannot run inside a transaction block`,
+    };
+  }
+
+  if (transactionStatus === 'E') {
+    return {
+      action: 'error',
+      sqlState: '25P02',
+      message: 'current transaction is aborted, commands ignored until end of transaction block',
     };
   }
 
@@ -254,11 +262,11 @@ function tokenize(sql: string): Token[] | null {
     }
 
     if (character === '/' && sql[index + 1] === '*') {
-      const end = sql.indexOf('*/', index + 2);
+      const closed = skipBlockComment(sql, index + 2);
 
-      if (end < 0) return null;
+      if (closed == null) return null;
 
-      index = end + 2;
+      index = closed;
       continue;
     }
 
@@ -346,6 +354,35 @@ function readQuoted(
   }
 
   return null;
+}
+
+/**
+ * Postgres block comments nest. Stopping at the first star-slash would treat
+ * the text after an inner comment as SQL and could drop the wrong database.
+ */
+function skipBlockComment(sql: string, start: number): number | null {
+  let depth = 1;
+  let index = start;
+
+  while (index < sql.length && depth > 0) {
+    if (sql[index] === '/' && sql[index + 1] === '*') {
+      depth += 1;
+      index += 2;
+      continue;
+    }
+
+    if (sql[index] === '*' && sql[index + 1] === '/') {
+      depth -= 1;
+      index += 2;
+      continue;
+    }
+
+    index += 1;
+  }
+
+  if (depth !== 0) return null;
+
+  return index;
 }
 
 function isIdentifierStart(character: string): boolean {

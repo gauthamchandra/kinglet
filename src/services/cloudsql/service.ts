@@ -418,14 +418,26 @@ export class SqlAdminService {
 
     if (recognized.action === 'forward') return { handled: false };
 
+    const { project, instance } = splitInstanceKey(context.instanceKey);
+    const connected = await this.repo.getDatabase(project, instance, context.database);
+
+    if (!connected) {
+      return {
+        handled: true,
+        error: {
+          sqlState: '57P01',
+          message: 'terminating connection due to administrator command',
+          fatal: true,
+        },
+      };
+    }
+
     if (recognized.action === 'error') {
       return {
         handled: true,
         error: { sqlState: recognized.sqlState, message: recognized.message },
       };
     }
-
-    const { project, instance } = splitInstanceKey(context.instanceKey);
 
     if (recognized.action === 'create') {
       try {
