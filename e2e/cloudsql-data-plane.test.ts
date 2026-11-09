@@ -242,6 +242,67 @@ describe('Cloud SQL data plane e2e', () => {
     );
   });
 
+  test(
+    'CREATE DATABASE and DROP DATABASE stay on the instance that was connected to',
+    async () => {
+      const sql = connect(instancePort, 'postgres');
+
+      await sql.unsafe("CREATE DATABASE app WITH ENCODING = 'UTF8' TEMPLATE = template0");
+
+      const listed = await fetch(
+        emulatorUrl(`/v1/projects/${PROJECT}/instances/${INSTANCE}/databases`)
+      );
+
+      expect(listed.status).toBe(200);
+
+      const body = (await listed.json()) as { items: { name: string; charset: string }[] };
+      const created = body.items.find(item => item.name === 'app');
+
+      expect(created?.charset).toBe('UTF8');
+
+      const app = connect(instancePort, 'app');
+
+      expect(await rows(app, 'SELECT 1 AS one')).toEqual([{ one: 1 }]);
+
+      await expect(run(sql, 'CREATE DATABASE app')).rejects.toThrow(/already exists/);
+      expect(await rows(sql, 'SELECT 1 AS one')).toEqual([{ one: 1 }]);
+
+      await expect(run(app, 'DROP DATABASE app')).rejects.toThrow(/being accessed by other users/);
+      expect(await rows(app, 'SELECT 1 AS one')).toEqual([{ one: 1 }]);
+
+      const other = 'data-plane-other';
+
+      await createInstance(other);
+
+      const otherPort = portOf(other);
+      const otherSql = connect(otherPort, 'postgres');
+
+      await otherSql.unsafe('CREATE DATABASE app');
+
+      const otherApp = connect(otherPort, 'app');
+
+      expect(await rows(otherApp, 'SELECT 1 AS one')).toEqual([{ one: 1 }]);
+
+      await sql.unsafe('DROP DATABASE app');
+
+      const gone = connect(instancePort, 'app');
+
+      await expect(run(gone, 'SELECT 1')).rejects.toThrow(/database "app" does not exist/);
+      expect(await rows(otherApp, 'SELECT 1 AS one')).toEqual([{ one: 1 }]);
+
+      const otherListed = await fetch(
+        emulatorUrl(`/v1/projects/${PROJECT}/instances/${other}/databases`)
+      );
+
+      expect(otherListed.status).toBe(200);
+
+      const otherBody = (await otherListed.json()) as { items: { name: string }[] };
+
+      expect(otherBody.items.map(item => item.name)).toContain('app');
+    },
+    INSTANCE_BOOT_TIMEOUT_MS * 2
+  );
+
   test('an unknown user is refused', async () => {
     const sql = connect(instancePort, 'postgres', 'ghost', '');
 

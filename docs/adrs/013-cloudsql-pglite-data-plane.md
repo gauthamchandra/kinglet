@@ -34,7 +34,11 @@ exactly as ADR-003 describes.
   root, no separate process to supervise.
 - **One PGlite instance per `Database` resource.** PGlite has no
   `CREATE DATABASE` — one PGlite is one database — so the admin API's
-  `Database` list is the unit of mapping.
+  `Database` list is the unit of mapping. On Cloud SQL, a simple-query
+  `CREATE DATABASE` or `DROP DATABASE` is turned into that same admin-API
+  create or delete, scoped to the instance whose port accepted the
+  connection. AlloyDB has no databases API, so the statement still reaches
+  PGlite there.
 - **One TCP port per `DatabaseInstance`**, allocated sequentially from 5432, so
   the common single-instance case is reachable at plain `localhost:5432`.
   A hand-rolled Postgres wire-protocol front end
@@ -169,18 +173,40 @@ answers "does my Terraform work?" but not "does my application code work?".
   (or `tls: false`). `settings.ipConfiguration.requireSsl` is metadata only.
 - **Cleartext password authentication only.** SCRAM and MD5 both need a stored
   verifier, and the admin API stores whatever password the caller supplied.
-- **Databases must be created through the admin API**, not `CREATE DATABASE` —
-  one PGlite is one database, and PGlite has no `CREATE DATABASE`.
-- **The engine is Postgres 18 whatever `databaseVersion` says.** A
-  `POSTGRES_14` instance still answers `SELECT version()` with 18.
+- **Simple-query `CREATE DATABASE` / `DROP DATABASE` on Cloud SQL** opens or
+  drops that instance's PGlite and writes the same control-plane row as
+  `databases.insert` / `databases.delete`. The row is always stored as
+  `UTF8` / `en_US.UTF8`. `OWNER`, `LC_COLLATE`, `LC_CTYPE`, `LOCALE`,
+  `ENCODING` of `UTF8` / `UTF-8` / `UNICODE`, and `TEMPLATE template0` are
+  accepted and ignored. Any other `TEMPLATE`, `TABLESPACE`, and the other
+  server options are rejected with SQLSTATE `0A000`. `DROP DATABASE ... FORCE`
+  is rejected. `DROP` of the database the connection is using returns
+  `55006`. Another session using that database is disconnected the same way
+  `databases.delete` disconnects it. Extended-protocol `Parse`/`Bind`/`Execute`
+  is not intercepted, so drivers that always use it (node-postgres, psycopg3)
+  still get PGlite's error. `pg_database` on the connected PGlite does not
+  list sibling databases; connect-by-name uses the instance's database set.
+  A name is only unique per instance: the same name on another Cloud SQL
+  instance, another project, or AlloyDB is a different database.
+- **`databaseVersion` does not select an engine.** The data plane is the one
+  PGlite build this repo pins (Postgres 18). pgvector and PostGIS peer-pin
+  that same build, so two majors cannot be loaded side by side. A later
+  major can replace the pin as a whole. A `POSTGRES_14` instance still
+  answers `SELECT version()` with 18, which is the engine that is running.
 - **PostGIS is opt-in.** Set `CLOUDSQL_POSTGIS=true` or `ALLOYDB_POSTGIS=true`
   to link PostGIS into every database for that product. It is off by default
   because it significantly increases per-database boot time. Existing on-disk
   databases gain PostGIS after a restart with the flag enabled — no recreation
   needed. All 26 contrib extensions plus pgvector are always available.
-- `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
-  nothing restricts who may connect beyond user and password.
-- `User.type` values other than `BUILT_IN` behave like `BUILT_IN`.
+- `settings.ipConfiguration` and `authorizedNetworks` are metadata only.
+  The listener binds every interface so a published Docker port works, and
+  the peer is loopback or the Docker bridge. Private-IP-only instances and
+  office CIDRs never include that peer, so enforcing the allowlist would
+  refuse the connections this emulator exists to serve.
+- `User.type` values other than `BUILT_IN` use the same password exchange as
+  `BUILT_IN`. IAM database authentication sends an OAuth token, which is not
+  checked. Rejecting those users would refuse a local connection that stored
+  a password on an IAM-typed user.
 - **Connections to one database share a Postgres session.** One PGlite is one
   backend, so there is one session behind every connection to a database.
   Prepared statements and portals are namespaced per connection on the way
@@ -197,9 +223,11 @@ answers "does my Terraform work?" but not "does my application code work?".
   report `postgres`, only `postgres` appears in `pg_roles`, and per-user
   `GRANT`s have nothing to apply to. Code that authenticates as a specific user
   works; code that depends on per-user privileges does not.
-- Query cancellation is not supported: a `CancelRequest` is accepted and
-  dropped, because there is no way to interrupt a running call into the single
-  wasm backend.
+- Query cancellation is not supported. A `CancelRequest` is a second
+  connection; it is recognized and closed without a reply, and the running
+  query is left to finish. PGlite's protocol execution has no interrupt, and
+  the wasm call does not yield back to JavaScript, so the cancel cannot be
+  delivered into the query that is already running.
 
 ### AlloyDB-only (same shared stack)
 

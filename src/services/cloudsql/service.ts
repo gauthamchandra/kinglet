@@ -4,8 +4,16 @@
 
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
-import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import {
+  DisabledDataPlane,
+  splitInstanceKey,
+} from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type {
+  SimpleQueryContext,
+  SimpleQueryOutcome,
+} from '@/shared/postgres-data-plane/postgres-wire-server.ts';
 import type { CloudSqlRepository } from './repository.ts';
+import { recognizeDatabaseStatement } from './sql-statements.ts';
 import type {
   DatabaseInstanceResponse,
   DatabaseResponse,
@@ -39,6 +47,19 @@ export type CloudSqlErrorCode =
   | 'INVALID_ARGUMENT'
   | 'FAILED_PRECONDITION'
   | 'INTERNAL';
+
+function outcomeFromAdminError(
+  error: unknown,
+  alreadyExists: { sqlState: string; message: string }
+): SimpleQueryOutcome {
+  if (error instanceof SqlAdminError && error.code === 'ALREADY_EXISTS') {
+    return { handled: true, error: alreadyExists };
+  }
+
+  const message = error instanceof Error ? error.message : 'database statement failed';
+
+  return { handled: true, error: { sqlState: 'XX000', message } };
+}
 
 export class SqlAdminError extends Error {
   readonly code: CloudSqlErrorCode;
@@ -382,6 +403,77 @@ export class SqlAdminService {
     await this.dataPlane.dropDatabase(project, instance, name);
 
     return this.recordOperation(project, OperationType.DELETE_DATABASE, instance);
+  }
+
+  /**
+   * Apply a simple-query CREATE DATABASE or DROP DATABASE to this instance.
+   *
+   * <p>The wire server calls this with the listener's instance key, so a
+   * database of the same name on another instance is a different row and a
+   * different PGlite. Statements that are not a single CREATE or DROP come
+   * back unhandled and are forwarded to PGlite.
+   */
+  async executeSimpleQuery(sql: string, context: SimpleQueryContext): Promise<SimpleQueryOutcome> {
+    const recognized = recognizeDatabaseStatement(sql, context.transactionStatus);
+
+    if (recognized.action === 'forward') return { handled: false };
+
+    if (recognized.action === 'error') {
+      return {
+        handled: true,
+        error: { sqlState: recognized.sqlState, message: recognized.message },
+      };
+    }
+
+    const { project, instance } = splitInstanceKey(context.instanceKey);
+
+    if (recognized.action === 'create') {
+      try {
+        await this.createDatabase(project, instance, { name: recognized.name });
+      } catch (error) {
+        return outcomeFromAdminError(error, {
+          sqlState: '42P04',
+          message: `database "${recognized.name}" already exists`,
+        });
+      }
+
+      return { handled: true, commandTag: 'CREATE DATABASE' };
+    }
+
+    if (recognized.name === context.database) {
+      return {
+        handled: true,
+        error: {
+          sqlState: '55006',
+          message: `database "${recognized.name}" is being accessed by other users`,
+        },
+      };
+    }
+
+    try {
+      await this.deleteDatabase(project, instance, recognized.name);
+    } catch (error) {
+      if (error instanceof SqlAdminError && error.code === 'NOT_FOUND' && recognized.ifExists) {
+        return { handled: true, commandTag: 'DROP DATABASE' };
+      }
+
+      if (error instanceof SqlAdminError && error.code === 'NOT_FOUND') {
+        return {
+          handled: true,
+          error: {
+            sqlState: '3D000',
+            message: `database "${recognized.name}" does not exist`,
+          },
+        };
+      }
+
+      return outcomeFromAdminError(error, {
+        sqlState: 'XX000',
+        message: 'database statement failed',
+      });
+    }
+
+    return { handled: true, commandTag: 'DROP DATABASE' };
   }
 
   // ── Users ──

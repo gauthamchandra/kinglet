@@ -14,9 +14,10 @@
  * multiplexer at all. Both would leave the two things this server exists to do
  * unimplemented, in exchange for a dependency.
  *
- * <p>Only the startup exchange is interpreted. Once a connection is
- * authenticated every byte is passed through to PGlite untouched, so the
- * emulator inherits the real Postgres protocol — extended query, COPY,
+ * <p>The startup exchange is interpreted here. After that, a lone simple
+ * Query may be answered by {@link PostgresWireServerOptions.handleSimpleQuery}
+ * before it reaches PGlite. Every other byte is passed through untouched, so
+ * the emulator inherits the real Postgres protocol — extended query, COPY,
  * NOTIFY — rather than reimplementing it.
  *
  * <p>Nothing here is Cloud-SQL-specific, so AlloyDB can reuse it.
@@ -50,7 +51,9 @@ const MAX_MESSAGE_LENGTH = 64 * 1024 * 1024;
 const AUTHENTICATION_CLEARTEXT_PASSWORD = 3;
 
 const PASSWORD_MESSAGE_TAG = 0x70; // 'p'
+const QUERY_MESSAGE_TAG = 0x51; // 'Q'
 const TERMINATE_MESSAGE_TAG = 0x58; // 'X'
+const READY_FOR_QUERY_TAG = 0x5a; // 'Z'
 
 // Bounds a client that opens an extended-query sequence and never closes it,
 // so the pending batch cannot grow without limit any more than a single frame
@@ -112,11 +115,40 @@ export type ResolveConnection = (
   user: string
 ) => Promise<ConnectionResolution>;
 
+/** Transaction status from the last ReadyForQuery this socket observed. */
+export type TransactionStatus = 'I' | 'T' | 'E';
+
+/**
+ * What the product behind this listener needs in order to answer a simple
+ * query itself. `instanceKey` is the listener's instance, so two instances
+ * that happen to use the same database name stay distinct.
+ */
+export interface SimpleQueryContext {
+  instanceKey: string;
+  database: string;
+  transactionStatus: TransactionStatus;
+}
+
+export type SimpleQueryOutcome =
+  | { handled: false }
+  | { handled: true; commandTag: string }
+  | { handled: true; error: { sqlState: string; message: string } };
+
+export type SimpleQueryHandler = (
+  sql: string,
+  context: SimpleQueryContext
+) => Promise<SimpleQueryOutcome>;
+
 export interface PostgresWireServerOptions {
   /** Identifies the emulated instance this server fronts, passed to `resolveConnection`. */
   instanceKey: string;
   port: number;
   resolveConnection: ResolveConnection;
+  /**
+   * Optional answerer for a lone simple Query. Unset, or a `{ handled: false }`
+   * result, forwards the bytes. AlloyDB leaves this unset.
+   */
+  handleSimpleQuery?: SimpleQueryHandler;
 }
 
 /** Frame a backend message: a one-byte tag, a length covering itself, a body. */
@@ -130,9 +162,13 @@ function buildBackendMessage(tag: string, body: Uint8Array): Uint8Array {
   return message;
 }
 
-export function buildErrorResponse(sqlState: string, message: string): Uint8Array {
+export function buildErrorResponse(
+  sqlState: string,
+  message: string,
+  severity: 'FATAL' | 'ERROR' = 'FATAL'
+): Uint8Array {
   const encoder = new TextEncoder();
-  const fields = [`SFATAL`, `VFATAL`, `C${sqlState}`, `M${message}`];
+  const fields = [`S${severity}`, `V${severity}`, `C${sqlState}`, `M${message}`];
   const encoded = fields.map(field => encoder.encode(field));
   const bodyLength = encoded.reduce((total, field) => total + field.length + 1, 0) + 1;
   const body = new Uint8Array(bodyLength);
@@ -218,6 +254,10 @@ interface ConnectionState {
   database: string;
   startupPacket: Uint8Array | null;
   connection: ResolvedConnection | null;
+  /** Last ReadyForQuery status byte. Starts idle, then follows the backend. */
+  transactionStatus: TransactionStatus;
+  /** Bytes of a backend message not yet complete, used only to find ReadyForQuery. */
+  statusScratch: Uint8Array;
 }
 
 let nextConnectionId = 1;
@@ -256,6 +296,8 @@ export class PostgresWireServer {
             database: '',
             startupPacket: null,
             connection: null,
+            transactionStatus: 'I',
+            statusScratch: new Uint8Array(0),
           };
         },
         data: (socket, chunk) => {
@@ -425,6 +467,15 @@ export class PostgresWireServer {
       socket.end();
 
       return;
+    }
+
+    // A Query that closes an extended-query batch has to travel with that
+    // batch. Only a Query that arrives on its own can be answered here, and
+    // only before enqueue, so the callback is not holding the session queue.
+    if (frame[0] === QUERY_MESSAGE_TAG && state.pendingBatch.length === 0) {
+      const answered = await this.answerSimpleQuery(socket, frame);
+
+      if (answered) return;
     }
 
     const namespaced = namespaceFrameNames(frame, state.namespace);
@@ -630,7 +681,10 @@ export class PostgresWireServer {
       await connection.queue.enqueue(state.id, bytes, data => {
         // A client that hung up mid-response leaves the queue still streaming;
         // dropping the remainder is the only thing left to do with it.
-        if (state.phase !== 'closed') socket.write(data);
+        if (state.phase !== 'closed') {
+          noteTransactionStatus(state, data);
+          socket.write(data);
+        }
       });
     } catch (error) {
       this.fail(
@@ -655,6 +709,58 @@ export class PostgresWireServer {
     void this.releaseConnection(state);
   }
 
+  /**
+   * Answer one simple Query from the product callback.
+   *
+   * @returns true when the callback handled it, so the caller must not forward.
+   */
+  private async answerSimpleQuery(
+    socket: Socket<ConnectionState>,
+    frame: Uint8Array
+  ): Promise<boolean> {
+    const handleSimpleQuery = this.options.handleSimpleQuery;
+
+    if (!handleSimpleQuery) return false;
+
+    const sql = decodeSimpleQuery(frame);
+
+    if (sql == null) return false;
+
+    const state = socket.data;
+
+    let outcome: SimpleQueryOutcome;
+
+    try {
+      outcome = await handleSimpleQuery(sql, {
+        instanceKey: this.options.instanceKey,
+        database: state.database,
+        transactionStatus: state.transactionStatus,
+      });
+    } catch (error) {
+      outcome = {
+        handled: true,
+        error: {
+          sqlState: SQLSTATE_INTERNAL_ERROR,
+          message: error instanceof Error ? error.message : 'Query execution failed',
+        },
+      };
+    }
+
+    if (!outcome.handled) return false;
+
+    // Severity ERROR, and the socket stays up. fail() is FATAL and closes,
+    // which is the startup path; a rejected CREATE DATABASE is not that.
+    if ('error' in outcome) {
+      socket.write(buildErrorResponse(outcome.error.sqlState, outcome.error.message, 'ERROR'));
+    } else {
+      socket.write(buildCommandComplete(outcome.commandTag));
+    }
+
+    socket.write(buildReadyForQuery(state.transactionStatus));
+
+    return true;
+  }
+
   private async releaseConnection(state: ConnectionState): Promise<void> {
     const connection = state.connection;
 
@@ -665,6 +771,60 @@ export class PostgresWireServer {
     // otherwise block every other connection to the same database.
     await connection?.queue.detach(state.id);
   }
+}
+
+function decodeSimpleQuery(frame: Uint8Array): string | null {
+  if (frame.length < 6 || frame[frame.length - 1] !== 0) return null;
+
+  return new TextDecoder().decode(frame.subarray(5, frame.length - 1));
+}
+
+function buildCommandComplete(tag: string): Uint8Array {
+  return buildBackendMessage('C', new TextEncoder().encode(`${tag}\0`));
+}
+
+function buildReadyForQuery(status: TransactionStatus): Uint8Array {
+  return buildBackendMessage('Z', new Uint8Array([status.charCodeAt(0)]));
+}
+
+/**
+ * Record the last ReadyForQuery status in a backend reply.
+ *
+ * <p>Replies are not guaranteed to arrive one message at a time, so a status
+ * byte split across two writes has to wait in `statusScratch` until the
+ * message is whole.
+ */
+function noteTransactionStatus(state: ConnectionState, data: Uint8Array): void {
+  const bytes = concat(state.statusScratch, data);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+  let offset = 0;
+
+  while (offset + 5 <= bytes.length) {
+    const length = view.getInt32(offset + 1);
+
+    if (length < 4) {
+      state.statusScratch = new Uint8Array(0);
+
+      return;
+    }
+
+    const frameLength = 1 + length;
+
+    if (offset + frameLength > bytes.length) break;
+
+    if (bytes[offset] === READY_FOR_QUERY_TAG && length >= 5) {
+      const status = String.fromCharCode(bytes[offset + 5] ?? 0);
+
+      if (status === 'I' || status === 'T' || status === 'E') {
+        state.transactionStatus = status;
+      }
+    }
+
+    offset += frameLength;
+  }
+
+  state.statusScratch = bytes.subarray(offset);
 }
 
 function concatAll(frames: Uint8Array[]): Uint8Array {

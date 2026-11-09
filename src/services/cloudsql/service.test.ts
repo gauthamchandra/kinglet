@@ -421,6 +421,168 @@ describe('SqlAdminService', () => {
     });
   });
 
+  describe('simple-query database statements', () => {
+    const idle = {
+      database: 'postgres',
+      transactionStatus: 'I' as const,
+    };
+
+    beforeEach(async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.createInstance('p1', { name: 'db-b', databaseVersion: 'POSTGRES_16' });
+      await service.createInstance('other', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+    });
+
+    test('create and drop apply only to the instance the client connected to', async () => {
+      const created = await service.executeSimpleQuery('CREATE DATABASE app', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+
+      expect(created).toEqual({ handled: true, commandTag: 'CREATE DATABASE' });
+
+      await service.executeSimpleQuery('CREATE DATABASE "App"', {
+        ...idle,
+        instanceKey: 'p1/db-b',
+      });
+      await service.executeSimpleQuery('CREATE DATABASE app', {
+        ...idle,
+        instanceKey: 'other/db-a',
+      });
+
+      expect((await service.listDatabases('p1', 'db-a')).items.map(item => item.name)).toEqual([
+        'app',
+        'postgres',
+      ]);
+      expect((await service.listDatabases('p1', 'db-b')).items.map(item => item.name)).toEqual([
+        'App',
+        'postgres',
+      ]);
+      expect((await service.listDatabases('other', 'db-a')).items.map(item => item.name)).toEqual([
+        'app',
+        'postgres',
+      ]);
+
+      const dropped = await service.executeSimpleQuery('DROP DATABASE app', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+
+      expect(dropped).toEqual({ handled: true, commandTag: 'DROP DATABASE' });
+      expect((await service.listDatabases('p1', 'db-a')).items.map(item => item.name)).toEqual([
+        'postgres',
+      ]);
+      expect((await service.listDatabases('p1', 'db-b')).items.map(item => item.name)).toEqual([
+        'App',
+        'postgres',
+      ]);
+      expect((await service.listDatabases('other', 'db-a')).items.map(item => item.name)).toEqual([
+        'app',
+        'postgres',
+      ]);
+      expect(dataPlane.calls).toContain('openDatabase:p1/db-a/app');
+      expect(dataPlane.calls).toContain('dropDatabase:p1/db-a/app');
+      expect(dataPlane.calls).toContain('openDatabase:p1/db-b/App');
+      expect(dataPlane.calls).not.toContain('dropDatabase:p1/db-b/App');
+      expect(dataPlane.calls).not.toContain('dropDatabase:other/db-a/app');
+
+      const operations = await service.listOperations('p1', 'db-a');
+
+      expect(operations.items.some(item => item.operationType === 'CREATE_DATABASE')).toBe(true);
+      expect(operations.items.some(item => item.operationType === 'DELETE_DATABASE')).toBe(true);
+    });
+
+    test('stores the default charset when encoding and collation clauses are ignored', async () => {
+      await service.executeSimpleQuery(
+        "CREATE DATABASE app WITH OWNER = postgres ENCODING = 'unicode' TEMPLATE = template0 LC_COLLATE = 'C'",
+        { ...idle, instanceKey: 'p1/db-a' }
+      );
+
+      const database = await service.getDatabase('p1', 'db-a', 'app');
+
+      expect(database.charset).toBe('UTF8');
+      expect(database.collation).toBe('en_US.UTF8');
+    });
+
+    test('maps a duplicate to 42P04 and a missing drop to 3D000 without closing the other instance', async () => {
+      await service.executeSimpleQuery('CREATE DATABASE app', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+      await service.executeSimpleQuery('CREATE DATABASE app', {
+        ...idle,
+        instanceKey: 'p1/db-b',
+      });
+
+      const duplicate = await service.executeSimpleQuery('CREATE DATABASE app', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+
+      expect(duplicate).toEqual({
+        handled: true,
+        error: { sqlState: '42P04', message: 'database "app" already exists' },
+      });
+
+      const missing = await service.executeSimpleQuery('DROP DATABASE gone', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+
+      expect(missing).toEqual({
+        handled: true,
+        error: { sqlState: '3D000', message: 'database "gone" does not exist' },
+      });
+
+      const ifExists = await service.executeSimpleQuery('DROP DATABASE IF EXISTS gone', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+
+      expect(ifExists).toEqual({ handled: true, commandTag: 'DROP DATABASE' });
+      expect((await service.listDatabases('p1', 'db-b')).items.map(item => item.name)).toContain(
+        'app'
+      );
+    });
+
+    test('refuses to drop the database this connection is using', async () => {
+      await service.executeSimpleQuery('CREATE DATABASE app', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+
+      const outcome = await service.executeSimpleQuery('DROP DATABASE app', {
+        instanceKey: 'p1/db-a',
+        database: 'app',
+        transactionStatus: 'I',
+      });
+
+      expect(outcome).toEqual({
+        handled: true,
+        error: {
+          sqlState: '55006',
+          message: 'database "app" is being accessed by other users',
+        },
+      });
+      expect(dataPlane.calls).not.toContain('dropDatabase:p1/db-a/app');
+      expect((await service.listDatabases('p1', 'db-a')).items.map(item => item.name)).toContain(
+        'app'
+      );
+    });
+
+    test('does not create a database for a statement it does not recognize', async () => {
+      const outcome = await service.executeSimpleQuery('CREATE DATABASE foo; DROP TABLE users', {
+        ...idle,
+        instanceKey: 'p1/db-a',
+      });
+
+      expect(outcome).toEqual({ handled: false });
+      expect((await service.listDatabases('p1', 'db-a')).items.map(item => item.name)).toEqual([
+        'postgres',
+      ]);
+    });
+  });
+
   describe('users', () => {
     beforeEach(async () => {
       await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
