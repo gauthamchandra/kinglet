@@ -60,7 +60,14 @@ These will be closed, and it is nothing personal — they are outside what this 
 - **Broad reformatting, renaming, or "cleanup" sweeps.** These produce enormous diffs, carry
   real regression risk, and are almost impossible to review. Biome already governs
   formatting.
-- **Dependency bumps by hand.** Renovate handles these.
+- **Routine dependency bumps by hand.** Renovate handles a version bump that the
+  change does not need. A hand bump is accepted when this change needs that
+  version and Renovate cannot land a working set by itself: a new package, an
+  exact peer pin that has to move with the rest of its family, or an API the
+  change calls that the installed release does not have. Say why in the PR.
+  When a family of packages must move together, add a Renovate group in the
+  same change so the next bump does not arrive as separate pull requests that
+  cannot install.
 
 ---
 
