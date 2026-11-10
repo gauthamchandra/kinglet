@@ -82,7 +82,7 @@ describe('instanceRecordToResponse', () => {
     expect(response.ipAddresses).toEqual([{ type: 'PRIMARY', ipAddress: '127.0.0.1' }]);
     expect(response.settings).toEqual({
       kind: 'sql#settings',
-      settingsVersion: 1,
+      settingsVersion: '1',
       tier: 'db-custom-1-3840',
     });
     expect(response.etag).toBe('1');

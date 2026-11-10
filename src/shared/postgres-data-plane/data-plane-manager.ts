@@ -16,6 +16,7 @@ import type { Logger } from '@/shared/utils/logger.ts';
 import { PortAllocator } from '@/shared/utils/port-allocator.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { PostgresDataPlaneDirectoryName, PostgresDataPlaneProductLabel } from './host.ts';
+import type { PgStatStatementsOptions } from './pg-stat-statements.ts';
 import type { DatabaseKey } from './pglite-database-manager.ts';
 import { PGliteDatabaseManager } from './pglite-database-manager.ts';
 
@@ -36,12 +37,22 @@ export interface PostgresDataPlane {
    * Bring up an instance's endpoint with the given databases open, returning
    * the port it listens on, or null when no data plane is running.
    */
-  startInstance(project: string, instance: string, databases: string[]): Promise<number | null>;
+  startInstance(
+    project: string,
+    instance: string,
+    databases: string[],
+    options?: PgStatStatementsOptions
+  ): Promise<number | null>;
   /** Tear down the endpoint but leave any persisted data alone. */
   stopInstance(project: string, instance: string): Promise<void>;
   /** Tear down the endpoint and delete the instance's data. */
   dropInstance(project: string, instance: string): Promise<void>;
-  restartInstance(project: string, instance: string, databases: string[]): Promise<void>;
+  restartInstance(
+    project: string,
+    instance: string,
+    databases: string[],
+    options?: PgStatStatementsOptions
+  ): Promise<void>;
   openDatabase(project: string, instance: string, database: string): Promise<void>;
   dropDatabase(project: string, instance: string, database: string): Promise<void>;
   stopAll(): Promise<void>;
@@ -81,6 +92,8 @@ interface RunningInstance {
   port: number;
   wireServer: PostgresWireServer;
   databases: Set<string>;
+  /** The extension choice databases opened later on this instance inherit. */
+  pgStatStatements: boolean;
 }
 
 /**
@@ -146,17 +159,19 @@ export class DataPlaneManager implements PostgresDataPlane {
   async startInstance(
     project: string,
     instance: string,
-    databases: string[]
+    databases: string[],
+    options: PgStatStatementsOptions = { pgStatStatements: false }
   ): Promise<number | null> {
     return this.instanceMutex.runExclusively(buildInstanceKey(project, instance), () =>
-      this.startInstanceLocked(project, instance, databases)
+      this.startInstanceLocked(project, instance, databases, options)
     );
   }
 
   private async startInstanceLocked(
     project: string,
     instance: string,
-    databases: string[]
+    databases: string[],
+    options: PgStatStatementsOptions
   ): Promise<number | null> {
     const key = buildInstanceKey(project, instance);
     const previousPort = this.instances.get(key)?.port;
@@ -172,7 +187,7 @@ export class DataPlaneManager implements PostgresDataPlane {
 
     try {
       for (const database of databases) {
-        await this.databaseManager.open({ project, instance, database });
+        await this.databaseManager.open({ project, instance, database }, options);
         opened.add(database);
       }
     } catch (error) {
@@ -198,7 +213,12 @@ export class DataPlaneManager implements PostgresDataPlane {
     }
 
     const { port, wireServer } = bound;
-    const running: RunningInstance = { port, wireServer, databases: opened };
+    const running: RunningInstance = {
+      port,
+      wireServer,
+      databases: opened,
+      pgStatStatements: options.pgStatStatements,
+    };
 
     this.instances.set(key, running);
 
@@ -293,8 +313,13 @@ export class DataPlaneManager implements PostgresDataPlane {
     await this.databaseManager.dropInstance(project, instance);
   }
 
-  async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {
-    await this.startInstance(project, instance, databases);
+  async restartInstance(
+    project: string,
+    instance: string,
+    databases: string[],
+    options: PgStatStatementsOptions = { pgStatStatements: false }
+  ): Promise<void> {
+    await this.startInstance(project, instance, databases, options);
   }
 
   private async openDatabaseLocked(
@@ -309,7 +334,10 @@ export class DataPlaneManager implements PostgresDataPlane {
     // startInstance opens it with the rest.
     if (!running) return;
 
-    await this.databaseManager.open({ project, instance, database });
+    await this.databaseManager.open(
+      { project, instance, database },
+      { pgStatStatements: running.pgStatStatements }
+    );
 
     running.databases.add(database);
   }

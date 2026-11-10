@@ -323,7 +323,9 @@ export function instanceRecordToResponse(record: SqlInstanceRecord): DatabaseIns
     ipAddresses: [{ type: 'PRIMARY', ipAddress: '127.0.0.1' }],
     settings: {
       kind: 'sql#settings',
-      settingsVersion: record.settingsVersion,
+      // sqladmin encodes this int64 as a JSON string. A bare number makes the
+      // Terraform provider's Go client reject the GET (`json:",string"`).
+      settingsVersion: String(record.settingsVersion),
       ...userSettings,
     },
     selfLink: buildInstanceSelfLink(record.project, record.name),

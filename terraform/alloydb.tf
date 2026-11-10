@@ -60,10 +60,11 @@ resource "google_alloydb_instance" "primary" {
   }
 
   database_flags = {
-    "alloydb.iam_authentication"     = "on"
-    "alloydb.logical_decoding"       = "on"
-    "google_columnar_engine.enabled" = "off"
-    "max_connections"                = "1000"
+    "alloydb.enable_pg_stat_statements" = "on"
+    "alloydb.iam_authentication"        = "on"
+    "alloydb.logical_decoding"          = "on"
+    "google_columnar_engine.enabled"    = "off"
+    "max_connections"                   = "1000"
   }
 
   connection_pool_config {

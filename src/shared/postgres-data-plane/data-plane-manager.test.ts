@@ -98,6 +98,26 @@ afterEach(async () => {
 });
 
 describe('DataPlaneManager', () => {
+  test('a database opened later inherits pg_stat_statements from the instance', async () => {
+    const manager = makeManager();
+    const port =
+      (await manager.startInstance('p1', 'a', ['postgres'], { pgStatStatements: true })) ?? 0;
+
+    await manager.openDatabase('p1', 'a', 'app');
+
+    await runQuery(port, 'app', 'postgres', '', 'CREATE EXTENSION pg_stat_statements');
+
+    expect(
+      await runQuery(
+        port,
+        'app',
+        'postgres',
+        '',
+        "SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements'"
+      )
+    ).toEqual([{ extname: 'pg_stat_statements' }]);
+  });
+
   test('allocates ports sequentially from the start of the range', async () => {
     const manager = makeManager();
     const first = await manager.startInstance('p1', 'a', ['postgres']);

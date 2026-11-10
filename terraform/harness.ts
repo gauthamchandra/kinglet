@@ -111,6 +111,7 @@ async function startKingletBun(
       SERVICES: services.join(','),
       MEMORYSTORE_DATA_PLANE: 'false',
       ALLOYDB_DATA_PLANE: 'false',
+      CLOUDSQL_DATA_PLANE: 'false',
       HTTP_PORT: String(port),
       COMPUTE_LISTENER_PORT: String(listenerPort),
     },
@@ -193,6 +194,8 @@ async function startKingletDocker(
       'MEMORYSTORE_DATA_PLANE=false',
       '-e',
       'ALLOYDB_DATA_PLANE=false',
+      '-e',
+      'CLOUDSQL_DATA_PLANE=false',
       IMAGE_NAME,
     ],
     { stdout: 'ignore', stderr: 'inherit' }

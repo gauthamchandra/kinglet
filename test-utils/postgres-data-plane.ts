@@ -9,6 +9,7 @@
  */
 
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type { PgStatStatementsOptions } from '@/shared/postgres-data-plane/pg-stat-statements.ts';
 
 export interface RecordingDataPlaneOptions {
   /** Port reported by {@link RecordingDataPlane.startInstance}. */
@@ -34,8 +35,15 @@ export class RecordingDataPlane implements PostgresDataPlane {
     this.reportedPort = options.reportedPort === undefined ? this.port : options.reportedPort;
   }
 
-  async startInstance(project: string, instance: string, databases: string[]): Promise<number> {
-    this.calls.push(`start:${project}/${instance}:${databases.join(',')}`);
+  async startInstance(
+    project: string,
+    instance: string,
+    databases: string[],
+    options: PgStatStatementsOptions = { pgStatStatements: false }
+  ): Promise<number> {
+    this.calls.push(
+      `start:${project}/${instance}:${databases.join(',')}:${pgStatStatementsToken(options)}`
+    );
 
     if (this.startFailure) throw this.startFailure;
 
@@ -52,8 +60,15 @@ export class RecordingDataPlane implements PostgresDataPlane {
     if (this.dropFailure) throw this.dropFailure;
   }
 
-  async restartInstance(project: string, instance: string, databases: string[]): Promise<void> {
-    this.calls.push(`restart:${project}/${instance}:${databases.join(',')}`);
+  async restartInstance(
+    project: string,
+    instance: string,
+    databases: string[],
+    options: PgStatStatementsOptions = { pgStatStatements: false }
+  ): Promise<void> {
+    this.calls.push(
+      `restart:${project}/${instance}:${databases.join(',')}:${pgStatStatementsToken(options)}`
+    );
   }
 
   async openDatabase(project: string, instance: string, database: string): Promise<void> {
@@ -71,4 +86,8 @@ export class RecordingDataPlane implements PostgresDataPlane {
   getPort(): number | null {
     return this.reportedPort;
   }
+}
+
+function pgStatStatementsToken(options: PgStatStatementsOptions): string {
+  return `pgStatStatements=${options.pgStatStatements ? 'on' : 'off'}`;
 }

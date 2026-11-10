@@ -6,6 +6,26 @@
 
 | Method | Path | Route ID |
 | --- | --- | --- |
+| `GET` | `/sql/v1beta4/projects/:project/instances` | `cloudsql.instances.list:v1beta4` |
+| `POST` | `/sql/v1beta4/projects/:project/instances` | `cloudsql.instances.insert:v1beta4` |
+| `DELETE` | `/sql/v1beta4/projects/:project/instances/:instance` | `cloudsql.instances.delete:v1beta4` |
+| `GET` | `/sql/v1beta4/projects/:project/instances/:instance` | `cloudsql.instances.get:v1beta4` |
+| `PATCH` | `/sql/v1beta4/projects/:project/instances/:instance` | `cloudsql.instances.patch:v1beta4` |
+| `PUT` | `/sql/v1beta4/projects/:project/instances/:instance` | `cloudsql.instances.update:v1beta4` |
+| `GET` | `/sql/v1beta4/projects/:project/instances/:instance/databases` | `cloudsql.databases.list:v1beta4` |
+| `POST` | `/sql/v1beta4/projects/:project/instances/:instance/databases` | `cloudsql.databases.insert:v1beta4` |
+| `DELETE` | `/sql/v1beta4/projects/:project/instances/:instance/databases/:database` | `cloudsql.databases.delete:v1beta4` |
+| `GET` | `/sql/v1beta4/projects/:project/instances/:instance/databases/:database` | `cloudsql.databases.get:v1beta4` |
+| `PATCH` | `/sql/v1beta4/projects/:project/instances/:instance/databases/:database` | `cloudsql.databases.patch:v1beta4` |
+| `PUT` | `/sql/v1beta4/projects/:project/instances/:instance/databases/:database` | `cloudsql.databases.update:v1beta4` |
+| `POST` | `/sql/v1beta4/projects/:project/instances/:instance/restart` | `cloudsql.instances.restart:v1beta4` |
+| `DELETE` | `/sql/v1beta4/projects/:project/instances/:instance/users` | `cloudsql.users.delete:v1beta4` |
+| `GET` | `/sql/v1beta4/projects/:project/instances/:instance/users` | `cloudsql.users.list:v1beta4` |
+| `POST` | `/sql/v1beta4/projects/:project/instances/:instance/users` | `cloudsql.users.insert:v1beta4` |
+| `PUT` | `/sql/v1beta4/projects/:project/instances/:instance/users` | `cloudsql.users.update:v1beta4` |
+| `GET` | `/sql/v1beta4/projects/:project/instances/:instance/users/:name` | `cloudsql.users.get:v1beta4` |
+| `GET` | `/sql/v1beta4/projects/:project/operations` | `cloudsql.operations.list:v1beta4` |
+| `GET` | `/sql/v1beta4/projects/:project/operations/:operation` | `cloudsql.operations.get:v1beta4` |
 | `GET` | `/v1/projects/:project/instances` | `cloudsql.instances.list` |
 | `POST` | `/v1/projects/:project/instances` | `cloudsql.instances.insert` |
 | `DELETE` | `/v1/projects/:project/instances/:instance` | `cloudsql.instances.delete` |

@@ -615,6 +615,57 @@ describe('data plane', () => {
    * while nothing listens on its endpoint, and no admin call short of a
    * recreate brings it back.
    */
+  test('rehydrate links pg_stat_statements when the stored flag is on', async () => {
+    const first = await startService();
+
+    const cluster = await callRoute(first, 'alloydb.clusters.create', {
+      method: 'POST',
+      params: { project: PROJECT, location: LOCATION },
+      query: { clusterId: CLUSTER },
+      body: {
+        initialUser: { user: 'postgres', password: PASSWORD },
+        networkConfig: { network: 'projects/p1/global/networks/default' },
+      },
+    });
+
+    expect(cluster.status).toBe(200);
+
+    const created = await callRoute(first, 'alloydb.clusters.instances.create', {
+      method: 'POST',
+      params: { project: PROJECT, location: LOCATION, cluster: CLUSTER },
+      query: { instanceId: INSTANCE },
+      body: {
+        instanceType: 'PRIMARY',
+        databaseFlags: { 'alloydb.enable_pg_stat_statements': 'on' },
+      },
+    });
+
+    expect(created.status).toBe(200);
+    await first.stop();
+
+    const revived = await startService();
+    const port = revived.getDataPlanePort(PROJECT, LOCATION, CLUSTER, INSTANCE);
+
+    expect(port).not.toBeNull();
+
+    const client = new Bun.SQL({
+      url: `postgres://postgres:${PASSWORD}@127.0.0.1:${port}/postgres`,
+      tls: false,
+      max: 1,
+    });
+
+    await client.unsafe('CREATE EXTENSION pg_stat_statements');
+
+    const rows: Record<string, unknown>[] = await client.unsafe(
+      "SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements'"
+    );
+
+    expect(rows.map(row => ({ ...row }))).toEqual([{ extname: 'pg_stat_statements' }]);
+
+    await client.end();
+    await revived.stop();
+  });
+
   test('brings persisted instances back up on a fresh service over the same storage', async () => {
     const first = await startService();
 

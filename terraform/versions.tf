@@ -24,6 +24,9 @@ provider "google" {
   workflows_custom_endpoint       = "${var.kinglet_endpoint}/v1/"
   compute_custom_endpoint         = "${var.kinglet_endpoint}/compute/v1/"
   alloydb_custom_endpoint         = "${var.kinglet_endpoint}/v1/"
+  # The provider's SQL client keeps the /sql/v1beta4 prefix and only takes the
+  # host from this endpoint. Kinglet serves that prefix as an alias of /v1.
+  sql_custom_endpoint = "${var.kinglet_endpoint}/"
 
   # Avoid real oauth2.googleapis.com token exchange in CI/local harness runs.
   access_token = var.access_token

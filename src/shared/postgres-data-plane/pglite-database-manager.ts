@@ -17,6 +17,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import type { StorageType } from '@/core/storage/types.ts';
 import { resolveExtensions } from './extensions.ts';
+import type { PgStatStatementsOptions } from './pg-stat-statements.ts';
 import type { ProtocolBackend } from './pglite-session-queue.ts';
 import { PGliteSessionQueue } from './pglite-session-queue.ts';
 
@@ -109,19 +110,25 @@ export class PGliteDatabaseManager {
     this.options = options;
   }
 
-  async open(key: DatabaseKey): Promise<OpenDatabase> {
+  async open(
+    key: DatabaseKey,
+    options: PgStatStatementsOptions = { pgStatStatements: false }
+  ): Promise<OpenDatabase> {
     const id = buildDatabaseKey(key);
 
     this.requireNotDropping(key, id);
     const existing = this.databases.get(id);
 
+    // An already-open database keeps the extension set it was built with. A
+    // flag change has to close it first (the data plane's restart does) so the
+    // next open links the module the flag now asks for.
     if (existing) return existing;
 
     const inFlight = this.opening.get(id);
 
     if (inFlight) return inFlight;
 
-    const opening = this.createDatabase(id, key);
+    const opening = this.createDatabase(id, key, options);
 
     this.opening.set(id, opening);
     this.openingKeys.set(id, key);
@@ -301,7 +308,11 @@ export class PGliteDatabaseManager {
     return directory;
   }
 
-  private async createDatabase(id: string, key: DatabaseKey): Promise<TrackedDatabase> {
+  private async createDatabase(
+    id: string,
+    key: DatabaseKey,
+    options: PgStatStatementsOptions
+  ): Promise<TrackedDatabase> {
     if (this.options.storageType !== 'memory') {
       // PGlite creates only the leaf directory it is pointed at, so the
       // project/instance path above it has to exist first or the very first
@@ -310,7 +321,10 @@ export class PGliteDatabaseManager {
     }
 
     const db = await PGlite.create(this.resolveDataSource(key), {
-      extensions: resolveExtensions({ postgis: this.options.postgis }),
+      extensions: resolveExtensions({
+        postgis: this.options.postgis,
+        pgStatStatements: options.pgStatStatements,
+      }),
     });
 
     // Re-checked after the boot, not only before it: a drop that began while

@@ -63,15 +63,40 @@ describe('DATA_PLANE_EXTENSIONS', () => {
 });
 
 describe('resolveExtensions', () => {
-  test('without postgis returns the base set', () => {
-    const extensions = resolveExtensions({ postgis: false });
+  test('without postgis or pg_stat_statements returns the base set', () => {
+    const extensions = resolveExtensions({ postgis: false, pgStatStatements: false });
 
     expect(extensions).toBe(DATA_PLANE_EXTENSIONS);
     expect('postgis' in extensions).toBe(false);
+    expect('pg_stat_statements' in extensions).toBe(false);
+  });
+
+  test('pg_stat_statements records a statement only when it is linked', async () => {
+    const enabled = resolveExtensions({ postgis: false, pgStatStatements: true });
+    const enabledDb = await PGlite.create('memory://', { extensions: enabled });
+
+    await enabledDb.exec('CREATE EXTENSION pg_stat_statements');
+    await enabledDb.exec("SELECT 'kinglet_pgss_probe'");
+
+    const tracked = await enabledDb.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM pg_stat_statements WHERE query = 'SELECT $1'"
+    );
+
+    await enabledDb.close();
+
+    expect(tracked.rows[0]?.n).toBeGreaterThan(0);
+
+    const disabled = resolveExtensions({ postgis: false, pgStatStatements: false });
+    const disabledDb = await PGlite.create('memory://', { extensions: disabled });
+    const create = disabledDb.exec('CREATE EXTENSION pg_stat_statements');
+
+    await expect(create).rejects.toThrow(/pg_stat_statements/);
+
+    await disabledDb.close();
   });
 
   test('with postgis enabled, CREATE EXTENSION postgis works', async () => {
-    const extensions = resolveExtensions({ postgis: true });
+    const extensions = resolveExtensions({ postgis: true, pgStatStatements: false });
     const db = await PGlite.create('memory://', { extensions });
 
     await db.exec('CREATE EXTENSION postgis');

@@ -8,12 +8,14 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Logger } from '@/shared/utils/logger.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { DataPlaneManager, DisabledDataPlane } from './data-plane-manager.ts';
 import {
   ALLOYDB_DATA_PLANE_PRODUCT,
   CLOUDSQL_DATA_PLANE_PRODUCT,
   createPostgresDataPlane,
   type PostgresDataPlaneProduct,
+  restartPersistedInstances,
 } from './host.ts';
 
 const logger = new Logger('PostgresDataPlaneHostTest', 'error');
@@ -140,6 +142,22 @@ describe('createPostgresDataPlane', () => {
     await alloydb.dropInstance('p1', 'us-central1/c1/i1');
 
     expect(existsSync(alloydbTree)).toBe(false);
+  });
+
+  test('restartPersistedInstances forwards the pg_stat_statements choice', async () => {
+    const plane = new RecordingDataPlane();
+
+    await restartPersistedInstances(logger, CLOUDSQL_DATA_PLANE_PRODUCT, plane, [
+      {
+        name: 'p1/db',
+        project: 'p1',
+        instance: 'db',
+        databases: ['postgres'],
+        pgStatStatements: true,
+      },
+    ]);
+
+    expect(plane.calls).toEqual(['start:p1/db:postgres:pgStatStatements=on']);
   });
 
   test('stampsCloudSqlWithItsOwnDirectoryTree', async () => {

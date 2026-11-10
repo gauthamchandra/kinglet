@@ -283,6 +283,39 @@ describe('PGliteDatabaseManager', () => {
     expect(first.db).toBe(second.db);
   });
 
+  test('links pg_stat_statements only when the open asks for it', async () => {
+    const manager = memoryManager();
+    const open = await manager.open(KEY, { pgStatStatements: true });
+
+    await open.db.exec('CREATE EXTENSION pg_stat_statements');
+
+    const installed = await open.db.query<{ extname: string }>(
+      "SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements'"
+    );
+
+    expect(installed.rows).toEqual([{ extname: 'pg_stat_statements' }]);
+  });
+
+  test('reopening without the module after CREATE EXTENSION fails, and the flag restores it', async () => {
+    const { manager } = await fileManager();
+    const open = await manager.open(KEY, { pgStatStatements: true });
+
+    await open.db.exec('CREATE EXTENSION pg_stat_statements');
+    await open.db.exec('CREATE TABLE kept (id int); INSERT INTO kept VALUES (1)');
+    await manager.close(KEY);
+
+    // The catalog row still names a preload library that is no longer linked,
+    // and PGlite refuses to boot that directory.
+    await expect(manager.open(KEY, { pgStatStatements: false })).rejects.toThrow(
+      'PGlite failed to initialize properly'
+    );
+
+    const restored = await manager.open(KEY, { pgStatStatements: true });
+    const rows = await restored.db.query<{ id: number }>('SELECT id FROM kept');
+
+    expect(rows.rows).toEqual([{ id: 1 }]);
+  });
+
   test('loads the contrib and pgvector extension set', async () => {
     const manager = memoryManager();
     const open = await manager.open(KEY);

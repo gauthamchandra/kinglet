@@ -36,6 +36,7 @@ import {
   createPostgresDataPlane,
   restartPersistedInstances,
 } from '@/shared/postgres-data-plane/host.ts';
+import { alloyDbPgStatStatementsEnabled } from '@/shared/postgres-data-plane/pg-stat-statements.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { parsePageSize } from '@/shared/utils/pagination.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
@@ -59,6 +60,7 @@ import {
   DEFAULT_DATABASE_NAME,
   parseDataPlaneInstanceKey,
   parseInstanceName,
+  parseSpecJson,
 } from './types.ts';
 import { UserHandlers } from './user-handlers.ts';
 import { UserRepository } from './user-repository.ts';
@@ -299,6 +301,9 @@ export class AlloyDbService {
         project: parsed.project,
         instance: buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId),
         databases: [DEFAULT_DATABASE_NAME],
+        pgStatStatements: alloyDbPgStatStatementsEnabled(
+          parseSpecJson(instance.spec).databaseFlags
+        ),
       });
     }
 

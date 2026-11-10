@@ -80,7 +80,25 @@ describe('createInstance', () => {
     );
 
     expect(dataPlane.calls).toEqual([
-      `start:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}:postgres`,
+      `start:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}:postgres:pgStatStatements=off`,
+    ]);
+  });
+
+  test('createInstance_withTheEnableFlagOn_startsPgStatStatements', async () => {
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      {
+        instanceType: 'PRIMARY',
+        databaseFlags: { 'alloydb.enable_pg_stat_statements': 'on' },
+      },
+      {}
+    );
+
+    expect(dataPlane.calls).toEqual([
+      `start:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}:postgres:pgStatStatements=on`,
     ]);
   });
 
@@ -528,6 +546,53 @@ describe('updateInstance', () => {
       { instanceType: 'PRIMARY' },
       {}
     );
+  });
+
+  test('updateInstance_flippingTheEnableFlag_restartsWithTheNewValue', async () => {
+    dataPlane.calls.length = 0;
+
+    await service.updateInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { databaseFlags: { 'alloydb.enable_pg_stat_statements': 'on' } },
+      { updateMask: 'databaseFlags' }
+    );
+
+    expect(dataPlane.calls).toEqual([
+      `restart:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}:postgres:pgStatStatements=on`,
+    ]);
+  });
+
+  test('updateInstance_leavingTheEnableFlagAlone_doesNotRestart', async () => {
+    dataPlane.calls.length = 0;
+
+    await service.updateInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { displayName: 'renamed' },
+      { updateMask: 'displayName' }
+    );
+
+    expect(dataPlane.calls).toEqual([]);
+  });
+
+  test('updateInstance_validateOnlyFlippingTheFlag_doesNotRestart', async () => {
+    dataPlane.calls.length = 0;
+
+    await service.updateInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { databaseFlags: { 'alloydb.enable_pg_stat_statements': 'on' } },
+      { updateMask: 'databaseFlags', validateOnly: true }
+    );
+
+    expect(dataPlane.calls).toEqual([]);
   });
 
   test('updateInstance_appliesTheMaskedFieldAndReturnsAnOperation', async () => {
