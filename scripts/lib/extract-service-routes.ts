@@ -13,6 +13,7 @@ import { MemorystoreService } from '@/services/memorystore/index.ts';
 import { NetworkSecurityService } from '@/services/networksecurity/index.ts';
 import { PubSubService } from '@/services/pubsub/index.ts';
 import { SchedulerService } from '@/services/scheduler/index.ts';
+import { SecretsService } from '@/services/secrets/index.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
@@ -46,11 +47,12 @@ const SERVICE_FACTORIES: Record<string, ServiceFactory> = {
   memorystore: (storage, logger) => new MemorystoreService(storage, logger, { enabled: false }),
   networksecurity: (storage, logger) => new NetworkSecurityService(storage, logger),
   pubsub: (storage, logger) => new PubSubService(storage, logger),
+  'secret-manager': (storage, logger) => new SecretsService(storage, logger),
   workflows: (storage, logger) => new CloudWorkflowsService(storage, logger),
 };
 
 /** Registry services with no routes yet — empty output is expected. */
-const PLANNED_WITHOUT_ROUTES = new Set(['secret-manager']);
+const PLANNED_WITHOUT_ROUTES = new Set<string>();
 
 /** v1 services that rely on the shared gateway locations routes. */
 const USES_SHARED_V1_LOCATIONS = new Set([
@@ -61,6 +63,7 @@ const USES_SHARED_V1_LOCATIONS = new Set([
   'memorystore',
   'networksecurity',
   'pubsub',
+  'secret-manager',
   'workflows',
 ]);
 
