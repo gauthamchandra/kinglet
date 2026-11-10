@@ -32,11 +32,19 @@ export class SecretManagerError extends Error {
 
   readonly resourceName: string | undefined;
 
-  constructor(code: SecretManagerErrorCode, message: string, resourceName?: string) {
+  readonly resourceType: string | undefined;
+
+  constructor(
+    code: SecretManagerErrorCode,
+    message: string,
+    resourceName?: string,
+    resourceType?: string
+  ) {
     super(message);
     this.name = 'SecretManagerError';
     this.code = code;
     this.resourceName = resourceName;
+    this.resourceType = resourceType;
   }
 }
 
@@ -362,7 +370,8 @@ export function resolveVersionNumber(
       throw new SecretManagerError(
         'NOT_FOUND',
         `SecretVersion ${requestedName} not found`,
-        requestedName
+        requestedName,
+        'SecretVersion'
       );
     }
 
@@ -376,7 +385,8 @@ export function resolveVersionNumber(
       throw new SecretManagerError(
         'NOT_FOUND',
         `SecretVersion ${requestedName} not found`,
-        requestedName
+        requestedName,
+        'SecretVersion'
       );
     }
 

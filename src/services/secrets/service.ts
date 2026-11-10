@@ -157,7 +157,8 @@ export class SecretManager {
       throw new SecretManagerError(
         'NOT_FOUND',
         `SecretVersion ${requestedName} not found`,
-        requestedName
+        requestedName,
+        'SecretVersion'
       );
     }
 

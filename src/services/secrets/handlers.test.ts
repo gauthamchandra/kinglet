@@ -125,6 +125,38 @@ describe('secret manager RPC table', () => {
     expect(added.status).toBe(200);
     expect(version.name).toBe('projects/p/secrets/a/versions/1');
   });
+
+  test('a missing version is reported as SecretVersion', async () => {
+    const { routes } = await harness();
+    const router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of routes) {
+      router.addRoute(route);
+    }
+
+    const created = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets?secretId=missing-version', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ replication: { automatic: {} } }),
+      })
+    );
+
+    expect(created.status).toBe(200);
+
+    const response = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets/missing-version/versions/9')
+    );
+    const body = (await response.json()) as {
+      error: { message: string; details: Array<{ resourceType: string }> };
+    };
+
+    expect(response.status).toBe(404);
+    expect(body.error.message).toBe(
+      'SecretVersion projects/p/secrets/missing-version/versions/9 not found'
+    );
+    expect(body.error.details[0]?.resourceType).toBe('SecretVersion');
+  });
 });
 
 describe('SecretsService lifecycle', () => {

@@ -324,9 +324,12 @@ function secretRestError(
   if (err instanceof SecretManagerError) {
     switch (err.code) {
       case 'NOT_FOUND':
-        return responseUtils.notFound('Secret', err.resourceName ?? 'unknown');
+        return responseUtils.notFound(err.resourceType ?? 'Secret', err.resourceName ?? 'unknown');
       case 'ALREADY_EXISTS':
-        return responseUtils.alreadyExists('Secret', err.resourceName ?? 'unknown');
+        return responseUtils.alreadyExists(
+          err.resourceType ?? 'Secret',
+          err.resourceName ?? 'unknown'
+        );
       case 'INVALID_ARGUMENT':
         return responseUtils.badRequest(err.message);
       case 'FAILED_PRECONDITION':
