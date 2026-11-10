@@ -117,8 +117,8 @@ const RPC_TABLE = {
       suffix: '/secrets/:secret:addVersion',
       id: 'secrets.addVersion',
       toMessage: parts => ({
-        parent: secretResource(parts),
         ...(isRecord(parts.body) ? parts.body : {}),
+        parent: secretResource(parts),
       }),
     },
     call: async (manager, message, dialect) => {

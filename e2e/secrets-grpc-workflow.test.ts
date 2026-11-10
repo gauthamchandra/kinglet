@@ -9,6 +9,7 @@ import type { Server } from 'bun';
 import { GrpcServer } from '@/core/gateway/grpc-server.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { SecretsService } from '@/services/secrets/index.ts';
+import { crc32cString } from '@/shared/utils/crc32c.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
 import { createFakeAuth } from './e2e-helpers.ts';
@@ -109,5 +110,30 @@ describe('Secret Manager E2E: gRPC', () => {
     const listed = client.listSecrets({ parent: 'projects/grpc-project' });
 
     await expect(listed).rejects.toHaveProperty('code', grpc.status.UNIMPLEMENTED);
+  });
+
+  test('a matching checksum is recorded and a mismatch is INVALID_ARGUMENT', async () => {
+    const [secret] = await client.createSecret({
+      parent: 'projects/grpc-project',
+      secretId: 'checksum',
+      secret: { replication: { automatic: {} } },
+    });
+    const data = Buffer.from('s3cret');
+    const checksum = crc32cString(new Uint8Array(data));
+
+    const [version] = await client.addSecretVersion({
+      parent: secret.name,
+      payload: { data, dataCrc32c: checksum },
+    });
+
+    expect(version.clientSpecifiedPayloadChecksum).toBe(true);
+    expect(version.name).toBe('projects/grpc-project/secrets/checksum/versions/1');
+
+    const mismatch = client.addSecretVersion({
+      parent: secret.name,
+      payload: { data, dataCrc32c: '1' },
+    });
+
+    await expect(mismatch).rejects.toHaveProperty('code', grpc.status.INVALID_ARGUMENT);
   });
 });

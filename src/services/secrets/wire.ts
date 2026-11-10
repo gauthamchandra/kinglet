@@ -548,7 +548,7 @@ function formatDuration(duration: Duration): string {
 }
 
 function readRestBytes(value: unknown): Uint8Array | null {
-  if (isUnset(value)) {
+  if (value == null) {
     return null;
   }
 
@@ -556,7 +556,25 @@ function readRestBytes(value: unknown): Uint8Array | null {
     throw new SecretManagerError('INVALID_ARGUMENT', 'Expected base64 data');
   }
 
-  return new Uint8Array(Buffer.from(value, 'base64'));
+  return decodeRestBase64(value);
+}
+
+function decodeRestBase64(value: string): Uint8Array {
+  const standard = value.replace(/-/g, '+').replace(/_/g, '/');
+
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(standard) || standard.length % 4 === 1) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'payload.data is not valid base64');
+  }
+
+  const remainder = standard.length % 4;
+  const padded = remainder === 0 ? standard : standard + '='.repeat(4 - remainder);
+  const bytes = Buffer.from(padded, 'base64');
+
+  if (bytes.toString('base64').replace(/=+$/, '') !== padded.replace(/=+$/, '')) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'payload.data is not valid base64');
+  }
+
+  return new Uint8Array(bytes);
 }
 
 function readProtoBytes(value: unknown): Uint8Array | null {

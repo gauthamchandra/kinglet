@@ -91,6 +91,40 @@ describe('secret manager RPC table', () => {
     expect(response.status).toBe(400);
     expect(body.error.status).toBe('INVALID_ARGUMENT');
   });
+
+  test('addVersion uses the secret in the URL when the body names another parent', async () => {
+    const { routes } = await harness();
+    const router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of routes) {
+      router.addRoute(route);
+    }
+
+    const created = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets?secretId=a', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ replication: { automatic: {} } }),
+      })
+    );
+
+    expect(created.status).toBe(200);
+
+    const added = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets/a:addVersion', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          parent: 'projects/p/secrets/b',
+          payload: { data: Buffer.from('s3cret').toString('base64') },
+        }),
+      })
+    );
+    const version = (await added.json()) as { name: string };
+
+    expect(added.status).toBe(200);
+    expect(version.name).toBe('projects/p/secrets/a/versions/1');
+  });
 });
 
 describe('SecretsService lifecycle', () => {
