@@ -91,6 +91,55 @@ describe('SqlAdminService', () => {
       expect(dataPlane.calls).toContain('restart:p1/db-a:postgres:pgStatStatements=on');
     });
 
+    test('overlapping patches restart from the settings each one saved', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+
+      let releaseFirstRestart: () => void = () => {};
+      let heldFirstRestart = false;
+      const firstRestartEntered = new Promise<void>(resolve => {
+        const original = dataPlane.restartInstance.bind(dataPlane);
+
+        dataPlane.restartInstance = async (...args) => {
+          if (!heldFirstRestart) {
+            heldFirstRestart = true;
+            resolve();
+            await new Promise<void>(resume => {
+              releaseFirstRestart = resume;
+            });
+          }
+
+          return original(...args);
+        };
+      });
+
+      const turningOn = service.patchInstance('p1', 'db-a', {
+        settings: {
+          databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'on' }],
+        },
+      });
+
+      await firstRestartEntered;
+
+      const turningOff = service.patchInstance('p1', 'db-a', {
+        settings: {
+          databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'off' }],
+        },
+      });
+
+      releaseFirstRestart();
+      await Promise.all([turningOn, turningOff]);
+
+      const instance = await service.getInstance('p1', 'db-a');
+
+      expect(instance.settings.databaseFlags).toEqual([
+        { name: 'cloudsql.enable_pg_stat_statements', value: 'off' },
+      ]);
+      expect(dataPlane.calls.filter(call => call.startsWith('restart:'))).toEqual([
+        'restart:p1/db-a:postgres:pgStatStatements=on',
+        'restart:p1/db-a:postgres:pgStatStatements=off',
+      ]);
+    });
+
     test('a patch that leaves the enable flag alone does not restart', async () => {
       await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
       dataPlane.calls.length = 0;

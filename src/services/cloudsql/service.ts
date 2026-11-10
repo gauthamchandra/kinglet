@@ -6,6 +6,7 @@ import type { BaseRecord } from '@/core/storage/types.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { cloudSqlPgStatStatementsEnabled } from '@/shared/postgres-data-plane/pg-stat-statements.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { CloudSqlRepository } from './repository.ts';
 import type {
   DatabaseInstanceResponse,
@@ -64,6 +65,10 @@ export interface ListOperationsResponse {
 export class SqlAdminService {
   private repo: CloudSqlRepository;
   private dataPlane: PostgresDataPlane;
+  // The enable-flag decision is only valid for the row it was read from. Two
+  // patches that both read "off" can otherwise save opposite values while only
+  // the first restarts, leaving the module loaded against a flag that says off.
+  private instanceMutex = new ResourceMutex();
 
   constructor(repo: CloudSqlRepository, dataPlane: PostgresDataPlane = new DisabledDataPlane()) {
     this.repo = repo;
@@ -558,9 +563,20 @@ export class SqlAdminService {
       throw new SqlAdminError('INVALID_ARGUMENT', 'settings is required for instances.update');
     }
 
+    return this.instanceMutex.runExclusively(`${project}/${name}`, () =>
+      this.applySettingsExclusively(project, name, parsed.data.settings, requireVersion)
+    );
+  }
+
+  private async applySettingsExclusively(
+    project: string,
+    name: string,
+    incomingSettings: Record<string, unknown> | undefined,
+    requireVersion: boolean
+  ): Promise<OperationResponse> {
     const existing = await this.requireInstance(project, name);
     const previous = cloudSqlPgStatStatementsEnabled(JSON.parse(existing.settings));
-    const incoming = parsed.data.settings ?? {};
+    const incoming = incomingSettings ?? {};
     const { settingsVersion, kind, ...userSettings } = incoming as Record<string, unknown>;
 
     void kind;
