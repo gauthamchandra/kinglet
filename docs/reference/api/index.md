@@ -15,7 +15,7 @@ HTTP routes registered by kinglet, grouped by emulated GCP service.
 | [Cloud Storage](cloud-storage.md) | 16 |
 | [Cloud Workflows](workflows.md) | 15 |
 | [Cloud KMS](cloud-kms.md) | 24 |
-| [Cloud SQL](cloud-sql.md) | 22 |
+| [Cloud SQL](cloud-sql.md) | 42 |
 | [Cloud Armor (Compute)](compute.md) | 12 |
 | [Network Security](networksecurity.md) | 11 |
 
