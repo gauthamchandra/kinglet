@@ -59,6 +59,8 @@ export class CloudSqlService {
 
     await repository.initialize();
 
+    let adminService: SqlAdminService | undefined;
+
     this.dataPlane = createPostgresDataPlane(
       this.logger,
       CLOUDSQL_DATA_PLANE_PRODUCT,
@@ -67,10 +69,16 @@ export class CloudSqlService {
         const record = await repository.getUser(project, instance, user);
 
         return record ? { password: record.password } : null;
+      },
+      async (sql, context) => {
+        if (!adminService) return { handled: false };
+
+        return adminService.executeSimpleQuery(sql, context);
       }
     );
 
-    this.adminService = new SqlAdminService(repository, this.dataPlane);
+    adminService = new SqlAdminService(repository, this.dataPlane);
+    this.adminService = adminService;
     this.handlers = new CloudSqlHandlers(this.adminService, this.logger);
 
     if (this.dataPlaneOptions.enabled) {

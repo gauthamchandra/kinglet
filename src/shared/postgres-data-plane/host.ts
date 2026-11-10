@@ -13,6 +13,7 @@ import type {
   PostgresDataPlane,
 } from './data-plane-manager.ts';
 import { DataPlaneManager, DisabledDataPlane } from './data-plane-manager.ts';
+import type { SimpleQueryHandler } from './postgres-wire-server.ts';
 
 export type ProductDataPlaneOptions = Omit<
   DataPlaneManagerOptions,
@@ -55,13 +56,19 @@ export function createPostgresDataPlane(
   logger: Logger,
   product: PostgresDataPlaneProduct,
   options: ProductDataPlaneOptions & { enabled: boolean },
-  lookupUser: LookupUser
+  lookupUser: LookupUser,
+  handleSimpleQuery?: SimpleQueryHandler
 ): PostgresDataPlane {
   if (!options.enabled) return new DisabledDataPlane();
 
   const { enabled: _enabled, ...managerOptions } = options;
 
-  return new DataPlaneManager(logger, { ...managerOptions, ...product }, lookupUser);
+  return new DataPlaneManager(
+    logger,
+    { ...managerOptions, ...product },
+    lookupUser,
+    handleSimpleQuery
+  );
 }
 
 /** An instance the control plane still has rows for, keyed the way its data plane knows it. */

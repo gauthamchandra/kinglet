@@ -9,7 +9,13 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { PGliteSessionQueue } from './pglite-session-queue.ts';
-import type { ConnectionResolution, ResolvedConnection } from './postgres-wire-server.ts';
+import type {
+  ConnectionResolution,
+  ResolvedConnection,
+  SimpleQueryContext,
+  SimpleQueryHandler,
+  SimpleQueryOutcome,
+} from './postgres-wire-server.ts';
 import {
   buildErrorResponse,
   PostgresWireServer,
@@ -129,7 +135,7 @@ function readErrorFields(body: Uint8Array): Record<string, string> {
 // ── Test doubles ──
 
 /** Echoes back what it was asked to run, so pass-through is observable. */
-function makeFakeQueue(): { queue: PGliteSessionQueue; received: string[] } {
+function makeFakeQueue(readyStatus = 0x49): { queue: PGliteSessionQueue; received: string[] } {
   const received: string[] = [];
   const queue = {
     enqueue: async (
@@ -138,7 +144,7 @@ function makeFakeQueue(): { queue: PGliteSessionQueue; received: string[] } {
       onData: (data: Uint8Array) => void
     ) => {
       received.push(new TextDecoder().decode(bytes).replace(/\0/g, '·'));
-      onData(buildTaggedMessage('Z', new Uint8Array([0x49])));
+      onData(buildTaggedMessage('Z', new Uint8Array([readyStatus])));
     },
     detach: async () => {},
   };
@@ -245,12 +251,14 @@ function startServer(
     instanceKey: string,
     database: string,
     user: string
-  ) => Promise<ConnectionResolution>
+  ) => Promise<ConnectionResolution>,
+  handleSimpleQuery?: SimpleQueryHandler
 ): number {
   const server = new PostgresWireServer({
     instanceKey: 'p1/inst',
     port: 0,
     resolveConnection,
+    ...(handleSimpleQuery ? { handleSimpleQuery } : {}),
   });
 
   server.listen();
@@ -688,6 +696,142 @@ describe('PostgresWireServer', () => {
     expect(readErrorFields(messages[1]?.body ?? new Uint8Array(0)).C).toBe(
       SQLSTATE_PROTOCOL_VIOLATION
     );
+  });
+
+  test('answers a lone CREATE DATABASE without forwarding it, then still accepts a query', async () => {
+    const { queue, received } = makeFakeQueue();
+    const calls: { sql: string; context: SimpleQueryContext }[] = [];
+    const handleSimpleQuery: SimpleQueryHandler = async (sql, context) => {
+      if (!sql.startsWith('CREATE DATABASE')) return { handled: false };
+
+      calls.push({ sql, context });
+
+      const outcome: SimpleQueryOutcome = { handled: true, commandTag: 'CREATE DATABASE' };
+
+      return outcome;
+    };
+    const port = startServer(async () => allow(queue, ''), handleSimpleQuery);
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    client.send(buildQueryMessage('CREATE DATABASE app'));
+
+    const messages = await client.waitForMessages(3);
+
+    expect(messages.map(message => message.tag)).toEqual(['Z', 'C', 'Z']);
+    expect(new TextDecoder().decode(messages[1]?.body ?? new Uint8Array())).toBe(
+      'CREATE DATABASE\0'
+    );
+    expect(messages[2]?.body[0]).toBe(0x49);
+    expect(calls).toEqual([
+      {
+        sql: 'CREATE DATABASE app',
+        context: {
+          instanceKey: 'p1/inst',
+          database: 'postgres',
+          transactionStatus: 'I',
+        },
+      },
+    ]);
+    expect(received.some(entry => entry.includes('CREATE DATABASE'))).toBe(false);
+
+    client.send(buildQueryMessage('SELECT 1'));
+
+    await client.waitForMessages(4);
+
+    expect(received.some(entry => entry.includes('SELECT 1'))).toBe(true);
+
+    client.close();
+  });
+
+  test('aborts an open transaction when a simple-query statement fails, and keeps the socket open', async () => {
+    const received: string[] = [];
+    const queue = {
+      enqueue: async (
+        _connectionId: string,
+        bytes: Uint8Array,
+        onData: (data: Uint8Array) => void
+      ) => {
+        const text = new TextDecoder().decode(bytes).replace(/\0/g, '·');
+
+        received.push(text);
+        const status = text.includes('1/0') ? 0x45 : 0x54;
+
+        onData(buildTaggedMessage('Z', new Uint8Array([status])));
+      },
+      detach: async () => {},
+    };
+    const handleSimpleQuery: SimpleQueryHandler = async sql => {
+      if (!sql.startsWith('CREATE DATABASE')) return { handled: false };
+
+      return {
+        handled: true,
+        error: {
+          sqlState: '25001',
+          message: 'CREATE DATABASE cannot run inside a transaction block',
+        },
+      };
+    };
+    const port = startServer(
+      async () => allow(queue as unknown as PGliteSessionQueue, ''),
+      handleSimpleQuery
+    );
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    client.send(buildQueryMessage('CREATE DATABASE app'));
+
+    const messages = await client.waitForMessages(3);
+    const error = messages[1];
+    const ready = messages[2];
+
+    expect(error?.tag).toBe('E');
+    expect(readErrorFields(error?.body ?? new Uint8Array())).toMatchObject({
+      S: 'ERROR',
+      V: 'ERROR',
+      C: '25001',
+    });
+    expect(ready?.tag).toBe('Z');
+    expect(ready?.body[0]).toBe(0x45);
+    expect(received.some(entry => entry.includes('1/0'))).toBe(true);
+    expect(received.some(entry => entry.includes('CREATE DATABASE'))).toBe(false);
+
+    client.send(buildQueryMessage('SELECT 1'));
+
+    await client.waitForMessages(4);
+
+    expect(received.some(entry => entry.includes('SELECT 1'))).toBe(true);
+
+    client.close();
+  });
+
+  test('forwards a CREATE DATABASE that ends an extended-query batch', async () => {
+    const { queue, received } = makeFakeQueue();
+    let calls = 0;
+    const handleSimpleQuery: SimpleQueryHandler = async () => {
+      calls += 1;
+
+      return { handled: true, commandTag: 'CREATE DATABASE' };
+    };
+    const port = startServer(async () => allow(queue, ''), handleSimpleQuery);
+    const client = await TestClient.connect(port);
+
+    client.send(buildStartupPacket({ user: 'postgres', database: 'postgres' }));
+    await client.waitForMessages(1);
+
+    client.send(buildTaggedMessage('P', buildParseBody('', 'SELECT 1')));
+    client.send(buildQueryMessage('CREATE DATABASE app'));
+
+    await client.waitForMessages(2);
+
+    expect(calls).toBe(0);
+    expect(received.some(entry => entry.includes('CREATE DATABASE'))).toBe(true);
+
+    client.close();
   });
 
   test('listen is idempotent so a second call cannot double-bind the port', async () => {

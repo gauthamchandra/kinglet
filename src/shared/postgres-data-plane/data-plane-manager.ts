@@ -19,7 +19,7 @@ import type { PostgresDataPlaneDirectoryName, PostgresDataPlaneProductLabel } fr
 import type { DatabaseKey } from './pglite-database-manager.ts';
 import { PGliteDatabaseManager } from './pglite-database-manager.ts';
 
-import type { ConnectionResolution } from './postgres-wire-server.ts';
+import type { ConnectionResolution, SimpleQueryHandler } from './postgres-wire-server.ts';
 import {
   PostgresWireServer,
   SQLSTATE_INVALID_AUTHORIZATION_SPECIFICATION,
@@ -103,7 +103,7 @@ function buildInstanceKey(project: string, instance: string): string {
  * location/cluster/instance that way), so only the first slash separates
  * project from instance.
  */
-function splitInstanceKey(key: string): { project: string; instance: string } {
+export function splitInstanceKey(key: string): { project: string; instance: string } {
   const separator = key.indexOf('/');
 
   if (separator < 0) return { project: key, instance: '' };
@@ -115,6 +115,7 @@ export class DataPlaneManager implements PostgresDataPlane {
   private logger: Logger;
   private options: DataPlaneManagerOptions;
   private lookupUser: LookupUser;
+  private handleSimpleQuery: SimpleQueryHandler | undefined;
   private databaseManager: PGliteDatabaseManager;
   private portAllocator: PortAllocator;
   private instances = new Map<string, RunningInstance>();
@@ -127,10 +128,16 @@ export class DataPlaneManager implements PostgresDataPlane {
   // closes it. Serialising per instance is what makes each of these atomic.
   private instanceMutex = new ResourceMutex();
 
-  constructor(logger: Logger, options: DataPlaneManagerOptions, lookupUser: LookupUser) {
+  constructor(
+    logger: Logger,
+    options: DataPlaneManagerOptions,
+    lookupUser: LookupUser,
+    handleSimpleQuery?: SimpleQueryHandler
+  ) {
     this.logger = logger;
     this.options = options;
     this.lookupUser = lookupUser;
+    this.handleSimpleQuery = handleSimpleQuery;
     this.databaseManager = new PGliteDatabaseManager({
       storageType: options.storageType,
       sqlitePath: options.sqlitePath,
@@ -228,6 +235,7 @@ export class DataPlaneManager implements PostgresDataPlane {
           instanceKey,
           port,
           resolveConnection: (key, database, user) => this.resolveConnection(key, database, user),
+          ...(this.handleSimpleQuery ? { handleSimpleQuery: this.handleSimpleQuery } : {}),
         });
 
         wireServer.listen();
