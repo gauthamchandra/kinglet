@@ -341,9 +341,7 @@ async function main(): Promise<void> {
     }
 
     if (secretsService) {
-      for (const def of secretsService.getGrpcServices()) {
-        grpcServer.registerService(def);
-      }
+      grpcServer.registerService(secretsService.getGrpcService());
     }
 
     await grpcServer.start();

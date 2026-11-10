@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { SecretManagerError } from './types.ts';
 import { decodeSecretSpecInput, encodeSecret, GRPC_DIALECT, REST_DIALECT } from './wire.ts';
 
 describe('secret wire dialects', () => {
@@ -29,6 +30,15 @@ describe('secret wire dialects', () => {
     expect(grpc).toEqual(rest);
     expect(rest.expiration).toEqual({ kind: 'ttl', ttl: { seconds: 3600, nanos: 0 } });
     expect(rest.versionAliases).toEqual({ current: 1 });
+  });
+
+  test('rejects a ttl whose seconds do not fit in a JavaScript integer', () => {
+    expect(() =>
+      decodeSecretSpecInput(
+        { replication: { automatic: {} }, ttl: '100000000000000000000s' },
+        REST_DIALECT
+      )
+    ).toThrow(SecretManagerError);
   });
 
   test('encodes timestamps as RFC3339 on REST and seconds on gRPC', () => {

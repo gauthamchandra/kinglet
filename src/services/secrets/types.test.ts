@@ -68,6 +68,24 @@ describe('resolveSpec', () => {
     expect(resolved.expireTime).toBe('2026-01-01T01:00:00.000Z');
     expect(resolved.replication?.kind).toBe('automatic');
   });
+
+  test('rejects a ttl that would overflow the timestamp', () => {
+    const name = secretNameIn({ project: 'p', location: null }, 'db');
+    const error = capture(() =>
+      resolveSpec(
+        name,
+        {
+          ...emptyInput(),
+          replication: { kind: 'automatic', cmek: null },
+          expiration: { kind: 'ttl', ttl: { seconds: 8_640_000_000_000, nanos: 0 } },
+        },
+        NOW
+      )
+    );
+
+    expect(error).toBeInstanceOf(SecretManagerError);
+    expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
+  });
 });
 
 function emptyInput() {

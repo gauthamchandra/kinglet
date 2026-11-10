@@ -4,8 +4,6 @@
 
 export const SECRETS_TABLE = 'secretmanager_secrets';
 
-export const VERSIONS_TABLE = 'secretmanager_versions';
-
 const SECRET_ID_PATTERN = /^[A-Za-z0-9_-]{1,255}$/;
 
 const ALIAS_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,62}$/;
@@ -274,8 +272,13 @@ function expireTimeFrom(expiration: Expiration, now: Date): string | null {
   }
 
   const millis = expiration.ttl.seconds * 1000 + Math.floor(expiration.ttl.nanos / 1_000_000);
+  const at = now.getTime() + millis;
 
-  return new Date(now.getTime() + millis).toISOString();
+  if (!Number.isFinite(at) || Math.abs(at) > 8_640_000_000_000_000) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'ttl is out of range');
+  }
+
+  return new Date(at).toISOString();
 }
 
 function requiredSegment(value: string | undefined, field: string): string {

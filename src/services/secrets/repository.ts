@@ -5,7 +5,7 @@
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { TableSchema } from '@/core/storage/types.ts';
 import type { SecretSpec } from './types.ts';
-import { SECRETS_TABLE, VERSIONS_TABLE } from './types.ts';
+import { SECRETS_TABLE } from './types.ts';
 
 export interface StoredSecret {
   readonly name: string;
@@ -42,30 +42,6 @@ const secretsTableSchema: TableSchema = {
   timestamps: true,
 };
 
-const versionsTableSchema: TableSchema = {
-  name: VERSIONS_TABLE,
-  columns: [
-    { name: 'secretName', type: 'string' },
-    { name: 'number', type: 'number' },
-    { name: 'state', type: 'string' },
-    { name: 'createTime', type: 'string' },
-    { name: 'destroyTime', type: 'string', nullable: true },
-    { name: 'generation', type: 'number' },
-    { name: 'payloadData', type: 'string', nullable: true },
-    { name: 'payloadCrc32c', type: 'string', nullable: true },
-    { name: 'clientSpecifiedPayloadChecksum', type: 'number' },
-  ],
-  indexes: [
-    {
-      name: 'idx_secretmanager_versions_secret_number',
-      columns: ['secretName', 'number'],
-      unique: true,
-    },
-    { name: 'idx_secretmanager_versions_secret', columns: ['secretName'] },
-  ],
-  timestamps: true,
-};
-
 export class SecretRepository {
   private readonly storage: StorageManager;
 
@@ -75,7 +51,6 @@ export class SecretRepository {
 
   async initialize(): Promise<void> {
     await this.storage.createTable(SECRETS_TABLE, secretsTableSchema);
-    await this.storage.createTable(VERSIONS_TABLE, versionsTableSchema);
   }
 
   async getByName(name: string): Promise<StoredSecret | null> {

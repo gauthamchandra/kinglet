@@ -47,20 +47,18 @@ export class SecretsService {
     return buildRestRoutes(this.managerOrThrow(), this.responseUtils, this.formatter);
   }
 
-  getGrpcServices(): GrpcServiceDefinition[] {
+  getGrpcService(): GrpcServiceDefinition {
     const protoPath = getProtoPath('cloud/secretmanager/v1/service.proto');
     const protoRoot = path.resolve(path.dirname(protoPath), '../../../..');
 
-    return [
-      {
-        name: 'SecretManager',
-        protoPath,
-        packageName: 'google.cloud.secretmanager.v1',
-        serviceName: 'SecretManagerService',
-        implementation: buildGrpcImplementation(this.managerOrThrow()),
-        includeDirs: [protoRoot],
-      },
-    ];
+    return {
+      name: 'SecretManager',
+      protoPath,
+      packageName: 'google.cloud.secretmanager.v1',
+      serviceName: 'SecretManagerService',
+      implementation: buildGrpcImplementation(this.managerOrThrow()),
+      includeDirs: [protoRoot],
+    };
   }
 
   start(): void {

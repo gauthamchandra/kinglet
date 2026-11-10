@@ -38,9 +38,7 @@ beforeAll(async () => {
 
   grpcServer = new GrpcServer({ httpPort, grpcPort, maxConnections: 100 }, logger);
 
-  for (const definition of service.getGrpcServices()) {
-    grpcServer.registerService(definition);
-  }
+  grpcServer.registerService(service.getGrpcService());
 
   await grpcServer.start();
 

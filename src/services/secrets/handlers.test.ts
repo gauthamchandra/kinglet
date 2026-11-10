@@ -61,6 +61,30 @@ describe('secret manager RPC table', () => {
     expect(response.status).toBe(501);
     expect(body.error.status).toBe('UNIMPLEMENTED');
   });
+
+  test('an oversized ttl is INVALID_ARGUMENT rather than a server error', async () => {
+    const { routes } = await harness();
+    const router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of routes) {
+      router.addRoute(route);
+    }
+
+    const response = await router.route(
+      new Request('http://localhost/v1/projects/demo/secrets?secretId=huge', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          replication: { automatic: {} },
+          ttl: '100000000000000000000s',
+        }),
+      })
+    );
+    const body = (await response.json()) as { error: { status: string } };
+
+    expect(response.status).toBe(400);
+    expect(body.error.status).toBe('INVALID_ARGUMENT');
+  });
 });
 
 describe('SecretsService lifecycle', () => {

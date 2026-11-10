@@ -455,10 +455,10 @@ function readRestDuration(value: unknown): Duration | null {
 
   const fraction = match[2] ?? '';
 
-  return {
-    seconds: Number(match[1]),
-    nanos: fraction.length === 0 ? 0 : Number(fraction.padEnd(9, '0')),
-  };
+  return checkedDuration(
+    Number(match[1]),
+    fraction.length === 0 ? 0 : Number(fraction.padEnd(9, '0'))
+  );
 }
 
 function readProtoDuration(value: unknown): Duration | null {
@@ -472,6 +472,20 @@ function readProtoDuration(value: unknown): Duration | null {
 
   if (seconds === 0 && nanos === 0) {
     return null;
+  }
+
+  return checkedDuration(seconds, nanos);
+}
+
+function checkedDuration(seconds: number, nanos: number): Duration {
+  if (
+    !Number.isSafeInteger(seconds) ||
+    seconds < 0 ||
+    !Number.isInteger(nanos) ||
+    nanos < 0 ||
+    nanos > 999_999_999
+  ) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'duration is out of range');
   }
 
   return { seconds, nanos };

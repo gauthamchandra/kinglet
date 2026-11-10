@@ -162,7 +162,7 @@ describe('Secret Manager E2E: official client over REST', () => {
     const [got] = await client.getSecret({ name: created.name });
 
     expect(got.etag).toBe('1');
-    expect(got.replication?.automatic).toBeDefined();
+    expect(got.replication?.automatic).toEqual({ customerManagedEncryption: null });
     expect(got.secretType).toBe('ACCESS_KEY');
 
     const iam = client.getIamPolicy({ resource: created.name });
