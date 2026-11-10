@@ -8,8 +8,11 @@
  * pg_trgm` work later without the emulator having to rebuild the database
  * underneath a live connection.
  *
- * <p>This is every contrib extension `@electric-sql/pglite` ships plus
- * pgvector, which is a separate package because of its size.
+ * <p>The default set is the contrib modules imported below, plus pgvector and
+ * pg_partman. PGlite ships further contrib modules that stay unloaded.
+ * pgvector and pg_partman are separate packages. pg_partman is the SQL-only
+ * build: it has no background worker, so maintenance stays a call the user
+ * makes.
  *
  * <p>PostGIS is available behind each service's `*_POSTGIS` opt-in flag. It is
  * not in the default set because it significantly increases boot time.
@@ -44,6 +47,7 @@ import { tsm_system_rows } from '@electric-sql/pglite/contrib/tsm_system_rows';
 import { tsm_system_time } from '@electric-sql/pglite/contrib/tsm_system_time';
 import { unaccent } from '@electric-sql/pglite/contrib/unaccent';
 import { uuid_ossp } from '@electric-sql/pglite/contrib/uuid_ossp';
+import { pg_partman } from '@electric-sql/pglite-pg_partman';
 import { vector } from '@electric-sql/pglite-pgvector';
 import { postgis } from '@electric-sql/pglite-postgis';
 
@@ -65,6 +69,7 @@ export const DATA_PLANE_EXTENSIONS = {
   lo,
   ltree,
   moddatetime,
+  pg_partman,
   pg_trgm,
   pgcrypto,
   seg,

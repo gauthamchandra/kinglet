@@ -204,6 +204,48 @@ describe('Cloud SQL data plane e2e', () => {
     );
   });
 
+  test('pg_partman can be created and maintained over the wire', async () => {
+    const sql = connect(instancePort, 'postgres');
+
+    await sql.unsafe('CREATE SCHEMA IF NOT EXISTS partman');
+    await sql.unsafe('CREATE EXTENSION pg_partman SCHEMA partman');
+    await sql.unsafe(`
+      CREATE TABLE partman_events (
+        id int,
+        created_at timestamptz NOT NULL
+      ) PARTITION BY RANGE (created_at)
+    `);
+    await sql.unsafe(
+      "SELECT partman.create_parent('public.partman_events', 'created_at', '1 day')"
+    );
+
+    const before = await rows(
+      sql,
+      "SELECT count(*)::int AS n FROM partman.show_partitions('public.partman_events')"
+    );
+
+    await sql.unsafe(
+      `UPDATE partman.part_config
+       SET premake = 6, infinite_time_partitions = true
+       WHERE parent_table = 'public.partman_events'`
+    );
+    await sql.unsafe("SELECT partman.run_maintenance('public.partman_events')");
+
+    const after = await rows(
+      sql,
+      "SELECT count(*)::int AS n FROM partman.show_partitions('public.partman_events')"
+    );
+
+    const beforeCount = Number(before[0]?.n);
+    const afterCount = Number(after[0]?.n);
+
+    expect(beforeCount).toBeGreaterThan(0);
+    expect(afterCount).toBeGreaterThan(beforeCount);
+
+    // Cloud SQL's documented scheduler calls the procedure, not the function.
+    await sql.unsafe('CALL partman.run_maintenance_proc()');
+  });
+
   test(
     'a database added through the admin API is reachable and isolated',
     async () => {
