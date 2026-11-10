@@ -13,6 +13,7 @@ import type {
   PostgresDataPlane,
 } from './data-plane-manager.ts';
 import { DataPlaneManager, DisabledDataPlane } from './data-plane-manager.ts';
+import type { PgStatStatementsOptions } from './pg-stat-statements.ts';
 
 export type ProductDataPlaneOptions = Omit<
   DataPlaneManagerOptions,
@@ -65,7 +66,7 @@ export function createPostgresDataPlane(
 }
 
 /** An instance the control plane still has rows for, keyed the way its data plane knows it. */
-export interface PersistedInstance {
+export interface PersistedInstance extends PgStatStatementsOptions {
   /** Resource name, for the log line when the restart fails. */
   name: string;
   project: string;
@@ -91,7 +92,9 @@ export async function restartPersistedInstances(
 ): Promise<void> {
   for (const instance of instances) {
     try {
-      await dataPlane.startInstance(instance.project, instance.instance, instance.databases);
+      await dataPlane.startInstance(instance.project, instance.instance, instance.databases, {
+        pgStatStatements: instance.pgStatStatements,
+      });
     } catch (error) {
       logger.warn(
         `Failed to restart the data plane for ${product.productLabel} instance ${instance.name}, leaving it degraded`,

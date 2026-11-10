@@ -28,7 +28,7 @@ describe('SqlAdminService', () => {
     test('starts an instance endpoint with its default database on create', async () => {
       await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
 
-      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres']);
+      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres:pgStatStatements=off']);
     });
 
     test('deletes the instance data when the instance is deleted', async () => {
@@ -43,7 +43,7 @@ describe('SqlAdminService', () => {
       await service.createDatabase('p1', 'db-a', { name: 'app' });
       await service.restartInstance('p1', 'db-a');
 
-      expect(dataPlane.calls).toContain('restart:p1/db-a:app,postgres');
+      expect(dataPlane.calls).toContain('restart:p1/db-a:app,postgres:pgStatStatements=off');
     });
 
     test('opens and drops a database alongside its control-plane record', async () => {
@@ -53,6 +53,67 @@ describe('SqlAdminService', () => {
 
       expect(dataPlane.calls).toContain('openDatabase:p1/db-a/app');
       expect(dataPlane.calls).toContain('dropDatabase:p1/db-a/app');
+    });
+
+    test('starts with pg_stat_statements when the enable flag is on', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: {
+          databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'on' }],
+        },
+      });
+
+      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres:pgStatStatements=on']);
+    });
+
+    test('treats any value other than on as disabled', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: {
+          databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'off' }],
+        },
+      });
+
+      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres:pgStatStatements=off']);
+    });
+
+    test('a patch that flips the enable flag restarts with the new value', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+
+      await service.patchInstance('p1', 'db-a', {
+        settings: {
+          databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'on' }],
+        },
+      });
+
+      expect(dataPlane.calls).toContain('restart:p1/db-a:postgres:pgStatStatements=on');
+    });
+
+    test('a patch that leaves the enable flag alone does not restart', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      dataPlane.calls.length = 0;
+
+      await service.patchInstance('p1', 'db-a', {
+        settings: { availabilityType: 'ZONAL' },
+      });
+
+      expect(dataPlane.calls.some(call => call.startsWith('restart:'))).toBe(false);
+    });
+
+    test('restart keeps the stored enable flag', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: {
+          databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'on' }],
+        },
+      });
+
+      await service.restartInstance('p1', 'db-a');
+
+      expect(dataPlane.calls).toContain('restart:p1/db-a:postgres:pgStatStatements=on');
     });
 
     /**
@@ -170,7 +231,7 @@ describe('SqlAdminService', () => {
       expect(instance.kind).toBe('sql#instance');
       expect(instance.state).toBe('RUNNABLE');
       expect(instance.connectionName).toBe('p1:us-central1:db-a');
-      expect(instance.settings.settingsVersion).toBe(1);
+      expect(instance.settings.settingsVersion).toBe('1');
     });
 
     test('getInstance throws NOT_FOUND for a missing instance', async () => {
@@ -212,7 +273,7 @@ describe('SqlAdminService', () => {
 
       const instance = await service.getInstance('p1', 'db-a');
 
-      expect(instance.settings.settingsVersion).toBe(2);
+      expect(instance.settings.settingsVersion).toBe('2');
       expect(instance.settings.tier).toBe('db-custom-2-8192');
     });
 
@@ -233,7 +294,7 @@ describe('SqlAdminService', () => {
 
       expect(instance.settings.tier).toBe('db-custom-2-8192');
       expect(instance.settings.availabilityType).toBeUndefined();
-      expect(instance.settings.settingsVersion).toBe(2);
+      expect(instance.settings.settingsVersion).toBe('2');
     });
 
     test('update (PUT) without a settings object throws INVALID_ARGUMENT', async () => {
@@ -260,7 +321,24 @@ describe('SqlAdminService', () => {
 
       expect(instance.settings.tier).toBe('db-custom-1-3840');
       expect(instance.settings.availabilityType).toBe('ZONAL');
-      expect(instance.settings.settingsVersion).toBe(2);
+      expect(instance.settings.settingsVersion).toBe('2');
+    });
+
+    test('patch accepts the string settingsVersion the API returns', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { tier: 'db-custom-1-3840' },
+      });
+
+      await service.patchInstance('p1', 'db-a', {
+        settings: { settingsVersion: '1', availabilityType: 'ZONAL' },
+      });
+
+      const instance = await service.getInstance('p1', 'db-a');
+
+      expect(instance.settings.availabilityType).toBe('ZONAL');
+      expect(instance.settings.settingsVersion).toBe('2');
     });
 
     test('patch with a mismatched settingsVersion throws FAILED_PRECONDITION', async () => {
@@ -351,7 +429,7 @@ describe('SqlAdminService', () => {
 
       const instance = await service.getInstance('p1', 'db-a');
 
-      expect(instance.settings.settingsVersion).toBe(1);
+      expect(instance.settings.settingsVersion).toBe('1');
       expect(instance.settings.tier).toBe('db-custom-1-3840');
     });
   });

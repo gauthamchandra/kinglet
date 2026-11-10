@@ -14,6 +14,7 @@ import type {
   RouteResponse,
 } from '@/core/gateway/request-router.ts';
 import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
+import { ALLOYDB_PG_STAT_STATEMENTS_FLAG } from '@/shared/postgres-data-plane/pg-stat-statements.ts';
 import { parseOffsetToken, parsePageSize } from '@/shared/utils/pagination.ts';
 import { readQueryString } from './handler-support.ts';
 
@@ -58,6 +59,15 @@ const SUPPORTED_DATABASE_FLAGS: readonly Record<string, unknown>[] = [
     valueType: 'STRING',
     acceptsMultipleValues: false,
     requiresDbRestart: false,
+    scope: 'DATABASE',
+    stringRestrictions: { allowedValues: ['on', 'off'] },
+    supportedDbVersions: ['POSTGRES_14', 'POSTGRES_15', 'POSTGRES_16', 'POSTGRES_17'],
+  },
+  {
+    flagName: ALLOYDB_PG_STAT_STATEMENTS_FLAG,
+    valueType: 'STRING',
+    acceptsMultipleValues: false,
+    requiresDbRestart: true,
     scope: 'DATABASE',
     stringRestrictions: { allowedValues: ['on', 'off'] },
     supportedDbVersions: ['POSTGRES_14', 'POSTGRES_15', 'POSTGRES_16', 'POSTGRES_17'],

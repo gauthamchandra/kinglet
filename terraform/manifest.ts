@@ -70,6 +70,12 @@ export const TERRAFORM_VALIDATION_CASES = [
     targets: ['google_network_security_address_group.cloud_armor'],
   },
   {
+    id: 'cloudsql',
+    description: 'Cloud SQL Postgres instance with pg_stat_statements enabled',
+    services: ['cloudsql'],
+    targets: ['google_sql_database_instance.app'],
+  },
+  {
     id: 'alloydb',
     description: 'AlloyDB cluster, primary, read pool, users, and on-demand backup',
     services: ['alloydb'],

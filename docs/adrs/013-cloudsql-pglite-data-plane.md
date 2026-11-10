@@ -56,9 +56,13 @@ exactly as ADR-003 describes.
   actually persisting, which it did not until the storage fix in this same
   change — every storage type had been running in-memory.
 - **Extensions are fixed at build time.** PGlite links each extension's wasm
-  when the database is created, so every database is built with all 26 contrib
-  extensions PGlite ships plus pgvector. That is what lets `CREATE EXTENSION
-  pg_trgm` work later without rebuilding the database under a live connection.
+  when the database is created, so every database is built with the contrib
+  extensions PGlite ships (except `pg_stat_statements`) plus pgvector. That is
+  what lets `CREATE EXTENSION pg_trgm` work later without rebuilding the
+  database under a live connection. `pg_stat_statements` is a preload module
+  and is linked only when `cloudsql.enable_pg_stat_statements` or
+  `alloydb.enable_pg_stat_statements` is `on`. Flipping that flag restarts the
+  instance's data plane so the databases are opened again with the new set.
   pgvector is a separate package peer-pinned to the same PGlite version, so the
   two move together.
 - The data plane is **on by default**, for ADR-007's reason: an instance a
@@ -177,7 +181,14 @@ answers "does my Terraform work?" but not "does my application code work?".
   to link PostGIS into every database for that product. It is off by default
   because it significantly increases per-database boot time. Existing on-disk
   databases gain PostGIS after a restart with the flag enabled — no recreation
-  needed. All 26 contrib extensions plus pgvector are always available.
+  needed. The default contrib set plus pgvector are always available.
+  `pg_stat_statements` is not: it is linked only while the instance's enable
+  flag is `on`, and the extension version is the one PGlite ships rather than
+  the per-`databaseVersion` version Cloud SQL documents. `pg_stat_statements.*`
+  tuning flags are stored and echoed but not applied as GUCs. Turning the flag
+  off after `CREATE EXTENSION pg_stat_statements` fails to boot that database,
+  and the data plane stays down until the flag is turned back on. The files
+  are left in place, so turning it back on recovers them.
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
   nothing restricts who may connect beyond user and password.
 - `User.type` values other than `BUILT_IN` behave like `BUILT_IN`.

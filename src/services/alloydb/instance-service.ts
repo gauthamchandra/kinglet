@@ -6,6 +6,7 @@ import type { OperationResponse, OperationsStore } from '@/core/operations/opera
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { alloyDbPgStatStatementsEnabled } from '@/shared/postgres-data-plane/pg-stat-statements.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
@@ -145,7 +146,9 @@ export class InstanceService {
     // has seen the create succeed can connect immediately — the same contract
     // Cloud SQL's data plane gives (see ADR-013).
     try {
-      await this.dataPlane.startInstance(project, dataPlaneKey, [DEFAULT_DATABASE_NAME]);
+      await this.dataPlane.startInstance(project, dataPlaneKey, [DEFAULT_DATABASE_NAME], {
+        pgStatStatements: alloyDbPgStatStatementsEnabled(parseSpecJson(record.spec).databaseFlags),
+      });
     } catch (error) {
       // An instance whose rows exist but whose endpoint never came up would
       // advertise an address nothing answers on. Undoing the rows keeps create
@@ -302,7 +305,11 @@ export class InstanceService {
       );
     }
 
+    const previous = alloyDbPgStatStatementsEnabled(parseSpecJson(existing.spec).databaseFlags);
     const updates = buildInstanceUpdates(existing, body, options.updateMask);
+    const next = alloyDbPgStatStatementsEnabled(
+      updates.spec == null ? undefined : parseSpecJson(updates.spec).databaseFlags
+    );
 
     if (typeof updates.instanceType === 'string') {
       await this.validateInstancePlacement(
@@ -316,9 +323,22 @@ export class InstanceService {
 
     const updated: InstanceRecord = { ...existing, ...updates };
 
-    return this.completeMutation(project, location, name, 'update', options, updated, () =>
-      this.instances.update(name, updates)
-    );
+    return this.completeMutation(project, location, name, 'update', options, updated, async () => {
+      const applied = await this.instances.update(name, updates);
+
+      // The preload flag takes effect only on a fresh PGlite. Other field
+      // updates leave the running databases alone.
+      if (applied && previous !== next) {
+        await this.dataPlane.restartInstance(
+          project,
+          buildDataPlaneInstanceKey(location, clusterId, instanceId),
+          [DEFAULT_DATABASE_NAME],
+          { pgStatStatements: next }
+        );
+      }
+
+      return applied;
+    });
   }
 
   async deleteInstance(

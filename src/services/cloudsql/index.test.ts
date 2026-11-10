@@ -78,10 +78,13 @@ describe('CloudSqlService', () => {
     expect(() => service.getRoutes()).toThrow('not initialized');
   });
 
-  test('initialize wires the 20 GCP routes', async () => {
+  test('initialize wires the 20 GCP routes and the v1beta4 aliases', async () => {
     await service.initialize();
 
-    expect(service.getRoutes()).toHaveLength(20);
+    const routes = service.getRoutes();
+
+    expect(routes).toHaveLength(40);
+    expect(routes.some(route => route.path.startsWith('/sql/v1beta4/'))).toBe(true);
   });
 
   test('a created instance is retrievable through the routes', async () => {
@@ -229,6 +232,52 @@ describe('CloudSqlService', () => {
       expect(rebound.port).toBe(PORT_RANGE_START);
 
       rebound.stop(true);
+    });
+
+    test('rehydrate links pg_stat_statements when the stored flag is on', async () => {
+      const first = await startService();
+      const insertRoute = first.getRoutes().find(route => route.id === 'cloudsql.instances.insert');
+
+      const response = await insertRoute?.handler(
+        makeRequest({
+          method: 'POST',
+          params: { project: 'p1' },
+          body: {
+            name: 'db-a',
+            databaseVersion: 'POSTGRES_16',
+            rootPassword: 's3cret',
+            settings: {
+              databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'on' }],
+            },
+          },
+        }),
+        makeContext()
+      );
+
+      expect(response?.status).toBe(200);
+      await first.stop();
+
+      const revived = await startService();
+      const port = revived.getDataPlanePort('p1', 'db-a');
+
+      expect(port).not.toBeNull();
+
+      const client = new Bun.SQL({
+        url: `postgres://postgres:s3cret@127.0.0.1:${port}/postgres`,
+        tls: false,
+        max: 1,
+      });
+
+      await client.unsafe('CREATE EXTENSION pg_stat_statements');
+
+      const rows: Record<string, unknown>[] = await client.unsafe(
+        "SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements'"
+      );
+
+      expect(rows.map(row => ({ ...row }))).toEqual([{ extname: 'pg_stat_statements' }]);
+
+      await client.end();
+      await revived.stop();
     });
 
     test('brings persisted instances back up on a fresh service over the same storage', async () => {

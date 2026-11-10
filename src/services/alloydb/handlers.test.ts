@@ -799,8 +799,12 @@ describe('location handlers', () => {
     expect(flags.length).toBeGreaterThan(0);
 
     const maxConnections = flags.find(flag => flag.flagName === 'max_connections');
+    const pgStatStatements = flags.find(
+      flag => flag.flagName === 'alloydb.enable_pg_stat_statements'
+    );
 
     expect(maxConnections?.valueType).toBe('INTEGER');
+    expect(pgStatStatements?.valueType).toBe('STRING');
     expect(maxConnections?.name).toBe('projects/p/locations/us-central1/flags/max_connections');
   });
 });

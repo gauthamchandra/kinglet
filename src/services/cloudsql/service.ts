@@ -5,6 +5,7 @@
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { cloudSqlPgStatStatementsEnabled } from '@/shared/postgres-data-plane/pg-stat-statements.ts';
 import type { CloudSqlRepository } from './repository.ts';
 import type {
   DatabaseInstanceResponse,
@@ -136,7 +137,9 @@ export class SqlAdminService {
     // has seen the create succeed can connect immediately — the same contract
     // Memorystore's data plane gives (see ADR-007).
     try {
-      await this.dataPlane.startInstance(project, request.name, ['postgres']);
+      await this.dataPlane.startInstance(project, request.name, ['postgres'], {
+        pgStatStatements: cloudSqlPgStatStatementsEnabled(userSettings),
+      });
     } catch (error) {
       // An instance whose rows exist but whose endpoint never came up would
       // advertise an address nothing answers on, and no later call would ever
@@ -207,14 +210,15 @@ export class SqlAdminService {
   }
 
   async restartInstance(project: string, name: string): Promise<OperationResponse> {
-    await this.requireInstance(project, name);
+    const record = await this.requireInstance(project, name);
 
     const databases = await this.repo.listDatabases(project, name);
 
     await this.dataPlane.restartInstance(
       project,
       name,
-      databases.map(database => database.name)
+      databases.map(database => database.name),
+      { pgStatStatements: cloudSqlPgStatStatementsEnabled(JSON.parse(record.settings)) }
     );
 
     return this.recordOperation(project, OperationType.RESTART, name);
@@ -555,13 +559,16 @@ export class SqlAdminService {
     }
 
     const existing = await this.requireInstance(project, name);
+    const previous = cloudSqlPgStatStatementsEnabled(JSON.parse(existing.settings));
     const incoming = parsed.data.settings ?? {};
     const { settingsVersion, kind, ...userSettings } = incoming as Record<string, unknown>;
 
     void kind;
 
     if (requireVersion || settingsVersion != null) {
-      const provided = typeof settingsVersion === 'number' ? settingsVersion : Number.NaN;
+      // The response encodes this int64 as a string, and clients send that
+      // string back. A bare number is what our own tests and older callers use.
+      const provided = parseSettingsVersion(settingsVersion);
 
       if (provided !== existing.settingsVersion) {
         throw new SqlAdminError(
@@ -576,11 +583,25 @@ export class SqlAdminService {
     const nextSettings = requireVersion
       ? userSettings
       : { ...(JSON.parse(existing.settings) as Record<string, unknown>), ...userSettings };
+    const next = cloudSqlPgStatStatementsEnabled(nextSettings);
 
     await this.repo.updateInstance(project, name, {
       settings: JSON.stringify(nextSettings),
       settingsVersion: existing.settingsVersion + 1,
     });
+
+    // shared_preload_libraries changes take effect on a restart. Only the
+    // enable flag does that here; other settings stay metadata.
+    if (previous !== next) {
+      const databases = await this.repo.listDatabases(project, name);
+
+      await this.dataPlane.restartInstance(
+        project,
+        name,
+        databases.map(database => database.name),
+        { pgStatStatements: next }
+      );
+    }
 
     return this.recordOperation(project, OperationType.UPDATE, name);
   }
@@ -611,4 +632,12 @@ export class SqlAdminService {
 
     return operationRecordToResponse(record);
   }
+}
+
+function parseSettingsVersion(value: unknown): number {
+  if (typeof value === 'number') return value;
+
+  if (typeof value === 'string' && value.trim() !== '') return Number(value);
+
+  return Number.NaN;
 }

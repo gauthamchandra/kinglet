@@ -8,14 +8,18 @@
  * pg_trgm` work later without the emulator having to rebuild the database
  * underneath a live connection.
  *
- * <p>This is every contrib extension `@electric-sql/pglite` ships plus
- * pgvector, which is a separate package because of its size.
+ * <p>This is the contrib set linked into every database — every
+ * `@electric-sql/pglite` contrib module that does not have to be preloaded,
+ * plus pgvector, which is a separate package because of its size.
+ * `pg_stat_statements` is withheld: PGlite preloads it and it records every
+ * statement, so it is linked only when that instance's enable flag is on.
  *
  * <p>PostGIS is available behind each service's `*_POSTGIS` opt-in flag. It is
  * not in the default set because it significantly increases boot time.
  *
- * <p>Every extension here is linked into every database, so anything added
- * to this set is a boot-time cost paid per database.
+ * <p>Every extension in {@link DATA_PLANE_EXTENSIONS} is linked into every
+ * database, so anything added to that set is a boot-time cost paid per
+ * database. `pg_stat_statements` and PostGIS are paid only when requested.
  */
 
 import { amcheck } from '@electric-sql/pglite/contrib/amcheck';
@@ -35,6 +39,7 @@ import { isn } from '@electric-sql/pglite/contrib/isn';
 import { lo } from '@electric-sql/pglite/contrib/lo';
 import { ltree } from '@electric-sql/pglite/contrib/ltree';
 import { moddatetime } from '@electric-sql/pglite/contrib/moddatetime';
+import { pg_stat_statements } from '@electric-sql/pglite/contrib/pg_stat_statements';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { seg } from '@electric-sql/pglite/contrib/seg';
@@ -79,12 +84,17 @@ export const DATA_PLANE_EXTENSIONS = {
 
 export interface ResolveExtensionsOptions {
   postgis: boolean;
+  pgStatStatements: boolean;
 }
 
 export function resolveExtensions(options: ResolveExtensionsOptions) {
-  if (options.postgis) {
-    return { ...DATA_PLANE_EXTENSIONS, postgis };
+  if (!options.postgis && !options.pgStatStatements) {
+    return DATA_PLANE_EXTENSIONS;
   }
 
-  return DATA_PLANE_EXTENSIONS;
+  return {
+    ...DATA_PLANE_EXTENSIONS,
+    ...(options.postgis ? { postgis } : {}),
+    ...(options.pgStatStatements ? { pg_stat_statements } : {}),
+  };
 }

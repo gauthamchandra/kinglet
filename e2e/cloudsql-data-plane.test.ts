@@ -88,7 +88,7 @@ async function expectOk(response: Response, what: string): Promise<void> {
   throw new Error(`${what} failed with ${response.status}: ${body}`);
 }
 
-async function createInstance(name: string): Promise<void> {
+async function createInstance(name: string, settings?: Record<string, unknown>): Promise<void> {
   const response = await fetch(emulatorUrl(`/v1/projects/${PROJECT}/instances`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -96,6 +96,7 @@ async function createInstance(name: string): Promise<void> {
       name,
       databaseVersion: 'POSTGRES_16',
       rootPassword: ROOT_PASSWORD,
+      ...(settings === undefined ? {} : { settings }),
     }),
   });
 
@@ -185,6 +186,66 @@ describe('Cloud SQL data plane e2e', () => {
       { id: 2, total: 20.25 },
     ]);
   });
+
+  test('pg_stat_statements is unavailable until its database flag is on', async () => {
+    const sql = connect(instancePort, 'postgres');
+
+    await expect(run(sql, 'CREATE EXTENSION pg_stat_statements')).rejects.toThrow(
+      /pg_stat_statements/
+    );
+  });
+
+  test(
+    'pg_stat_statements tracks statements when the flag is set at create',
+    async () => {
+      await createInstance('stats-db', {
+        databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'on' }],
+      });
+
+      const sql = connect(portOf('stats-db'), 'postgres');
+
+      await sql.unsafe('CREATE EXTENSION pg_stat_statements');
+      await sql.unsafe("SELECT 'kinglet_pgss_probe'");
+
+      const tracked = await rows(
+        sql,
+        "SELECT count(*)::int AS n FROM pg_stat_statements WHERE query = 'SELECT $1'"
+      );
+
+      expect(Number(tracked[0]?.n)).toBeGreaterThan(0);
+    },
+    INSTANCE_BOOT_TIMEOUT_MS
+  );
+
+  test(
+    'turning the flag on restarts in place and then allows CREATE EXTENSION',
+    async () => {
+      await createInstance('stats-patch');
+
+      const before = portOf('stats-patch');
+      const response = await fetch(emulatorUrl(`/v1/projects/${PROJECT}/instances/stats-patch`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: {
+            databaseFlags: [{ name: 'cloudsql.enable_pg_stat_statements', value: 'on' }],
+          },
+        }),
+      });
+
+      await expectOk(response, 'Patching stats-patch database flags');
+      expect(portOf('stats-patch')).toBe(before);
+
+      const sql = connect(before, 'postgres');
+
+      await sql.unsafe('CREATE EXTENSION pg_stat_statements');
+
+      expect(
+        await rows(sql, "SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements'")
+      ).toEqual([{ extname: 'pg_stat_statements' }]);
+    },
+    INSTANCE_BOOT_TIMEOUT_MS
+  );
 
   test('contrib and pgvector extensions can be created', async () => {
     const sql = connect(instancePort, 'postgres');

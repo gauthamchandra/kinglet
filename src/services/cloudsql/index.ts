@@ -19,6 +19,7 @@ import {
   createPostgresDataPlane,
   restartPersistedInstances,
 } from '@/shared/postgres-data-plane/host.ts';
+import { cloudSqlPgStatStatementsEnabled } from '@/shared/postgres-data-plane/pg-stat-statements.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { CloudSqlHandlers } from './handlers.ts';
 import { CloudSqlRepository } from './repository.ts';
@@ -85,7 +86,18 @@ export class CloudSqlService {
       throw new Error('CloudSqlService not initialized. Call initialize() first.');
     }
 
-    return this.handlers.getRoutes();
+    const routes = this.handlers.getRoutes();
+
+    // HashiCorp's SQL client calls /sql/v1beta4 even when sql_custom_endpoint
+    // points at kinglet. The v1 routes stay the ones @googleapis/sqladmin uses.
+    return [
+      ...routes,
+      ...routes.map(route => ({
+        ...route,
+        id: `${route.id}:v1beta4`,
+        path: route.path.replace(/^\/v1(?=\/)/, '/sql/v1beta4'),
+      })),
+    ];
   }
 
   start(): void {
@@ -125,6 +137,7 @@ export class CloudSqlService {
         project: instance.project,
         instance: instance.name,
         databases: databases.map(database => database.name),
+        pgStatStatements: cloudSqlPgStatStatementsEnabled(JSON.parse(instance.settings)),
       });
     }
 
