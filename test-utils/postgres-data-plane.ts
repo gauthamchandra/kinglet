@@ -8,7 +8,10 @@
  * drifted apart on `getPort` before it moved here.
  */
 
-import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type {
+  DataPlaneLogin,
+  PostgresDataPlane,
+} from '@/shared/postgres-data-plane/data-plane-manager.ts';
 
 export interface RecordingDataPlaneOptions {
   /** Port reported by {@link RecordingDataPlane.startInstance}. */
@@ -66,6 +69,14 @@ export class RecordingDataPlane implements PostgresDataPlane {
 
   async stopAll(): Promise<void> {
     this.calls.push('stopAll');
+  }
+
+  async upsertUser(project: string, instance: string, user: DataPlaneLogin): Promise<void> {
+    this.calls.push(`upsertUser:${project}/${instance}:${user.name}`);
+  }
+
+  async dropUser(project: string, instance: string, userName: string): Promise<void> {
+    this.calls.push(`dropUser:${project}/${instance}:${userName}`);
   }
 
   getPort(): number | null {

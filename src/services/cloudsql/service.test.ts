@@ -28,7 +28,7 @@ describe('SqlAdminService', () => {
     test('starts an instance endpoint with its default database on create', async () => {
       await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
 
-      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres']);
+      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres', 'upsertUser:p1/db-a:postgres']);
     });
 
     test('deletes the instance data when the instance is deleted', async () => {
@@ -424,6 +424,43 @@ describe('SqlAdminService', () => {
   describe('users', () => {
     beforeEach(async () => {
       await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+    });
+
+    test('createUser upserts the role after the user row is stored', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+
+      const start = dataPlane.calls.indexOf('start:p1/db-a:postgres');
+      const upsert = dataPlane.calls.indexOf('upsertUser:p1/db-a:app');
+
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(upsert).toBeGreaterThan(start);
+    });
+
+    test('updateUser upserts the role only when the password changes', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      dataPlane.calls.length = 0;
+
+      await service.updateUser('p1', 'db-a', 'app', undefined, { name: 'app' });
+
+      expect(dataPlane.calls).not.toContain('upsertUser:p1/db-a:app');
+
+      await service.updateUser('p1', 'db-a', 'app', undefined, {
+        name: 'app',
+        password: 'next',
+      });
+
+      expect(dataPlane.calls).toContain('upsertUser:p1/db-a:app');
+    });
+
+    test('deleteUser drops the role after the user row is gone', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+
+      await service.deleteUser('p1', 'db-a', 'app');
+
+      const drop = dataPlane.calls.indexOf('dropUser:p1/db-a:app');
+
+      expect(drop).toBeGreaterThanOrEqual(0);
+      expect(await repo.getUser('p1', 'db-a', 'app')).toBeNull();
     });
 
     test('createUser returns CREATE_USER op and user appears without password', async () => {

@@ -80,6 +80,7 @@ export const DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOption
   storageType: 'sqlite',
   sqlitePath: './data/emulator.db',
   postgis: false,
+  postgresBinDir: undefined,
 };
 
 export class AlloyDbService {

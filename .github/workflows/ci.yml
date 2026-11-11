@@ -183,7 +183,7 @@ jobs:
           . /etc/os-release
           echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends valkey-server postgresql-18
+          sudo apt-get install -y --no-install-recommends valkey-server postgresql-18 postgresql-18-pgvector postgresql-18-postgis-3
           valkey-server --version
           /usr/lib/postgresql/18/bin/postgres --version
 
@@ -238,7 +238,7 @@ jobs:
           . /etc/os-release
           echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends valkey-server postgresql-18
+          sudo apt-get install -y --no-install-recommends valkey-server postgresql-18 postgresql-18-pgvector postgresql-18-postgis-3
           valkey-server --version
           /usr/lib/postgresql/18/bin/postgres --version
 

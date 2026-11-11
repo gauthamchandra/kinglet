@@ -106,18 +106,19 @@ const ServicesConfigSchema = z.object({
           // On by default, for the same reason Memorystore's is: a Cloud SQL
           // instance no Postgres client can connect to is metadata, not
           // emulation. Set CLOUDSQL_DATA_PLANE=false for the metadata-only
-          // control plane. Unlike Memorystore there is no external binary to
-          // be missing — PGlite ships as an npm dependency — so this default
-          // cannot fail on a host that simply lacks postgres.
+          // control plane. The server binary comes from PostgreSQL on PATH,
+          // or CLOUDSQL_POSTGRES_BIN_DIR. A missing binary degrades that
+          // instance to metadata-only and logs once.
           enabled: z.boolean().default(true),
           // Starts at the well-known Postgres port so a single emulated
           // instance is reachable at the address every Postgres client and
           // connection string already assumes: 127.0.0.1:5432.
           portRangeStart: z.number().int().min(1).max(65535).default(5432),
           portRangeEnd: z.number().int().min(1).max(65535).default(5531),
-          // Off by default because it significantly increases boot time.
-          // Set CLOUDSQL_POSTGIS=true to opt in.
+          // Still accepted. Cloud SQL no longer consults it: PostGIS is a
+          // package on the server, not a link-time flag. AlloyDB still does.
           postgis: z.boolean().default(false),
+          postgresBinDir: z.string().min(1).optional(),
         })
         .refine(dataPlane => dataPlane.portRangeStart <= dataPlane.portRangeEnd, {
           message: 'portRangeStart must be less than or equal to portRangeEnd',
@@ -281,6 +282,7 @@ export const EnvConfigSchema = z.object({
     .string()
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
+  CLOUDSQL_POSTGRES_BIN_DIR: z.string().min(1).optional(),
   ENABLE_COMPUTE: z
     .string()
     .transform(val => val.toLowerCase() === 'true')
@@ -374,6 +376,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.CLOUDSQL_PORT_RANGE_START !== undefined ||
     env.CLOUDSQL_PORT_RANGE_END !== undefined ||
     env.CLOUDSQL_POSTGIS !== undefined ||
+    env.CLOUDSQL_POSTGRES_BIN_DIR !== undefined ||
     env.ENABLE_COMPUTE !== undefined ||
     env.COMPUTE_LISTENER_PORT !== undefined ||
     env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined ||
@@ -502,7 +505,8 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       env.CLOUDSQL_DATA_PLANE !== undefined ||
       env.CLOUDSQL_PORT_RANGE_START !== undefined ||
       env.CLOUDSQL_PORT_RANGE_END !== undefined ||
-      env.CLOUDSQL_POSTGIS !== undefined
+      env.CLOUDSQL_POSTGIS !== undefined ||
+      env.CLOUDSQL_POSTGRES_BIN_DIR !== undefined
     ) {
       if (!config.services.cloudsql) config.services.cloudsql = {};
 
@@ -518,6 +522,9 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
         dataPlane.portRangeEnd = env.CLOUDSQL_PORT_RANGE_END;
       }
       if (env.CLOUDSQL_POSTGIS !== undefined) dataPlane.postgis = env.CLOUDSQL_POSTGIS;
+      if (env.CLOUDSQL_POSTGRES_BIN_DIR !== undefined) {
+        dataPlane.postgresBinDir = env.CLOUDSQL_POSTGRES_BIN_DIR;
+      }
 
       config.services.cloudsql.dataPlane = dataPlane;
     }

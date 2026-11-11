@@ -27,7 +27,9 @@ part application code actually depends on.
   Kinglet does not sit in the protocol path.
 - `pg_hba` allows `trust` only for `kinglet_admin` on the instance's private
   Unix socket. TCP uses `scram-sha-256`. Kinglet issues DDL that mirrors the
-  Google control plane, and nothing more.
+  Google control plane, and nothing more. `CREATE/ALTER ROLE ... PASSWORD`
+  does not accept a parameter through Bun.SQL, so the password is inlined
+  with standard literal quoting and that statement is never logged.
 - `google_sql_*` and `google_alloydb_*` Terraform resources produce that DDL
   by calling the admin API. A `postgresql` provider resource connects as a
   normal user of the instance, the same way it would against Cloud SQL.
@@ -104,16 +106,17 @@ opt-in, not the default.
   postmaster (on the order of 30 MB RSS) and about 42 MB of disk.
 - An empty admin-API password cannot mean "connect with no challenge" under
   scram-only TCP the way the PGlite wire server treated it.
-- This record does not itself retarget Cloud SQL or AlloyDB, and it does not
-  change the image. Both follow. Until they do, PGlite is still what a
-  running emulator serves.
+- Cloud SQL instances are real Postgres servers. AlloyDB is still PGlite.
+  The image does not yet install the server packages, so a stock `docker run`
+  of kinglet has no `postgres` binary and Cloud SQL degrades to metadata-only
+  until that install lands. Nested containers are not that install.
 
 ## Follow-ups
 
 Not built here:
 
-- Point Cloud SQL, then AlloyDB, at these servers. Keep the admin API's
-  response shapes, operations, and errors.
+- Point AlloyDB at these servers. Cloud SQL already uses them. Keep the
+  admin API's response shapes, operations, and errors.
 - Install `postgresql-18`, `pg_partman`, PostGIS, and pgvector in the
   kinglet image, and confirm `setpriv` is present for the root drop.
 - Optional per-instance container mode, off unless an image is configured.

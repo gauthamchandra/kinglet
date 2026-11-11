@@ -46,6 +46,33 @@ export interface PostgresDataPlane {
   dropDatabase(project: string, instance: string, database: string): Promise<void>;
   stopAll(): Promise<void>;
   getPort(project: string, instance: string): number | null;
+  /**
+   * Create or alter the role a control-plane user logs in as.
+   * A null or empty password is NOLOGIN. No-op when the instance has no server.
+   */
+  upsertUser(project: string, instance: string, user: DataPlaneLogin): Promise<void>;
+  /** Remove a role from every database in the instance. No-op when nothing is running. */
+  dropUser(project: string, instance: string, userName: string): Promise<void>;
+}
+
+/**
+ * A control-plane user projected onto a Postgres role.
+ *
+ * <p>Distinct from {@link DataPlaneUser}, which is the password record the
+ * PGlite wire server still reads. AlloyDB keeps that path until it moves.
+ */
+export interface DataPlaneLogin {
+  name: string;
+  /** null or '' is NOLOGIN. Anything else is LOGIN with that password. */
+  password: string | null;
+  /** Granted to the role. Cloud SQL passes `cloudsqlsuperuser`. */
+  memberOf: string[];
+  /**
+   * The seeded `postgres` user is a superuser so it can `CREATE EXTENSION`
+   * for vector, PostGIS, and pg_stat_statements. Those control files are not
+   * `trusted`, and membership in `cloudsqlsuperuser` does not confer it.
+   */
+  superuser?: boolean;
 }
 
 /** The user record the data plane needs to authenticate a connection. */
@@ -338,6 +365,10 @@ export class DataPlaneManager implements PostgresDataPlane {
     await this.databaseManager.closeAll();
   }
 
+  async upsertUser(_project: string, _instance: string, _user: DataPlaneLogin): Promise<void> {}
+
+  async dropUser(_project: string, _instance: string, _userName: string): Promise<void> {}
+
   getPort(project: string, instance: string): number | null {
     return this.instances.get(buildInstanceKey(project, instance))?.port ?? null;
   }
@@ -423,6 +454,10 @@ export class DisabledDataPlane implements PostgresDataPlane {
   async dropDatabase(): Promise<void> {}
 
   async stopAll(): Promise<void> {}
+
+  async upsertUser(): Promise<void> {}
+
+  async dropUser(): Promise<void> {}
 
   getPort(): number | null {
     return null;

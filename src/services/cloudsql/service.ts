@@ -3,7 +3,10 @@
  */
 
 import type { BaseRecord } from '@/core/storage/types.ts';
-import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type {
+  DataPlaneLogin,
+  PostgresDataPlane,
+} from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import type { CloudSqlRepository } from './repository.ts';
 import type {
@@ -58,6 +61,16 @@ export interface ListInstancesResponse {
 export interface ListOperationsResponse {
   items: OperationResponse[];
   nextPageToken?: string | undefined;
+}
+
+/** Cloud SQL users are roles in `cloudsqlsuperuser`. An empty password cannot log in. */
+export function cloudSqlLogin(name: string, password: string): DataPlaneLogin {
+  return {
+    name,
+    password: password.length > 0 ? password : null,
+    memberOf: ['cloudsqlsuperuser'],
+    superuser: name === 'postgres',
+  };
 }
 
 export class SqlAdminService {
@@ -137,6 +150,11 @@ export class SqlAdminService {
     // Memorystore's data plane gives (see ADR-007).
     try {
       await this.dataPlane.startInstance(project, request.name, ['postgres']);
+      await this.dataPlane.upsertUser(
+        project,
+        request.name,
+        cloudSqlLogin('postgres', request.rootPassword ?? '')
+      );
     } catch (error) {
       // An instance whose rows exist but whose endpoint never came up would
       // advertise an address nothing answers on, and no later call would ever
@@ -414,6 +432,12 @@ export class SqlAdminService {
       password: request.password,
     });
 
+    await this.dataPlane.upsertUser(
+      project,
+      instance,
+      cloudSqlLogin(request.name, request.password)
+    );
+
     return this.recordOperation(project, OperationType.CREATE_USER, instance);
   }
 
@@ -490,6 +514,14 @@ export class SqlAdminService {
       );
     }
 
+    if (updates.password !== undefined) {
+      await this.dataPlane.upsertUser(
+        project,
+        instance,
+        cloudSqlLogin(targetName, updates.password)
+      );
+    }
+
     return this.recordOperation(project, OperationType.UPDATE_USER, instance);
   }
 
@@ -516,6 +548,8 @@ export class SqlAdminService {
         `User ${name} does not exist on instance ${project}/${instance}`
       );
     }
+
+    await this.dataPlane.dropUser(project, instance, name);
 
     return this.recordOperation(project, OperationType.DELETE_USER, instance);
   }
