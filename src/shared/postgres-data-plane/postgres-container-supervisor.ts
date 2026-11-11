@@ -295,7 +295,7 @@ export class PostgresContainerSupervisor implements PostgresSupervisor {
     do {
       await this.assertContainerRunning(name);
 
-      const statement = `ALTER ROLE kinglet_admin PASSWORD ${quoteLiteral(password)}`;
+      const statement = `ALTER ROLE kinglet_admin PASSWORD ${quoteLiteral(password)};`;
       const result = await this.runner(
         ['docker', 'exec', '-i', name, 'psql', '-U', 'kinglet_admin', '-d', 'template1'],
         statement

@@ -259,7 +259,11 @@ describe('PostgresContainerSupervisor.start', () => {
       expect(passwordCall).toContain('-i');
       expect(passwordCall).toContain('psql');
       expect(passwordCall?.some(arg => arg.includes('PASSWORD'))).toBe(false);
-      expect(stdin.some(line => line.startsWith('ALTER ROLE kinglet_admin PASSWORD'))).toBe(true);
+      expect(
+        stdin.some(
+          line => line.startsWith('ALTER ROLE kinglet_admin PASSWORD') && line.endsWith(';')
+        )
+      ).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
