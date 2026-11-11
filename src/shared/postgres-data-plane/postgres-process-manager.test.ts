@@ -262,6 +262,59 @@ describe('Postgres process cleanup', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test('preloads pg_stat_statements from the selected server when PATH pg_config cannot see it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-share-'));
+    const binDir = join(root, 'bin');
+    const pathDir = join(root, 'path');
+    const serverShare = join(root, 'server-share');
+    const pathShare = join(root, 'path-share');
+    const templateDir = join(root, 'template');
+
+    await mkdir(binDir);
+    await mkdir(pathDir);
+    await mkdir(join(serverShare, 'extension'), { recursive: true });
+    await mkdir(pathShare);
+    await Bun.write(join(serverShare, 'extension', 'pg_stat_statements.control'), '');
+    await Bun.write(join(binDir, 'initdb'), '#!/bin/sh\nexit 0\n');
+    await Bun.write(join(binDir, 'postgres'), '#!/bin/sh\nexit 0\n');
+    await Bun.write(
+      join(binDir, 'pg_config'),
+      `#!/bin/sh\nif [ "$1" = "--sharedir" ]; then printf '%s\\n' '${serverShare}'; exit 0; fi\nexit 1\n`
+    );
+    await Bun.write(
+      join(pathDir, 'pg_config'),
+      `#!/bin/sh\nif [ "$1" = "--sharedir" ]; then printf '%s\\n' '${pathShare}'; exit 0; fi\nexit 1\n`
+    );
+
+    for (const file of ['initdb', 'postgres', 'pg_config']) {
+      await chmod(join(binDir, file), 0o755);
+    }
+
+    await chmod(join(pathDir, 'pg_config'), 0o755);
+
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'), {
+      binDir,
+      templateDir,
+    });
+    const originalWhich = Bun.which.bind(Bun);
+    const which = spyOn(Bun, 'which').mockImplementation((command: string) => {
+      if (command === 'pg_config') return join(pathDir, 'pg_config');
+
+      return originalWhich(command);
+    });
+
+    try {
+      await manager.ensureInitialized(join(root, 'data'));
+
+      const config = await Bun.file(join(templateDir, 'postgresql.auto.conf')).text();
+
+      expect(config).toContain("shared_preload_libraries='pg_stat_statements'");
+    } finally {
+      which.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe.skipIf(!isRealPostgresAvailable)('PostgresProcessManager', () => {
