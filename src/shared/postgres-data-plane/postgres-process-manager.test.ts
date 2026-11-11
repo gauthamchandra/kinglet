@@ -153,6 +153,58 @@ describe('Postgres process cleanup', () => {
     }
   });
 
+  test('does not remove a live server socket directory before the pid is identified', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-live-'));
+    const dataDir = resolve(join(root, 'data'));
+
+    await mkdir(dataDir);
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
+    const created = manager as unknown as {
+      createSocketDirectory(directory: string): Promise<string>;
+    };
+    const bystander = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)']);
+
+    try {
+      const socketDir = await created.createSocketDirectory(dataDir);
+
+      await Bun.write(join(dataDir, 'postmaster.pid'), `${bystander.pid}\n${dataDir}\n`);
+      await manager.stop(dataDir);
+      expect((await lstat(socketDir)).isDirectory()).toBe(true);
+    } finally {
+      bystander.kill();
+      await bystander.exited;
+      await rm(join(dataDir, 'postmaster.pid'), { force: true });
+      await manager.stop(dataDir);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a start that refuses an unconfirmed pid leaves that server socket directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-unknown-'));
+    const dataDir = resolve(join(root, 'data'));
+
+    await mkdir(dataDir);
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
+    const created = manager as unknown as {
+      createSocketDirectory(directory: string): Promise<string>;
+    };
+    const postmaster = Bun.spawn(['bash', '-c', 'exec -a postgres sleep 30']);
+
+    try {
+      const socketDir = await created.createSocketDirectory(dataDir);
+
+      await Bun.write(join(dataDir, 'postmaster.pid'), `${postmaster.pid}\n${dataDir}\n`);
+      await expect(manager.start(dataDir, 1)).rejects.toThrow(/could not be confirmed/);
+      expect((await lstat(socketDir)).isDirectory()).toBe(true);
+    } finally {
+      postmaster.kill();
+      await postmaster.exited;
+      await rm(join(dataDir, 'postmaster.pid'), { force: true });
+      await manager.stop(dataDir);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('does not signal a live process that is not the postmaster', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-pid-'));
     const dataDir = join(root, 'data');

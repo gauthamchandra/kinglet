@@ -111,7 +111,15 @@ export class PostgresProcessManager {
       child.kill('SIGINT');
       await child.exited;
       this.servers.delete(dataDir);
+      await this.removeSocketDirectory(dataDir);
+
+      return;
     }
+
+    // start() calls stop() before it knows whether the recorded pid can be
+    // signaled. Deleting the sockets first strands a postmaster this manager
+    // then refuses to stop, and the next start hits the same pid check.
+    if (await this.recordedPidIsAlive(dataDir)) return;
 
     await this.removeSocketDirectory(dataDir);
   }
@@ -451,6 +459,18 @@ export class PostgresProcessManager {
     }
 
     throw new Error('Postgres did not become ready before the readiness timeout');
+  }
+
+  private async recordedPidIsAlive(dataDir: string): Promise<boolean> {
+    const pidFile = Bun.file(join(dataDir, 'postmaster.pid'));
+
+    if (!(await pidFile.exists())) return false;
+
+    const pid = Number((await pidFile.text()).split('\n')[0]);
+
+    if (!Number.isSafeInteger(pid) || pid <= 1) return false;
+
+    return this.isPidAlive(pid);
   }
 
   private isPidAlive(pid: number): boolean {
