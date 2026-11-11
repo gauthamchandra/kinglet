@@ -6,10 +6,7 @@ import { SQL } from 'bun';
 import { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
 import { isRealPostgresAvailable } from '../../../test-utils/postgres.ts';
-import {
-  PostgresProcessManager,
-  preferredServerBinDir,
-} from './postgres-process-manager.ts';
+import { PostgresProcessManager, preferredServerBinDir } from './postgres-process-manager.ts';
 
 describe('preferredServerBinDir', () => {
   test('prefers the newest server over an older pg_config bindir', () => {
