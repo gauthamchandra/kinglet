@@ -509,7 +509,8 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       env.CLOUDSQL_PORT_RANGE_START !== undefined ||
       env.CLOUDSQL_PORT_RANGE_END !== undefined ||
       env.CLOUDSQL_POSTGIS !== undefined ||
-      env.CLOUDSQL_POSTGRES_BIN_DIR !== undefined
+      env.CLOUDSQL_POSTGRES_BIN_DIR !== undefined ||
+      env.CLOUDSQL_POSTGRES_IMAGE !== undefined
     ) {
       if (!config.services.cloudsql) config.services.cloudsql = {};
 
