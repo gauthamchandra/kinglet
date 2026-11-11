@@ -9,6 +9,7 @@ import type {
 } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { isReservedCloudSqlRole } from '@/shared/postgres-data-plane/postgres-server-data-plane.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { CloudSqlRepository } from './repository.ts';
 import type {
   DatabaseInstanceResponse,
@@ -77,6 +78,13 @@ export function cloudSqlLogin(name: string, password: string): DataPlaneLogin {
 export class SqlAdminService {
   private repo: CloudSqlRepository;
   private dataPlane: PostgresDataPlane;
+  /**
+   * Restart reads every saved user, then applies each role on its own.
+   * User inserts, updates, and deletes take this same lock, including the
+   * admin row, so a restore cannot write a password or role that row no
+   * longer has. The data-plane lock only covers one role call.
+   */
+  private readonly userChanges = new ResourceMutex();
 
   constructor(repo: CloudSqlRepository, dataPlane: PostgresDataPlane = new DisabledDataPlane()) {
     this.repo = repo;
@@ -230,23 +238,25 @@ export class SqlAdminService {
 
     const databases = await this.repo.listDatabases(project, name);
 
-    try {
-      await this.dataPlane.restartInstance(
-        project,
-        name,
-        databases.map(database => database.name)
-      );
+    return this.withUserChanges(project, name, async () => {
+      try {
+        await this.dataPlane.restartInstance(
+          project,
+          name,
+          databases.map(database => database.name)
+        );
 
-      // Startup rehydration already does this. An explicit restart has to as
-      // well, so a cluster created again comes back with the roles sqlite has.
-      for (const user of await this.repo.listUsers(project, name)) {
-        await this.dataPlane.upsertUser(project, name, cloudSqlLogin(user.name, user.password));
+        // Startup rehydration already does this. An explicit restart has to as
+        // well, so a cluster created again comes back with the roles sqlite has.
+        for (const user of await this.repo.listUsers(project, name)) {
+          await this.dataPlane.upsertUser(project, name, cloudSqlLogin(user.name, user.password));
+        }
+      } catch (error) {
+        throw this.dataPlaneError(error, `Failed to restart ${project}/${name}`);
       }
-    } catch (error) {
-      throw this.dataPlaneError(error, `Failed to restart ${project}/${name}`);
-    }
 
-    return this.recordOperation(project, OperationType.RESTART, name);
+      return this.recordOperation(project, OperationType.RESTART, name);
+    });
   }
 
   // ── Operations ──
@@ -438,45 +448,48 @@ export class SqlAdminService {
     }
 
     const request = parsed.data;
-    const sameName = (await this.repo.listUsers(project, instance)).some(
-      user => user.name === request.name
-    );
-
-    if (sameName) {
-      throw new SqlAdminError(
-        'ALREADY_EXISTS',
-        `User ${request.name} already exists on instance ${project}/${instance}`
-      );
-    }
 
     if (isReservedCloudSqlRole(request.name)) {
       throw new SqlAdminError('INVALID_ARGUMENT', `User name ${request.name} is reserved`);
     }
 
-    await this.repo.createUser({
-      project,
-      instance,
-      name: request.name,
-      host: request.host,
-      type: request.type,
-      password: request.password,
-    });
+    return this.withUserChanges(project, instance, async () => {
+      const sameName = (await this.repo.listUsers(project, instance)).some(
+        user => user.name === request.name
+      );
 
-    try {
-      await this.dataPlane.upsertUser(
+      if (sameName) {
+        throw new SqlAdminError(
+          'ALREADY_EXISTS',
+          `User ${request.name} already exists on instance ${project}/${instance}`
+        );
+      }
+
+      await this.repo.createUser({
         project,
         instance,
-        cloudSqlLogin(request.name, request.password)
-      );
-    } catch (error) {
-      await this.repo.deleteUser(project, instance, request.name, request.host);
-      throw this.dataPlaneError(
-        error,
-        `Failed to create user ${request.name} on ${project}/${instance}`
-      );
-    }
+        name: request.name,
+        host: request.host,
+        type: request.type,
+        password: request.password,
+      });
 
-    return this.recordOperation(project, OperationType.CREATE_USER, instance);
+      try {
+        await this.dataPlane.upsertUser(
+          project,
+          instance,
+          cloudSqlLogin(request.name, request.password)
+        );
+      } catch (error) {
+        await this.repo.deleteUser(project, instance, request.name, request.host);
+        throw this.dataPlaneError(
+          error,
+          `Failed to create user ${request.name} on ${project}/${instance}`
+        );
+      }
+
+      return this.recordOperation(project, OperationType.CREATE_USER, instance);
+    });
   }
 
   async getUser(
@@ -547,35 +560,43 @@ export class SqlAdminService {
     // to the request body's host field.
     const targetHost = host ?? parsed.data.host;
 
-    const previous = await this.repo.getUser(project, instance, targetName, targetHost);
-    const updated = await this.repo.updateUser(project, instance, targetName, targetHost, updates);
-
-    if (!updated || previous == null) {
-      throw new SqlAdminError(
-        'NOT_FOUND',
-        `User ${targetName} does not exist on instance ${project}/${instance}`
+    return this.withUserChanges(project, instance, async () => {
+      const previous = await this.repo.getUser(project, instance, targetName, targetHost);
+      const updated = await this.repo.updateUser(
+        project,
+        instance,
+        targetName,
+        targetHost,
+        updates
       );
-    }
 
-    if (updates.password !== undefined) {
-      try {
-        await this.dataPlane.upsertUser(
-          project,
-          instance,
-          cloudSqlLogin(targetName, updates.password)
-        );
-      } catch (error) {
-        await this.repo.updateUser(project, instance, targetName, targetHost, {
-          password: previous.password,
-        });
-        throw this.dataPlaneError(
-          error,
-          `Failed to update user ${targetName} on ${project}/${instance}`
+      if (!updated || previous == null) {
+        throw new SqlAdminError(
+          'NOT_FOUND',
+          `User ${targetName} does not exist on instance ${project}/${instance}`
         );
       }
-    }
 
-    return this.recordOperation(project, OperationType.UPDATE_USER, instance);
+      if (updates.password !== undefined) {
+        try {
+          await this.dataPlane.upsertUser(
+            project,
+            instance,
+            cloudSqlLogin(targetName, updates.password)
+          );
+        } catch (error) {
+          await this.repo.updateUser(project, instance, targetName, targetHost, {
+            password: previous.password,
+          });
+          throw this.dataPlaneError(
+            error,
+            `Failed to update user ${targetName} on ${project}/${instance}`
+          );
+        }
+      }
+
+      return this.recordOperation(project, OperationType.UPDATE_USER, instance);
+    });
   }
 
   async deleteUser(
@@ -593,47 +614,57 @@ export class SqlAdminService {
       );
     }
 
-    const existing = await this.repo.getUser(project, instance, name, host);
+    return this.withUserChanges(project, instance, async () => {
+      const existing = await this.repo.getUser(project, instance, name, host);
 
-    if (!existing) {
-      throw new SqlAdminError(
-        'NOT_FOUND',
-        `User ${name} does not exist on instance ${project}/${instance}`
+      if (!existing) {
+        throw new SqlAdminError(
+          'NOT_FOUND',
+          `User ${name} does not exist on instance ${project}/${instance}`
+        );
+      }
+
+      if (isReservedCloudSqlRole(existing.name)) {
+        throw new SqlAdminError('INVALID_ARGUMENT', `User name ${existing.name} is reserved`);
+      }
+
+      await this.repo.deleteUser(project, instance, name, host);
+
+      const roleStillNeeded = (await this.repo.listUsers(project, instance)).some(
+        user => user.name === name
       );
-    }
 
-    if (isReservedCloudSqlRole(existing.name)) {
-      throw new SqlAdminError('INVALID_ARGUMENT', `User name ${existing.name} is reserved`);
-    }
+      if (roleStillNeeded) {
+        return this.recordOperation(project, OperationType.DELETE_USER, instance);
+      }
 
-    await this.repo.deleteUser(project, instance, name, host);
+      try {
+        await this.dataPlane.dropUser(project, instance, name);
+      } catch (error) {
+        await this.repo.createUser({
+          project: existing.project,
+          instance: existing.instance,
+          name: existing.name,
+          host: existing.host,
+          type: existing.type,
+          password: existing.password,
+        });
+        throw this.dataPlaneError(error, `Failed to delete user ${name} on ${project}/${instance}`);
+      }
 
-    const roleStillNeeded = (await this.repo.listUsers(project, instance)).some(
-      user => user.name === name
-    );
-
-    if (roleStillNeeded) {
       return this.recordOperation(project, OperationType.DELETE_USER, instance);
-    }
-
-    try {
-      await this.dataPlane.dropUser(project, instance, name);
-    } catch (error) {
-      await this.repo.createUser({
-        project: existing.project,
-        instance: existing.instance,
-        name: existing.name,
-        host: existing.host,
-        type: existing.type,
-        password: existing.password,
-      });
-      throw this.dataPlaneError(error, `Failed to delete user ${name} on ${project}/${instance}`);
-    }
-
-    return this.recordOperation(project, OperationType.DELETE_USER, instance);
+    });
   }
 
   // ── Internals ──
+
+  private withUserChanges<T>(
+    project: string,
+    instance: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return this.userChanges.runExclusively(`${project}/${instance}`, operation);
+  }
 
   private dataPlaneError(error: unknown, action: string): SqlAdminError {
     if (error instanceof SqlAdminError) return error;

@@ -4,9 +4,34 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { DataPlaneLogin } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { CloudSqlRepository } from './repository.ts';
 import { SqlAdminError, SqlAdminService } from './service.ts';
+
+/** Pauses the first restore of `app` so a user change can try to land mid-restart. */
+class PausingDataPlane extends RecordingDataPlane {
+  gate: Promise<void> = Promise.resolve();
+  entered: (() => void) | undefined;
+
+  override async upsertUser(
+    project: string,
+    instance: string,
+    user: DataPlaneLogin
+  ): Promise<void> {
+    this.calls.push(`upsertUser:${project}/${instance}:${user.name}:${user.password ?? ''}`);
+
+    if (user.name === 'app' && this.entered != null) {
+      const entered = this.entered;
+
+      this.entered = undefined;
+      entered();
+      await this.gate;
+    }
+
+    if (this.upsertFailure) throw this.upsertFailure;
+  }
+}
 
 describe('SqlAdminService', () => {
   let repo: CloudSqlRepository;
@@ -63,6 +88,79 @@ describe('SqlAdminService', () => {
         'upsertUser:p1/db-a:app',
         'upsertUser:p1/db-a:postgres',
       ]);
+    });
+
+    test('restart does not put back a password a concurrent update replaced', async () => {
+      const pausing = new PausingDataPlane();
+      const racing = new SqlAdminService(repo, pausing);
+
+      await racing.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await racing.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      pausing.calls.length = 0;
+
+      let release = (): void => {};
+      const gate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let markEntered = (): void => {};
+      const entered = new Promise<void>(resolve => {
+        markEntered = resolve;
+      });
+
+      pausing.gate = gate;
+      pausing.entered = markEntered;
+
+      const restarting = racing.restartInstance('p1', 'db-a');
+
+      await entered;
+
+      const updating = racing.updateUser('p1', 'db-a', 'postgres', undefined, {
+        name: 'postgres',
+        password: 'next',
+      });
+
+      await Bun.sleep(20);
+      expect(pausing.calls.some(call => call.endsWith('postgres:next'))).toBe(false);
+      release();
+      await restarting;
+      await updating;
+      expect(pausing.calls.at(-1)).toBe('upsertUser:p1/db-a:postgres:next');
+      expect((await repo.getUser('p1', 'db-a', 'postgres'))?.password).toBe('next');
+    });
+
+    test('restart does not recreate a user deleted while roles are restored', async () => {
+      const pausing = new PausingDataPlane();
+      const racing = new SqlAdminService(repo, pausing);
+
+      await racing.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await racing.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      pausing.calls.length = 0;
+
+      let release = (): void => {};
+      const gate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let markEntered = (): void => {};
+      const entered = new Promise<void>(resolve => {
+        markEntered = resolve;
+      });
+
+      pausing.gate = gate;
+      pausing.entered = markEntered;
+
+      const restarting = racing.restartInstance('p1', 'db-a');
+
+      await entered;
+
+      const deleting = racing.deleteUser('p1', 'db-a', 'postgres');
+
+      await Bun.sleep(20);
+      expect(pausing.calls).not.toContain('dropUser:p1/db-a:postgres');
+      release();
+      await restarting;
+      await deleting;
+      expect(pausing.calls.at(-1)).toBe('dropUser:p1/db-a:postgres');
+      expect(await repo.getUser('p1', 'db-a', 'postgres')).toBeNull();
     });
 
     test('opens and drops a database alongside its control-plane record', async () => {
