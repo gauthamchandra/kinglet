@@ -83,6 +83,28 @@ describe('PostgresServerDataPlane without binaries', () => {
     await expect(plane.startInstance('p', 'b', ['postgres'])).rejects.toThrow('boom');
     expect(start).toHaveBeenCalledTimes(2);
   });
+
+  test('tries the next port when the chosen one cannot be bound', async () => {
+    const starts: number[] = [];
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: null,
+      portRangeStart: 47980,
+      portRangeEnd: 47982,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        start: async (_dataDir, port) => {
+          starts.push(port);
+
+          if (starts.length === 1) throw new Error('Address already in use');
+        },
+      },
+    });
+
+    await expect(plane.startInstance('p', 'a', ['postgres'])).rejects.toThrow('connected');
+    expect(starts).toEqual([47980, 47981]);
+  });
 });
 
 describe('PostgresServerDataPlane directory safety', () => {
@@ -134,6 +156,7 @@ describe('PostgresServerDataPlane directory safety', () => {
 
     try {
       await expect(started.dropDatabase('p', 'inst', 'app')).rejects.toThrow(/not running/);
+      await expect(started.dropUser('p', 'inst', 'app')).rejects.toThrow(/not running/);
       expect(await Bun.file(version).exists()).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });

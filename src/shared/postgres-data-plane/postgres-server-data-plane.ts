@@ -73,6 +73,12 @@ function splitInstanceKey(key: string): { project: string; instance: string } {
   return { project: key.slice(0, separator), instance: key.slice(separator + 1) };
 }
 
+function isAddressInUse(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : '';
+
+  return message.includes('Address already in use') || message.includes('could not bind');
+}
+
 function postgresErrorCode(error: unknown): string | null {
   if (typeof error !== 'object' || error == null) return null;
 
@@ -234,7 +240,13 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
 
       const current = this.running.get(instanceKey(project, instance));
 
-      if (current == null) return;
+      if (current == null) {
+        if (!(await this.clusterExists(project, instance))) return;
+
+        throw new Error(
+          `Cloud SQL instance ${project}/${instance} is not running, so user ${userName} was not dropped`
+        );
+      }
 
       const databases = await this.admin(current, async sql => {
         const existing = await sql`SELECT 1 AS one FROM pg_roles WHERE rolname = ${userName}`;
@@ -305,26 +317,50 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
       this.running.delete(key);
     }
 
-    let port = previous?.port;
-
-    if (port == null) {
-      const allocated = await this.ports.allocate();
-
-      if (allocated == null) {
-        throw new Error(
-          `No free port in the ${this.options.product.productLabel} data plane range ` +
-            `${this.options.portRangeStart}-${this.options.portRangeEnd}`
-        );
-      }
-
-      port = allocated;
-    }
+    const refused: number[] = [];
+    let port: number | undefined;
 
     try {
       await mkdir(dirname(dataDir), { recursive: true });
       await this.refusePgliteLayout(dataDir);
       await this.options.processManager.ensureInitialized(dataDir);
-      await this.options.processManager.start(dataDir, port);
+
+      let preferred = previous?.port;
+
+      while (port == null) {
+        const allocated = await this.ports.allocate(
+          preferred == null ? {} : { preferredPort: preferred }
+        );
+
+        preferred = undefined;
+
+        if (allocated == null) {
+          throw new Error(
+            `No free port in the ${this.options.product.productLabel} data plane range ` +
+              `${this.options.portRangeStart}-${this.options.portRangeEnd}`
+          );
+        }
+
+        port = allocated;
+
+        try {
+          await this.options.processManager.start(dataDir, port);
+          break;
+        } catch (error) {
+          if (!isAddressInUse(error)) throw error;
+
+          // The probe only reaches loopback. Postgres binds every interface, so
+          // a port can look free and still refuse. Keep it claimed until this
+          // attempt finishes, then try the next one.
+          refused.push(port);
+          port = undefined;
+          this.logger.debug(
+            `Port ${allocated} looked free but could not be bound for ${key}, trying the next`,
+            error
+          );
+        }
+      }
+
       const current = { port, dataDir };
 
       await this.ensureSuperuser(current);
@@ -341,9 +377,12 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
       return port;
     } catch (error) {
       await this.options.processManager.stop(dataDir);
-      this.ports.release(port);
+
+      if (port != null) this.ports.release(port);
 
       throw error;
+    } finally {
+      for (const refusedPort of refused) this.ports.release(refusedPort);
     }
   }
 
