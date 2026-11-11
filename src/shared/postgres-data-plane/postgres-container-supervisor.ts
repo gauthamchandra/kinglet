@@ -6,23 +6,21 @@
  * config field) names an image. With no image configured the default
  * {@link PostgresProcessManager} path is used. See ADR-019.
  *
- * <p>Known gap: this supervisor is wired for Cloud SQL only, matching the
- * existing ADR-019 follow-up. AlloyDB continues to use PGlite until it
- * moves to {@code PostgresServerDataPlane}.
+ * <p>Known gap: this supervisor is wired for Cloud SQL only. AlloyDB
+ * continues to use PGlite until it moves to {@code PostgresServerDataPlane}.
  *
- * <p>Known gap: running kinglet as root (uid 0) is not supported by this
- * supervisor. The postgres binary inside the container refuses to start as
- * root, and the host-uid mapping required to hand the data directory over
- * to the container's postgres user is image-specific. Non-root use
- * (the typical developer case) works without restriction.
+ * <p>Known gap: running kinglet as root (uid 0) is not supported. The
+ * postgres binary inside the container refuses to start as root, and the
+ * host uid that should own the data directory depends on the image.
  */
 
-import { createHash } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { chmod, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { SQL } from 'bun';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
-import type { PostgresSupervisor } from './postgres-server-data-plane.ts';
+import { type PostgresSupervisor, quoteLiteral } from './postgres-server-data-plane.ts';
 
 /**
  * A function that runs a docker CLI command and returns the exit code and
@@ -54,6 +52,24 @@ export function containerNameForTest(dataDir: string): string {
   const hash = createHash('sha256').update(resolve(dataDir)).digest('hex').substring(0, 16);
 
   return `kinglet-pg-${hash}`;
+}
+
+const ADMIN_PASSWORD_FILE = 'kinglet-admin.password';
+
+function isMissingContainer(stderr: string): boolean {
+  return /no such container/i.test(stderr);
+}
+
+function readAdminPassword(dataDir: string): string {
+  try {
+    const password = readFileSync(join(dataDir, ADMIN_PASSWORD_FILE), 'utf8').trim();
+
+    if (password.length > 0) return password;
+  } catch {
+    // Missing file, handled below.
+  }
+
+  throw new Error(`Admin password for ${dataDir} is missing`);
 }
 
 function containerUser(): string {
@@ -111,53 +127,55 @@ export class PostgresContainerSupervisor implements PostgresSupervisor {
   async ensureInitialized(dataDir: string): Promise<void> {
     const absDataDir = resolve(dataDir);
 
-    if (await Bun.file(join(absDataDir, 'PG_VERSION')).exists()) return;
+    if (!(await Bun.file(join(absDataDir, 'PG_VERSION')).exists())) {
+      await mkdir(absDataDir, { recursive: true });
 
-    await mkdir(absDataDir, { recursive: true });
+      const { exitCode, stderr } = await this.runner([
+        'docker',
+        'run',
+        '--rm',
+        '--user',
+        containerUser(),
+        '--entrypoint',
+        '',
+        '-v',
+        `${absDataDir}:/var/lib/postgresql/data`,
+        this.options.image,
+        'initdb',
+        '-D',
+        '/var/lib/postgresql/data',
+        '-U',
+        'kinglet_admin',
+        '-A',
+        'trust',
+        '--no-sync',
+        '-E',
+        'UTF8',
+        '--locale=C',
+      ]);
 
-    const { exitCode, stderr } = await this.runner([
-      'docker',
-      'run',
-      '--rm',
-      '--user',
-      containerUser(),
-      '--entrypoint',
-      '',
-      '-v',
-      `${absDataDir}:/var/lib/postgresql/data`,
-      this.options.image,
-      'initdb',
-      '-D',
-      '/var/lib/postgresql/data',
-      '-U',
-      'kinglet_admin',
-      '-A',
-      'trust',
-      '--no-sync',
-      '-E',
-      'UTF8',
-      '--locale=C',
-    ]);
+      if (exitCode !== 0) {
+        throw new Error(
+          `initdb via container image ${this.options.image} failed` +
+            (stderr.length > 0 ? `: ${stderr}` : '')
+        );
+      }
 
-    if (exitCode !== 0) {
-      throw new Error(
-        `initdb via container image ${this.options.image} failed` +
-          (stderr.length > 0 ? `: ${stderr}` : '')
+      await Bun.write(
+        join(absDataDir, 'postgresql.auto.conf'),
+        "password_encryption='scram-sha-256'\n"
       );
     }
 
+    // A cluster created by the process manager trusts kinglet_admin only on
+    // its Unix socket. Rewrite pg_hba every time so a later container start
+    // can set a password over that socket and then require SCRAM on TCP.
+    await this.adminPassword(absDataDir);
     await Bun.write(
       join(absDataDir, 'pg_hba.conf'),
-      // TCP trust for the admin user; scram-sha-256 for all others.
-      // No local/ unix-socket line: the socket stays inside the container.
-      'host all kinglet_admin 0.0.0.0/0 trust\n' +
+      'local all kinglet_admin trust\n' +
         'host all all 0.0.0.0/0 scram-sha-256\n' +
         'host all all ::/0 scram-sha-256\n'
-    );
-
-    await Bun.write(
-      join(absDataDir, 'postgresql.auto.conf'),
-      "password_encryption='scram-sha-256'\n"
     );
   }
 
@@ -199,28 +217,90 @@ export class PostgresContainerSupervisor implements PostgresSupervisor {
       );
     }
 
+    await this.setAdminPassword(absDataDir, name);
     await this.waitForReady(absDataDir, port);
   }
 
   async stop(dataDir: string): Promise<void> {
-    const absDataDir = resolve(dataDir);
-    const name = containerNameForTest(absDataDir);
+    const name = containerNameForTest(resolve(dataDir));
+    const stopped = await this.runner(['docker', 'stop', '-t', '5', name]);
 
-    const { exitCode } = await this.runner(['docker', 'stop', '-t', '5', name]);
+    if (stopped.exitCode !== 0 && !isMissingContainer(stopped.stderr)) {
+      throw new Error(
+        `Failed to stop container ${name}` +
+          (stopped.stderr.length > 0 ? `: ${stopped.stderr}` : '')
+      );
+    }
 
-    if (exitCode !== 0) {
-      // The container may already be stopped or removed; treat as a no-op.
+    if (isMissingContainer(stopped.stderr)) return;
+
+    const removed = await this.runner(['docker', 'rm', '-f', name]);
+
+    if (removed.exitCode !== 0 && !isMissingContainer(removed.stderr)) {
+      throw new Error(
+        `Failed to remove container ${name}` +
+          (removed.stderr.length > 0 ? `: ${removed.stderr}` : '')
+      );
     }
   }
 
-  openAdminConnection(_dataDir: string, port: number, database = 'template1'): SQL {
-    // Container mode uses TCP; the unix socket stays inside the container.
+  openAdminConnection(dataDir: string, port: number, database = 'template1'): SQL {
+    const password = readAdminPassword(resolve(dataDir));
+
     return new SQL({
-      url: `postgres://kinglet_admin:x@127.0.0.1:${port}/${encodeURIComponent(database)}`,
+      url: `postgres://kinglet_admin:${encodeURIComponent(password)}@127.0.0.1:${port}/${encodeURIComponent(database)}`,
       tls: false,
       connectionTimeout: 1,
       max: 1,
     });
+  }
+
+  private async adminPassword(dataDir: string): Promise<string> {
+    const path = join(dataDir, ADMIN_PASSWORD_FILE);
+
+    if (await Bun.file(path).exists()) {
+      return (await Bun.file(path).text()).trim();
+    }
+
+    const password = randomBytes(24).toString('hex');
+
+    await Bun.write(path, `${password}\n`);
+    await chmod(path, 0o600);
+
+    return password;
+  }
+
+  private async setAdminPassword(dataDir: string, name: string): Promise<void> {
+    const password = await this.adminPassword(dataDir);
+    const deadline = Date.now() + (this.options.readinessTimeoutMs ?? 30_000);
+    let stderr = '';
+
+    do {
+      const result = await this.runner([
+        'docker',
+        'exec',
+        name,
+        'psql',
+        '-U',
+        'kinglet_admin',
+        '-d',
+        'template1',
+        '-c',
+        `ALTER ROLE kinglet_admin PASSWORD ${quoteLiteral(password)}`,
+      ]);
+
+      if (result.exitCode === 0) return;
+
+      stderr = result.stderr;
+
+      if ((this.options.readinessTimeoutMs ?? 30_000) === 0) break;
+
+      await Bun.sleep(100);
+    } while (Date.now() < deadline);
+
+    throw new Error(
+      `Failed to set the admin password in ${name}${stderr.length > 0 ? `: ${stderr}` : ''}`
+    );
   }
 
   private async waitForReady(dataDir: string, port: number): Promise<void> {

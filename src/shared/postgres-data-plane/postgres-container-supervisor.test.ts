@@ -87,6 +87,12 @@ describe('PostgresContainerSupervisor.ensureInitialized', () => {
       await supervisor.ensureInitialized(root);
 
       expect(calls).toHaveLength(0);
+
+      const hba = await Bun.file(join(root, 'pg_hba.conf')).text();
+
+      expect(hba).toContain('local all kinglet_admin trust');
+      expect(hba).not.toContain('0.0.0.0/0 trust');
+      expect(await Bun.file(join(root, 'kinglet-admin.password')).exists()).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -188,9 +194,10 @@ describe('PostgresContainerSupervisor.ensureInitialized', () => {
 
       const hba = await Bun.file(join(root, 'pg_hba.conf')).text();
 
-      expect(hba).toContain('kinglet_admin');
-      expect(hba).toContain('trust');
+      expect(hba).toContain('local all kinglet_admin trust');
+      expect(hba).not.toContain('0.0.0.0/0 trust');
       expect(hba).toContain('scram-sha-256');
+      expect(await Bun.file(join(root, 'kinglet-admin.password')).exists()).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -239,6 +246,13 @@ describe('PostgresContainerSupervisor.start', () => {
 
       expect(runCall).toBeDefined();
       expect(runCall).toContain(containerNameForTest(resolve(root)));
+
+      const passwordCall = calls.find(c => c[1] === 'exec');
+
+      expect(passwordCall).toContain('psql');
+      expect(passwordCall?.some(arg => arg.includes('ALTER ROLE kinglet_admin PASSWORD'))).toBe(
+        true
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -353,12 +367,10 @@ describe('PostgresContainerSupervisor.stop', () => {
 
       await supervisor.stop(root);
 
-      expect(calls).toHaveLength(1);
-      const stopCall = calls[0];
-
-      expect(stopCall?.[0]).toBe('docker');
-      expect(stopCall?.[1]).toBe('stop');
-      expect(stopCall).toContain(containerNameForTest(resolve(root)));
+      expect(calls.map(call => call[1])).toEqual(['stop', 'rm']);
+      expect(calls[0]).toContain(containerNameForTest(resolve(root)));
+      expect(calls[1]).toContain('-f');
+      expect(calls[1]).toContain(containerNameForTest(resolve(root)));
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -378,17 +390,42 @@ describe('PostgresContainerSupervisor.stop', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test('throws when docker cannot be reached', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-container-test-'));
+
+    try {
+      const supervisor = new PostgresContainerSupervisor({
+        image: 'postgres:18',
+        runner: failRunner(1, 'Cannot connect to the Docker daemon'),
+      });
+
+      await expect(supervisor.stop(root)).rejects.toThrow(/Failed to stop/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('PostgresContainerSupervisor.openAdminConnection', () => {
-  test('connects over TCP to the published port, not via unix socket', () => {
+  test('requires the password written for the data directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-container-test-'));
     const supervisor = new PostgresContainerSupervisor({
       image: 'postgres:18',
       runner: okRunner(),
     });
-    const sql = supervisor.openAdminConnection('/some/data', 54325);
 
-    expect(sql).toBeDefined();
-    sql.close({ timeout: 0 }).catch(() => {});
+    try {
+      expect(() => supervisor.openAdminConnection(root, 54325)).toThrow(/password/);
+
+      await writeFile(join(root, 'kinglet-admin.password'), 'secret\n');
+
+      const sql = supervisor.openAdminConnection(root, 54325);
+
+      expect(sql).toBeDefined();
+      await sql.close({ timeout: 0 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
