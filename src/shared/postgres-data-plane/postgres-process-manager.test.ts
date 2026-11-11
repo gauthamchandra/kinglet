@@ -183,18 +183,30 @@ describe('Postgres process cleanup', () => {
     const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-unknown-'));
     const dataDir = resolve(join(root, 'data'));
 
+    const bin = join(root, 'bin');
+    const sleep = Bun.which('sleep');
+
     await mkdir(dataDir);
+    await mkdir(bin);
+
+    if (sleep == null) throw new Error('sleep is required to impersonate a postmaster');
+
+    // argv[0] is already postgres. `exec -a` inside bash is still `bash` in
+    // /proc until the exec lands, and that window classifies the pid as other.
+    await symlink(sleep, join(bin, 'postgres'));
     const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
     const created = manager as unknown as {
       createSocketDirectory(directory: string): Promise<string>;
     };
-    const postmaster = Bun.spawn(['bash', '-c', 'exec -a postgres sleep 30']);
+    const postmaster = Bun.spawn([join(bin, 'postgres'), '30']);
 
     try {
       const socketDir = await created.createSocketDirectory(dataDir);
 
       await Bun.write(join(dataDir, 'postmaster.pid'), `${postmaster.pid}\n${dataDir}\n`);
       await expect(manager.start(dataDir, 1)).rejects.toThrow(/could not be confirmed/);
+      expect(postmaster.exitCode).toBeNull();
+      expect(postmaster.signalCode).toBeNull();
       expect((await lstat(socketDir)).isDirectory()).toBe(true);
     } finally {
       postmaster.kill();
