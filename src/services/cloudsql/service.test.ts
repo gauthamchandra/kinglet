@@ -554,6 +554,16 @@ describe('SqlAdminService', () => {
       expect(await repo.getUser('p1', 'db-a', 'app')).toBeNull();
     });
 
+    test('updateUser restores the previous password when the role cannot be changed', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      dataPlane.upsertFailure = new Error('role update failed');
+
+      await expect(
+        service.updateUser('p1', 'db-a', 'app', undefined, { name: 'app', password: 'next' })
+      ).rejects.toThrow('role update failed');
+      expect((await repo.getUser('p1', 'db-a', 'app'))?.password).toBe('s3cret');
+    });
+
     test('deleteUser restores the row when the role cannot be dropped', async () => {
       await service.createUser('p1', 'db-a', { name: 'app', password: 'x' });
       dataPlane.dropUserFailure = new Error('still logged in');
