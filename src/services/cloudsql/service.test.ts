@@ -504,6 +504,17 @@ describe('SqlAdminService', () => {
       await expect(promise).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
     });
 
+    test('createDatabase rejects a name postgres would truncate and stores nothing', async () => {
+      const name = `${'a'.repeat(63)}b`;
+      dataPlane.calls.length = 0;
+
+      const promise = service.createDatabase('p1', 'db-a', { name });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+      expect(await repo.getDatabase('p1', 'db-a', name)).toBeNull();
+      expect(dataPlane.calls.some(call => call.includes(name))).toBe(false);
+    });
+
     test('getDatabase returns the sql#database resource', async () => {
       await service.createDatabase('p1', 'db-a', { name: 'appdb', charset: 'UTF8' });
 
