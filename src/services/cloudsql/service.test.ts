@@ -495,7 +495,6 @@ describe('SqlAdminService', () => {
     });
 
     test('updateUser falls back to body.host when the query host is absent', async () => {
-      await service.createUser('p1', 'db-a', { name: 'app', host: '%', password: 'orig-1' });
       await service.createUser('p1', 'db-a', {
         name: 'app',
         host: '10.0.0.1',
@@ -508,11 +507,40 @@ describe('SqlAdminService', () => {
         password: 'x',
       });
 
-      const wildcardUser = await repo.getUser('p1', 'db-a', 'app', '%');
-      const scopedUser = await repo.getUser('p1', 'db-a', 'app', '10.0.0.1');
+      expect((await repo.getUser('p1', 'db-a', 'app', '10.0.0.1'))?.password).toBe('x');
+    });
 
-      expect(scopedUser?.password).toBe('x');
-      expect(wildcardUser?.password).toBe('orig-1');
+    test('createUser rejects a second host for the same role name', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', host: '%', password: 'orig-1' });
+      dataPlane.calls.length = 0;
+
+      await expect(
+        service.createUser('p1', 'db-a', { name: 'app', host: '10.0.0.1', password: 'orig-2' })
+      ).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
+      expect(await repo.getUser('p1', 'db-a', 'app', '10.0.0.1')).toBeNull();
+      expect(dataPlane.calls).not.toContain('upsertUser:p1/db-a:app');
+    });
+
+    test('deleteUser keeps the role while another host record still uses it', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', host: '%', password: 'orig-1' });
+      await repo.createUser({
+        project: 'p1',
+        instance: 'db-a',
+        name: 'app',
+        host: '10.0.0.1',
+        type: 'BUILT_IN',
+        password: 'orig-2',
+      });
+      dataPlane.calls.length = 0;
+
+      await service.deleteUser('p1', 'db-a', 'app', '%');
+
+      expect(dataPlane.calls).not.toContain('dropUser:p1/db-a:app');
+      expect(await repo.getUser('p1', 'db-a', 'app', '10.0.0.1')).not.toBeNull();
+
+      await service.deleteUser('p1', 'db-a', 'app', '10.0.0.1');
+
+      expect(dataPlane.calls).toContain('dropUser:p1/db-a:app');
     });
 
     test('updateUser with neither query nor body name throws INVALID_ARGUMENT', async () => {

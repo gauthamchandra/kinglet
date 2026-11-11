@@ -158,16 +158,13 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
         );
       }
 
-      // DROP DATABASE cannot run inside the database being dropped.
-      const maintenance = database === 'postgres' ? 'template1' : 'postgres';
+      if (database === 'template0' || database === 'template1') {
+        throw new Error(`Database ${database} is required to administer the instance`);
+      }
 
-      await this.admin(
-        current,
-        async sql => {
-          await sql.unsafe(`DROP DATABASE IF EXISTS ${quoteIdentifier(database)} WITH (FORCE)`);
-        },
-        maintenance
-      );
+      await this.admin(current, async sql => {
+        await sql.unsafe(`DROP DATABASE IF EXISTS ${quoteIdentifier(database)} WITH (FORCE)`);
+      });
     });
   }
 
@@ -315,6 +312,9 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     if (previous != null) {
       await this.options.processManager.stop(previous.dataDir);
       this.running.delete(key);
+      // The claim would otherwise outlive the process and the next start
+      // would skip this port, then never return it to the range.
+      this.ports.release(previous.port);
     }
 
     const refused: number[] = [];
@@ -521,7 +521,7 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
   private async admin<T>(
     current: RunningInstance,
     fn: (sql: SQL) => Promise<T>,
-    database = 'postgres'
+    database = 'template1'
   ): Promise<T> {
     const sql = this.options.processManager.openAdminConnection(
       current.dataDir,

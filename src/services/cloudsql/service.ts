@@ -428,9 +428,11 @@ export class SqlAdminService {
     }
 
     const request = parsed.data;
-    const existing = await this.repo.getUser(project, instance, request.name, request.host);
+    const sameName = (await this.repo.listUsers(project, instance)).some(
+      user => user.name === request.name
+    );
 
-    if (existing) {
+    if (sameName) {
       throw new SqlAdminError(
         'ALREADY_EXISTS',
         `User ${request.name} already exists on instance ${project}/${instance}`
@@ -589,6 +591,14 @@ export class SqlAdminService {
     }
 
     await this.repo.deleteUser(project, instance, name, host);
+
+    const roleStillNeeded = (await this.repo.listUsers(project, instance)).some(
+      user => user.name === name
+    );
+
+    if (roleStillNeeded) {
+      return this.recordOperation(project, OperationType.DELETE_USER, instance);
+    }
 
     try {
       await this.dataPlane.dropUser(project, instance, name);

@@ -172,7 +172,7 @@ export class PostgresProcessManager {
     await rm(join(dataDir, 'postmaster.pid'), { force: true });
   }
 
-  openAdminConnection(dataDir: string, port: number, database = 'postgres'): SQL {
+  openAdminConnection(dataDir: string, port: number, database = 'template1'): SQL {
     // Bun 1.3.4 needs the socket filename, not its directory or a URL host parameter.
     return new SQL({
       url: `postgres://kinglet_admin:x@localhost:${port}/${encodeURIComponent(database)}`,

@@ -105,6 +105,35 @@ describe('PostgresServerDataPlane without binaries', () => {
     await expect(plane.startInstance('p', 'a', ['postgres'])).rejects.toThrow('connected');
     expect(starts).toEqual([47980, 47981]);
   });
+
+  test('a restart reuses the port it already holds', async () => {
+    const ports: number[] = [];
+    const sql = Object.assign(async () => [{ one: 1 }], {
+      unsafe: async () => {},
+      close: async () => {},
+    });
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: null,
+      portRangeStart: 47990,
+      portRangeEnd: 47990,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        start: async (_dataDir, port) => {
+          ports.push(port);
+        },
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    const first = await plane.startInstance('p', 'a', ['postgres']);
+    const second = await plane.startInstance('p', 'a', ['postgres']);
+
+    expect(second).toBe(first);
+    expect(ports).toEqual([47990, 47990]);
+    await plane.stopAll();
+  });
 });
 
 describe('PostgresServerDataPlane directory safety', () => {
@@ -367,6 +396,22 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
     } finally {
       await dropped.close({ timeout: 0 });
       await maintenance.close({ timeout: 0 });
+    }
+
+    await started.upsertUser('p', 'inst', {
+      name: 'next',
+      password: 'secret',
+      memberOf: ['cloudsqlsuperuser'],
+    });
+    await started.openDatabase('p', 'inst', 'appdb');
+    expect(await started.startInstance('p', 'inst', ['postgres', 'appdb'])).toBe(port);
+
+    const ready = new PostgresProcessManager(logger).openAdminConnection(dataDir, port ?? 0);
+
+    try {
+      expect((await ready<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
+    } finally {
+      await ready.close({ timeout: 0 });
     }
   });
 
