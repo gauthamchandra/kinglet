@@ -42,10 +42,11 @@ See [Storage modes](storage.md) for details on each storage type.
 | `MEMORYSTORE_VALKEY_BINARY` | — | Override the resolved `valkey-server` binary path |
 | `MEMORYSTORE_PORT_RANGE_START` | `6380` | First port available for data-plane instances |
 | `MEMORYSTORE_PORT_RANGE_END` | `6479` | Last port available for data-plane instances |
-| `CLOUDSQL_DATA_PLANE` | `true` | Serve a real Postgres endpoint per instance (PGlite); `false` for a control plane only |
+| `CLOUDSQL_DATA_PLANE` | `true` | Serve a real Postgres server per instance; `false` for a control plane only |
+| `CLOUDSQL_POSTGRES_BIN_DIR` | — | Directory of `postgres` and `initdb`. Unset searches `pg_config`, then `PATH` |
 | `CLOUDSQL_PORT_RANGE_START` | `5432` | First port available for Cloud SQL instance endpoints |
 | `CLOUDSQL_PORT_RANGE_END` | `5531` | Last port available for Cloud SQL instance endpoints |
-| `CLOUDSQL_POSTGIS` | `false` | Link PostGIS into every Cloud SQL database (slower instance creation) |
+| `CLOUDSQL_POSTGIS` | `false` | Accepted, and ignored for Cloud SQL. PostGIS comes from the installed server packages. AlloyDB still uses this flag |
 | `ENABLE_COMPUTE` | `true` | Enable Compute Engine (Cloud Armor) service |
 | `ENABLE_NETWORKSECURITY` | `true` | Enable Network Security (project-scoped address groups) |
 | `COMPUTE_LISTENER_PORT` | `8787` | Cloud Armor evaluation server port |

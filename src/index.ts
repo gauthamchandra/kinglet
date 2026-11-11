@@ -416,7 +416,9 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
 
   try {
     if (server) {
-      server.stop();
+      // In-flight admin calls can still be starting a database process.
+      // Stop accepting, then let those calls finish before services tear children down.
+      await server.stop();
       server = null;
       logger.info('HTTP server stopped');
     }

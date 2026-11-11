@@ -7,6 +7,7 @@ import type { SqlInstanceRecord, SqlOperationRecord, SqlUserRecord } from './typ
 import {
   buildConnectionName,
   buildInstanceSelfLink,
+  InsertDatabaseRequestSchema,
   InsertInstanceRequestSchema,
   InsertUserRequestSchema,
   instanceRecordToResponse,
@@ -149,5 +150,29 @@ describe('InsertUserRequestSchema', () => {
 
     expect(parsed.host).toBe('');
     expect(parsed.type).toBe('BUILT_IN');
+  });
+
+  test('accepts a name at the 63-byte PostgreSQL identifier limit', () => {
+    expect(InsertUserRequestSchema.safeParse({ name: 'a'.repeat(63) }).success).toBe(true);
+    expect(InsertUserRequestSchema.safeParse({ name: 'é'.repeat(31) }).success).toBe(true);
+  });
+
+  test('rejects a name postgres would truncate to 63 bytes', () => {
+    expect(InsertUserRequestSchema.safeParse({ name: `${'a'.repeat(63)}b` }).success).toBe(false);
+    expect(InsertUserRequestSchema.safeParse({ name: 'é'.repeat(32) }).success).toBe(false);
+  });
+});
+
+describe('InsertDatabaseRequestSchema', () => {
+  test('accepts a name at the 63-byte PostgreSQL identifier limit', () => {
+    expect(InsertDatabaseRequestSchema.safeParse({ name: 'a'.repeat(63) }).success).toBe(true);
+    expect(InsertDatabaseRequestSchema.safeParse({ name: 'é'.repeat(31) }).success).toBe(true);
+  });
+
+  test('rejects a name postgres would truncate to 63 bytes', () => {
+    expect(InsertDatabaseRequestSchema.safeParse({ name: `${'a'.repeat(63)}b` }).success).toBe(
+      false
+    );
+    expect(InsertDatabaseRequestSchema.safeParse({ name: 'é'.repeat(32) }).success).toBe(false);
   });
 });

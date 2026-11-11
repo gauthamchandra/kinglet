@@ -1,9 +1,9 @@
 /**
  * Cloud SQL Service - entry point
  *
- * Wires together repository, admin service, HTTP handlers, and the PGlite-backed
- * data plane that makes an emulated instance something a Postgres client can
- * actually connect to (see docs/adrs/013-cloudsql-pglite-data-plane.md).
+ * Wires together repository, admin service, HTTP handlers, and the Postgres
+ * data plane that makes an emulated instance something a client can connect
+ * to (see docs/adrs/019-real-postgres-data-plane.md).
  */
 
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
@@ -22,7 +22,7 @@ import {
 import type { Logger } from '@/shared/utils/logger.ts';
 import { CloudSqlHandlers } from './handlers.ts';
 import { CloudSqlRepository } from './repository.ts';
-import { SqlAdminService } from './service.ts';
+import { cloudSqlLogin, SqlAdminService } from './service.ts';
 
 // Mirrors the config schema's defaults (see src/config/schema.ts). Tests that
 // only exercise the control plane pass `{ enabled: false }` to avoid building
@@ -34,6 +34,7 @@ export const DEFAULT_CLOUDSQL_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOptio
   storageType: 'sqlite',
   sqlitePath: './data/emulator.db',
   postgis: false,
+  postgresBinDir: undefined,
 };
 
 export class CloudSqlService {
@@ -134,5 +135,27 @@ export class CloudSqlService {
       this.dataPlane,
       persisted
     );
+
+    // Memory storage throws the cluster away on stop, so a revived service has
+    // a new server and has to put the roles back. On sqlite the same calls
+    // reset the password to the stored one.
+    for (const instance of persisted) {
+      const users = await repository.listUsers(instance.project, instance.instance);
+
+      for (const user of users) {
+        try {
+          await this.dataPlane.upsertUser(
+            instance.project,
+            instance.instance,
+            cloudSqlLogin(user.name, user.password)
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Failed to restore Cloud SQL user ${user.name} on ${instance.project}/${instance.instance}, leaving that role unset`,
+            error
+          );
+        }
+      }
+    }
   }
 }

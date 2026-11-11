@@ -416,6 +416,14 @@ describe('Configuration Schema', () => {
       expect(config.services?.cloudsql?.dataPlane?.postgis).toBe(true);
     });
 
+    test('mapEnvToConfig maps CLOUDSQL_POSTGRES_BIN_DIR into the dataPlane block', () => {
+      const config = mapEnvToConfig({ CLOUDSQL_POSTGRES_BIN_DIR: '/usr/lib/postgresql/18/bin' });
+
+      expect(config.services?.cloudsql?.dataPlane?.postgresBinDir).toBe(
+        '/usr/lib/postgresql/18/bin'
+      );
+    });
+
     test('mapEnvToConfig maps ENABLE_CLOUDSQL as an individual service flag', () => {
       const config = mapEnvToConfig({ ENABLE_CLOUDSQL: true });
 

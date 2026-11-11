@@ -2,9 +2,9 @@
  * End-to-End Test: Cloud SQL Data Plane
  *
  * With the data plane enabled, creating an Instance brings up a real Postgres
- * wire endpoint backed by PGlite. This suite asserts application code can
- * connect to it with Bun's built-in Bun.SQL and use it as a database — the
- * entire point of emulating a data plane rather than metadata only.
+ * server. This suite asserts application code can connect to it with Bun's
+ * built-in Bun.SQL and use it as a database — the entire point of emulating
+ * a data plane rather than metadata only.
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
@@ -245,7 +245,10 @@ describe('Cloud SQL data plane e2e', () => {
   test('an unknown user is refused', async () => {
     const sql = connect(instancePort, 'postgres', 'ghost', '');
 
-    await expect(run(sql, 'SELECT 1')).rejects.toThrow(/role "ghost" does not exist/);
+    // SCRAM answers an unknown role with the same error as a wrong password.
+    await expect(run(sql, 'SELECT 1')).rejects.toThrow(
+      /password authentication failed for user "ghost"/
+    );
   });
 
   test('a user added through the admin API can connect with its own password', async () => {
@@ -265,7 +268,7 @@ describe('Cloud SQL data plane e2e', () => {
     expect(await rows(sql, 'SELECT 1 AS one')).toEqual([{ one: 1 }]);
   });
 
-  test('an emulated user gates the connection but is not a Postgres role', async () => {
+  test('an admin-API user connects as that role', async () => {
     const response = await fetch(
       emulatorUrl(`/v1/projects/${PROJECT}/instances/${INSTANCE}/users`),
       {
@@ -279,10 +282,7 @@ describe('Cloud SQL data plane e2e', () => {
 
     const sql = connect(instancePort, 'postgres', 'reporting', 'reporting-pass');
 
-    // The credentials are enforced, but the session behind them is PGlite's own
-    // superuser: emulated users are not real roles. Pinned so the limitation in
-    // ADR-013 cannot drift silently.
-    expect(await rows(sql, 'SELECT current_user AS who')).toEqual([{ who: 'postgres' }]);
+    expect(await rows(sql, 'SELECT current_user AS who')).toEqual([{ who: 'reporting' }]);
   });
 
   test('two connections can run the same parameterised query', async () => {

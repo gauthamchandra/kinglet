@@ -139,6 +139,15 @@ describe('DataPlaneManager', () => {
     expect(makeManager().getPort('p1', 'ghost')).toBeNull();
   });
 
+  test('leaves roles to the wire server', async () => {
+    const manager = makeManager();
+
+    await manager.upsertUser('p1', 'a', { name: 'app', password: 'x', memberOf: [] });
+    await manager.dropUser('p1', 'a', 'app');
+
+    expect(manager.getPort('p1', 'a')).toBeNull();
+  });
+
   test('serves queries against the instance endpoint', async () => {
     const manager = makeManager();
     const port = await manager.startInstance('p1', 'a', ['postgres']);
@@ -443,5 +452,7 @@ describe('DisabledDataPlane', () => {
     await expect(dataPlane.openDatabase()).resolves.toBeUndefined();
     await expect(dataPlane.dropDatabase()).resolves.toBeUndefined();
     await expect(dataPlane.stopAll()).resolves.toBeUndefined();
+    await expect(dataPlane.upsertUser()).resolves.toBeUndefined();
+    await expect(dataPlane.dropUser()).resolves.toBeUndefined();
   });
 });

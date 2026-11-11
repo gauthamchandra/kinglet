@@ -263,8 +263,25 @@ export const UpdateInstanceRequestSchema = z.object({
   settings: z.record(z.string(), z.unknown()).optional(),
 });
 
+// PostgreSQL stores identifiers in NAMEDATALEN-1 bytes and truncates the rest.
+const POSTGRES_IDENTIFIER_MAX_BYTES = 63;
+
+function withinPostgresIdentifierLimit(name: string): boolean {
+  return new TextEncoder().encode(name).length <= POSTGRES_IDENTIFIER_MAX_BYTES;
+}
+
+function postgresIdentifier(label: string) {
+  return z
+    .string()
+    .min(1)
+    .refine(
+      withinPostgresIdentifierLimit,
+      `${label} must be at most 63 bytes, the PostgreSQL identifier limit`
+    );
+}
+
 export const InsertDatabaseRequestSchema = z.object({
-  name: z.string().min(1),
+  name: postgresIdentifier('Database name'),
   charset: z.string().default('UTF8'),
   collation: z.string().default('en_US.UTF8'),
 });
@@ -275,7 +292,7 @@ export const UpdateDatabaseRequestSchema = z.object({
 });
 
 export const InsertUserRequestSchema = z.object({
-  name: z.string().min(1),
+  name: postgresIdentifier('User name'),
   host: z.string().default(''),
   password: z.string().default(''),
   type: z.string().default('BUILT_IN'),

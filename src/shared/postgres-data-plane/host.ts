@@ -1,11 +1,12 @@
 /**
  * Factory helpers for constructing a product-stamped Postgres data plane.
  *
- * <p>Cloud SQL and AlloyDB share {@link DataPlaneManager}; they differ only in
- * the human-readable product label used in logs and the on-disk directory name
- * that keeps their PGlite data from colliding.
+ * <p>Cloud SQL supervises a real Postgres server (ADR-019). AlloyDB still uses
+ * {@link DataPlaneManager} until it moves. The on-disk directory name keeps
+ * their data from colliding.
  */
 
+import { dirname } from 'node:path';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type {
   DataPlaneManagerOptions,
@@ -13,11 +14,16 @@ import type {
   PostgresDataPlane,
 } from './data-plane-manager.ts';
 import { DataPlaneManager, DisabledDataPlane } from './data-plane-manager.ts';
+import { PostgresProcessManager } from './postgres-process-manager.ts';
+import { PostgresServerDataPlane } from './postgres-server-data-plane.ts';
 
 export type ProductDataPlaneOptions = Omit<
   DataPlaneManagerOptions,
   'productLabel' | 'dataDirectoryName'
->;
+> & {
+  /** Directory of `postgres` and `initdb`. Unset searches `pg_config`, then `PATH`. */
+  postgresBinDir?: string | undefined;
+};
 
 /**
  * What a service entry point accepts for its data plane: the product's port
@@ -48,8 +54,9 @@ export const ALLOYDB_DATA_PLANE_PRODUCT: PostgresDataPlaneProduct = {
 };
 
 /**
- * Build an enabled {@link DataPlaneManager} for `product`, or a
- * {@link DisabledDataPlane} when the service is running control-plane-only.
+ * Build the data plane for `product`, or a {@link DisabledDataPlane} when the
+ * service is running control-plane-only. Cloud SQL gets a real server.
+ * AlloyDB still gets {@link DataPlaneManager}.
  */
 export function createPostgresDataPlane(
   logger: Logger,
@@ -59,7 +66,20 @@ export function createPostgresDataPlane(
 ): PostgresDataPlane {
   if (!options.enabled) return new DisabledDataPlane();
 
-  const { enabled: _enabled, ...managerOptions } = options;
+  const { enabled: _enabled, postgresBinDir, ...managerOptions } = options;
+
+  if (product === CLOUDSQL_DATA_PLANE_PRODUCT) {
+    return new PostgresServerDataPlane(logger, {
+      product,
+      dataDirectory:
+        managerOptions.storageType === 'memory' ? null : dirname(managerOptions.sqlitePath),
+      portRangeStart: managerOptions.portRangeStart,
+      portRangeEnd: managerOptions.portRangeEnd,
+      processManager: new PostgresProcessManager(logger, {
+        ...(postgresBinDir != null ? { binDir: postgresBinDir } : {}),
+      }),
+    });
+  }
 
   return new DataPlaneManager(logger, { ...managerOptions, ...product }, lookupUser);
 }

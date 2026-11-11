@@ -4,9 +4,34 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { DataPlaneLogin } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { CloudSqlRepository } from './repository.ts';
 import { SqlAdminError, SqlAdminService } from './service.ts';
+
+/** Pauses the first restore of `app` so a user change can try to land mid-restart. */
+class PausingDataPlane extends RecordingDataPlane {
+  gate: Promise<void> = Promise.resolve();
+  entered: (() => void) | undefined;
+
+  override async upsertUser(
+    project: string,
+    instance: string,
+    user: DataPlaneLogin
+  ): Promise<void> {
+    this.calls.push(`upsertUser:${project}/${instance}:${user.name}:${user.password ?? ''}`);
+
+    if (user.name === 'app' && this.entered != null) {
+      const entered = this.entered;
+
+      this.entered = undefined;
+      entered();
+      await this.gate;
+    }
+
+    if (this.upsertFailure) throw this.upsertFailure;
+  }
+}
 
 describe('SqlAdminService', () => {
   let repo: CloudSqlRepository;
@@ -28,7 +53,7 @@ describe('SqlAdminService', () => {
     test('starts an instance endpoint with its default database on create', async () => {
       await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
 
-      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres']);
+      expect(dataPlane.calls).toEqual(['start:p1/db-a:postgres', 'upsertUser:p1/db-a:postgres']);
     });
 
     test('deletes the instance data when the instance is deleted', async () => {
@@ -41,9 +66,101 @@ describe('SqlAdminService', () => {
     test('restarts the endpoint with every database the instance has', async () => {
       await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
       await service.createDatabase('p1', 'db-a', { name: 'app' });
+      dataPlane.calls.length = 0;
+
       await service.restartInstance('p1', 'db-a');
 
-      expect(dataPlane.calls).toContain('restart:p1/db-a:app,postgres');
+      expect(dataPlane.calls).toEqual([
+        'restart:p1/db-a:app,postgres',
+        'upsertUser:p1/db-a:postgres',
+      ]);
+    });
+
+    test('restart reapplies a password saved while the server was down', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      dataPlane.calls.length = 0;
+
+      await service.restartInstance('p1', 'db-a');
+
+      expect(dataPlane.calls).toEqual([
+        'restart:p1/db-a:postgres',
+        'upsertUser:p1/db-a:app',
+        'upsertUser:p1/db-a:postgres',
+      ]);
+    });
+
+    test('restart does not put back a password a concurrent update replaced', async () => {
+      const pausing = new PausingDataPlane();
+      const racing = new SqlAdminService(repo, pausing);
+
+      await racing.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await racing.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      pausing.calls.length = 0;
+
+      let release = (): void => {};
+      const gate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let markEntered = (): void => {};
+      const entered = new Promise<void>(resolve => {
+        markEntered = resolve;
+      });
+
+      pausing.gate = gate;
+      pausing.entered = markEntered;
+
+      const restarting = racing.restartInstance('p1', 'db-a');
+
+      await entered;
+
+      const updating = racing.updateUser('p1', 'db-a', 'postgres', undefined, {
+        name: 'postgres',
+        password: 'next',
+      });
+
+      await Bun.sleep(20);
+      expect(pausing.calls.some(call => call.endsWith('postgres:next'))).toBe(false);
+      release();
+      await restarting;
+      await updating;
+      expect(pausing.calls.at(-1)).toBe('upsertUser:p1/db-a:postgres:next');
+      expect((await repo.getUser('p1', 'db-a', 'postgres'))?.password).toBe('next');
+    });
+
+    test('restart does not recreate a user deleted while roles are restored', async () => {
+      const pausing = new PausingDataPlane();
+      const racing = new SqlAdminService(repo, pausing);
+
+      await racing.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await racing.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      pausing.calls.length = 0;
+
+      let release = (): void => {};
+      const gate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let markEntered = (): void => {};
+      const entered = new Promise<void>(resolve => {
+        markEntered = resolve;
+      });
+
+      pausing.gate = gate;
+      pausing.entered = markEntered;
+
+      const restarting = racing.restartInstance('p1', 'db-a');
+
+      await entered;
+
+      const deleting = racing.deleteUser('p1', 'db-a', 'postgres');
+
+      await Bun.sleep(20);
+      expect(pausing.calls).not.toContain('dropUser:p1/db-a:postgres');
+      release();
+      await restarting;
+      await deleting;
+      expect(pausing.calls.at(-1)).toBe('dropUser:p1/db-a:postgres');
+      expect(await repo.getUser('p1', 'db-a', 'postgres')).toBeNull();
     });
 
     test('opens and drops a database alongside its control-plane record', async () => {
@@ -387,6 +504,17 @@ describe('SqlAdminService', () => {
       await expect(promise).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
     });
 
+    test('createDatabase rejects a name postgres would truncate and stores nothing', async () => {
+      const name = `${'a'.repeat(63)}b`;
+      dataPlane.calls.length = 0;
+
+      const promise = service.createDatabase('p1', 'db-a', { name });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+      expect(await repo.getDatabase('p1', 'db-a', name)).toBeNull();
+      expect(dataPlane.calls.some(call => call.includes(name))).toBe(false);
+    });
+
     test('getDatabase returns the sql#database resource', async () => {
       await service.createDatabase('p1', 'db-a', { name: 'appdb', charset: 'UTF8' });
 
@@ -419,11 +547,70 @@ describe('SqlAdminService', () => {
         'NOT_FOUND'
       );
     });
+
+    test('deleteDatabase keeps the record when the data plane cannot drop it', async () => {
+      await service.createDatabase('p1', 'db-a', { name: 'appdb' });
+      dataPlane.dropDatabaseFailure = new Error('not running');
+
+      const promise = service.deleteDatabase('p1', 'db-a', 'appdb');
+
+      await expect(promise).rejects.toThrow('not running');
+      await expect(promise).rejects.toHaveProperty('code', 'INTERNAL');
+      expect(await repo.getDatabase('p1', 'db-a', 'appdb')).not.toBeNull();
+    });
   });
 
   describe('users', () => {
     beforeEach(async () => {
       await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+    });
+
+    test('createUser upserts the role after the user row is stored', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+
+      const start = dataPlane.calls.indexOf('start:p1/db-a:postgres');
+      const upsert = dataPlane.calls.indexOf('upsertUser:p1/db-a:app');
+
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(upsert).toBeGreaterThan(start);
+    });
+
+    test('updateUser upserts the role only when the password changes', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      dataPlane.calls.length = 0;
+
+      await service.updateUser('p1', 'db-a', 'app', undefined, { name: 'app' });
+
+      expect(dataPlane.calls).not.toContain('upsertUser:p1/db-a:app');
+
+      await service.updateUser('p1', 'db-a', 'app', undefined, {
+        name: 'app',
+        password: 'next',
+      });
+
+      expect(dataPlane.calls).toContain('upsertUser:p1/db-a:app');
+    });
+
+    test('deleteUser drops the role after the user row is gone', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+
+      await service.deleteUser('p1', 'db-a', 'app');
+
+      const drop = dataPlane.calls.indexOf('dropUser:p1/db-a:app');
+
+      expect(drop).toBeGreaterThanOrEqual(0);
+      expect(await repo.getUser('p1', 'db-a', 'app')).toBeNull();
+    });
+
+    test('createUser rejects a name postgres would truncate and stores nothing', async () => {
+      const name = `${'a'.repeat(63)}b`;
+      dataPlane.calls.length = 0;
+
+      const promise = service.createUser('p1', 'db-a', { name, password: 's3cret' });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+      expect(await repo.getUser('p1', 'db-a', name)).toBeNull();
+      expect(dataPlane.calls.some(call => call.includes(name))).toBe(false);
     });
 
     test('createUser returns CREATE_USER op and user appears without password', async () => {
@@ -450,7 +637,6 @@ describe('SqlAdminService', () => {
     });
 
     test('updateUser falls back to body.host when the query host is absent', async () => {
-      await service.createUser('p1', 'db-a', { name: 'app', host: '%', password: 'orig-1' });
       await service.createUser('p1', 'db-a', {
         name: 'app',
         host: '10.0.0.1',
@@ -463,11 +649,40 @@ describe('SqlAdminService', () => {
         password: 'x',
       });
 
-      const wildcardUser = await repo.getUser('p1', 'db-a', 'app', '%');
-      const scopedUser = await repo.getUser('p1', 'db-a', 'app', '10.0.0.1');
+      expect((await repo.getUser('p1', 'db-a', 'app', '10.0.0.1'))?.password).toBe('x');
+    });
 
-      expect(scopedUser?.password).toBe('x');
-      expect(wildcardUser?.password).toBe('orig-1');
+    test('createUser rejects a second host for the same role name', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', host: '%', password: 'orig-1' });
+      dataPlane.calls.length = 0;
+
+      await expect(
+        service.createUser('p1', 'db-a', { name: 'app', host: '10.0.0.1', password: 'orig-2' })
+      ).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
+      expect(await repo.getUser('p1', 'db-a', 'app', '10.0.0.1')).toBeNull();
+      expect(dataPlane.calls).not.toContain('upsertUser:p1/db-a:app');
+    });
+
+    test('deleteUser keeps the role while another host record still uses it', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', host: '%', password: 'orig-1' });
+      await repo.createUser({
+        project: 'p1',
+        instance: 'db-a',
+        name: 'app',
+        host: '10.0.0.1',
+        type: 'BUILT_IN',
+        password: 'orig-2',
+      });
+      dataPlane.calls.length = 0;
+
+      await service.deleteUser('p1', 'db-a', 'app', '%');
+
+      expect(dataPlane.calls).not.toContain('dropUser:p1/db-a:app');
+      expect(await repo.getUser('p1', 'db-a', 'app', '10.0.0.1')).not.toBeNull();
+
+      await service.deleteUser('p1', 'db-a', 'app', '10.0.0.1');
+
+      expect(dataPlane.calls).toContain('dropUser:p1/db-a:app');
     });
 
     test('updateUser with neither query nor body name throws INVALID_ARGUMENT', async () => {
@@ -488,6 +703,51 @@ describe('SqlAdminService', () => {
       const list = await service.listUsers('p1', 'db-a');
 
       expect(list.items.find(u => u.name === 'app')).toBeUndefined();
+    });
+
+    test('createUser rejects a reserved role and stores nothing', async () => {
+      const promise = service.createUser('p1', 'db-a', {
+        name: 'kinglet_admin',
+        password: 'x',
+      });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+      expect(await repo.getUser('p1', 'db-a', 'kinglet_admin')).toBeNull();
+    });
+
+    test('createUser removes the row when the role cannot be created', async () => {
+      dataPlane.upsertFailure = new Error('role name is reserved');
+
+      const promise = service.createUser('p1', 'db-a', { name: 'app', password: 'x' });
+
+      await expect(promise).rejects.toThrow('reserved');
+      await expect(promise).rejects.toHaveProperty('code', 'INTERNAL');
+      expect(await repo.getUser('p1', 'db-a', 'app')).toBeNull();
+    });
+
+    test('updateUser restores the previous password when the role cannot be changed', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
+      dataPlane.upsertFailure = new Error('role update failed');
+
+      const promise = service.updateUser('p1', 'db-a', 'app', undefined, {
+        name: 'app',
+        password: 'next',
+      });
+
+      await expect(promise).rejects.toThrow('role update failed');
+      await expect(promise).rejects.toHaveProperty('code', 'INTERNAL');
+      expect((await repo.getUser('p1', 'db-a', 'app'))?.password).toBe('s3cret');
+    });
+
+    test('deleteUser restores the row when the role cannot be dropped', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 'x' });
+      dataPlane.dropUserFailure = new Error('still logged in');
+
+      const promise = service.deleteUser('p1', 'db-a', 'app');
+
+      await expect(promise).rejects.toThrow('still logged in');
+      await expect(promise).rejects.toHaveProperty('code', 'INTERNAL');
+      expect(await repo.getUser('p1', 'db-a', 'app')).not.toBeNull();
     });
 
     test('deleteUser without a name throws INVALID_ARGUMENT', async () => {
