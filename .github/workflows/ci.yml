@@ -175,11 +175,17 @@ jobs:
       # when the binary is absent. Without this step they would skip on every run and CI
       # would report green while covering nothing — so the install is verified, not assumed
       # (test-utils/valkey.ts additionally turns a missing binary into a hard error when CI=true).
-      - name: Install valkey-server
+      - name: Install valkey-server and PostgreSQL
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends valkey-server
+          sudo apt-get install -y --no-install-recommends ca-certificates curl
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/keyrings/postgresql.asc > /dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends valkey-server postgresql-18
           valkey-server --version
+          pg_config --version
 
       - name: Run linter
         run: bun run lint
@@ -224,11 +230,17 @@ jobs:
       # memorystore-data-plane.test.ts connects a real Valkey client to a real spawned
       # server; it skips without this binary, which is exactly how that suite could stop
       # running unnoticed. See the matching step in the `test` job.
-      - name: Install valkey-server
+      - name: Install valkey-server and PostgreSQL
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends valkey-server
+          sudo apt-get install -y --no-install-recommends ca-certificates curl
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/keyrings/postgresql.asc > /dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends valkey-server postgresql-18
           valkey-server --version
+          pg_config --version
 
       # e2e/ is excluded from the default `bun test` run by bunfig.toml's `include`,
       # so it needs its own job or it never runs at all.
