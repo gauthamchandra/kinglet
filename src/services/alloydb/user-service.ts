@@ -8,9 +8,9 @@
  * therefore takes no {@link OperationsStore} at all — wrapping these in an LRO
  * would break any real client.
  *
- * <p>Passwords are stored for data-plane authentication (ADR-013) but never
- * returned: `User.password` is input-only in the discovery document. Emulated
- * users gate connections; they are not Postgres roles.
+ * <p>Passwords are stored for data-plane authentication but never returned:
+ * `User.password` is input-only in the discovery document. A user is a
+ * Postgres role on every instance in the cluster.
  */
 
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
