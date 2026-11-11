@@ -8,6 +8,7 @@ import type { RouteContext, RouteRequest } from '@/core/gateway/request-router.t
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { CloudSqlService, DEFAULT_CLOUDSQL_DATA_PLANE_OPTIONS } from './index.ts';
+import { CloudSqlRepository } from './repository.ts';
 
 function makeRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
   return {
@@ -229,6 +230,30 @@ describe('CloudSqlService', () => {
       expect(rebound.port).toBe(PORT_RANGE_START);
 
       rebound.stop(true);
+    });
+
+    test('a saved role Postgres rejects does not stop initialization', async () => {
+      const first = await startService();
+
+      await createInstance(first, 'db-a');
+      const repository = new CloudSqlRepository(storage);
+
+      await repository.initialize();
+      await repository.createUser({
+        project: 'p1',
+        instance: 'db-a',
+        name: 'pg_app',
+        host: '',
+        type: 'BUILT_IN',
+        password: 'secret',
+      });
+      await first.stop();
+
+      const revived = await startService();
+
+      expect(revived.getDataPlanePort('p1', 'db-a')).toBeTypeOf('number');
+
+      await revived.stop();
     });
 
     test('brings persisted instances back up on a fresh service over the same storage', async () => {

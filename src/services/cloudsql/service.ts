@@ -8,6 +8,7 @@ import type {
   PostgresDataPlane,
 } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { isReservedCloudSqlRole } from '@/shared/postgres-data-plane/postgres-server-data-plane.ts';
 import type { CloudSqlRepository } from './repository.ts';
 import type {
   DatabaseInstanceResponse,
@@ -388,16 +389,29 @@ export class SqlAdminService {
   ): Promise<OperationResponse> {
     await this.requireInstance(project, instance);
 
-    const deleted = await this.repo.deleteDatabase(project, instance, name);
+    const existing = await this.repo.getDatabase(project, instance, name);
 
-    if (!deleted) {
+    if (!existing) {
       throw new SqlAdminError(
         'NOT_FOUND',
         `Database ${name} does not exist on instance ${project}/${instance}`
       );
     }
 
-    await this.dataPlane.dropDatabase(project, instance, name);
+    await this.repo.deleteDatabase(project, instance, name);
+
+    try {
+      await this.dataPlane.dropDatabase(project, instance, name);
+    } catch (error) {
+      await this.repo.createDatabase({
+        project: existing.project,
+        instance: existing.instance,
+        name: existing.name,
+        charset: existing.charset,
+        collation: existing.collation,
+      });
+      throw error;
+    }
 
     return this.recordOperation(project, OperationType.DELETE_DATABASE, instance);
   }
@@ -423,6 +437,10 @@ export class SqlAdminService {
       );
     }
 
+    if (isReservedCloudSqlRole(request.name)) {
+      throw new SqlAdminError('INVALID_ARGUMENT', `User name ${request.name} is reserved`);
+    }
+
     await this.repo.createUser({
       project,
       instance,
@@ -432,11 +450,16 @@ export class SqlAdminService {
       password: request.password,
     });
 
-    await this.dataPlane.upsertUser(
-      project,
-      instance,
-      cloudSqlLogin(request.name, request.password)
-    );
+    try {
+      await this.dataPlane.upsertUser(
+        project,
+        instance,
+        cloudSqlLogin(request.name, request.password)
+      );
+    } catch (error) {
+      await this.repo.deleteUser(project, instance, request.name, request.host);
+      throw error;
+    }
 
     return this.recordOperation(project, OperationType.CREATE_USER, instance);
   }
@@ -495,6 +518,10 @@ export class SqlAdminService {
       );
     }
 
+    if (isReservedCloudSqlRole(targetName)) {
+      throw new SqlAdminError('INVALID_ARGUMENT', `User name ${targetName} is reserved`);
+    }
+
     const updates: Partial<{ password: string }> = {};
 
     if (parsed.data.password !== undefined) {
@@ -505,9 +532,10 @@ export class SqlAdminService {
     // to the request body's host field.
     const targetHost = host ?? parsed.data.host;
 
+    const previous = await this.repo.getUser(project, instance, targetName, targetHost);
     const updated = await this.repo.updateUser(project, instance, targetName, targetHost, updates);
 
-    if (!updated) {
+    if (!updated || previous == null) {
       throw new SqlAdminError(
         'NOT_FOUND',
         `User ${targetName} does not exist on instance ${project}/${instance}`
@@ -515,11 +543,18 @@ export class SqlAdminService {
     }
 
     if (updates.password !== undefined) {
-      await this.dataPlane.upsertUser(
-        project,
-        instance,
-        cloudSqlLogin(targetName, updates.password)
-      );
+      try {
+        await this.dataPlane.upsertUser(
+          project,
+          instance,
+          cloudSqlLogin(targetName, updates.password)
+        );
+      } catch (error) {
+        await this.repo.updateUser(project, instance, targetName, targetHost, {
+          password: previous.password,
+        });
+        throw error;
+      }
     }
 
     return this.recordOperation(project, OperationType.UPDATE_USER, instance);
@@ -540,16 +575,34 @@ export class SqlAdminService {
       );
     }
 
-    const deleted = await this.repo.deleteUser(project, instance, name, host);
+    const existing = await this.repo.getUser(project, instance, name, host);
 
-    if (!deleted) {
+    if (!existing) {
       throw new SqlAdminError(
         'NOT_FOUND',
         `User ${name} does not exist on instance ${project}/${instance}`
       );
     }
 
-    await this.dataPlane.dropUser(project, instance, name);
+    if (isReservedCloudSqlRole(existing.name)) {
+      throw new SqlAdminError('INVALID_ARGUMENT', `User name ${existing.name} is reserved`);
+    }
+
+    await this.repo.deleteUser(project, instance, name, host);
+
+    try {
+      await this.dataPlane.dropUser(project, instance, name);
+    } catch (error) {
+      await this.repo.createUser({
+        project: existing.project,
+        instance: existing.instance,
+        name: existing.name,
+        host: existing.host,
+        type: existing.type,
+        password: existing.password,
+      });
+      throw error;
+    }
 
     return this.recordOperation(project, OperationType.DELETE_USER, instance);
   }

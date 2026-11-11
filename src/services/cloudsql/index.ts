@@ -143,11 +143,18 @@ export class CloudSqlService {
       const users = await repository.listUsers(instance.project, instance.instance);
 
       for (const user of users) {
-        await this.dataPlane.upsertUser(
-          instance.project,
-          instance.instance,
-          cloudSqlLogin(user.name, user.password)
-        );
+        try {
+          await this.dataPlane.upsertUser(
+            instance.project,
+            instance.instance,
+            cloudSqlLogin(user.name, user.password)
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Failed to restore Cloud SQL user ${user.name} on ${instance.project}/${instance.instance}, leaving that role unset`,
+            error
+          );
+        }
       }
     }
   }

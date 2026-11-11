@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import * as fsPromises from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SQL } from 'bun';
@@ -84,6 +85,100 @@ describe('PostgresServerDataPlane without binaries', () => {
   });
 });
 
+describe('PostgresServerDataPlane directory safety', () => {
+  test('refuses to replace a PGlite directory with an empty cluster', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pglite-'));
+    const kept = join(root, 'cloudsql', 'p', 'inst', 'postgres', 'PG_VERSION');
+
+    await mkdir(join(root, 'cloudsql', 'p', 'inst', 'postgres'), { recursive: true });
+    await Bun.write(kept, '16\n');
+    const ensureInitialized = mock(async () => {});
+    const started = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47940,
+      portRangeEnd: 47940,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized,
+        start: async () => {},
+      },
+    });
+
+    try {
+      await expect(started.startInstance('p', 'inst', ['postgres'])).rejects.toThrow(/PGlite/);
+      expect(ensureInitialized).not.toHaveBeenCalled();
+      expect(await Bun.file(kept).text()).toBe('16\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses to drop a database whose cluster is on disk but not running', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-stopped-'));
+    const version = join(root, 'cloudsql', 'p', 'inst', 'PG_VERSION');
+
+    await mkdir(join(root, 'cloudsql', 'p', 'inst'), { recursive: true });
+    await Bun.write(version, '18\n');
+    const started = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47950,
+      portRangeEnd: 47950,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+      },
+    });
+
+    try {
+      await expect(started.dropDatabase('p', 'inst', 'app')).rejects.toThrow(/not running/);
+      expect(await Bun.file(version).exists()).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('concurrent memory creates share one temp root', async () => {
+    const dirs: string[] = [];
+    const realMkdir = fsPromises.mkdtemp;
+    const delayed = spyOn(fsPromises, 'mkdtemp').mockImplementation(((prefix: string) =>
+      Bun.sleep(40).then(() => realMkdir(prefix))) as typeof fsPromises.mkdtemp);
+    const started = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: null,
+      portRangeStart: 47960,
+      portRangeEnd: 47970,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async (dir: string) => {
+          dirs.push(dir);
+        },
+        start: async () => {
+          throw new Error('stop after the directory is chosen');
+        },
+      },
+    });
+
+    try {
+      const results = await Promise.allSettled([
+        started.startInstance('p', 'a', ['postgres']),
+        started.startInstance('p', 'b', ['postgres']),
+      ]);
+
+      expect(delayed).toHaveBeenCalled();
+      expect(results.every(result => result.status === 'rejected')).toBe(true);
+      expect(dirs).toHaveLength(2);
+      expect(dirs[0]?.split('/cloudsql/')[0]).toBe(dirs[1]?.split('/cloudsql/')[0]);
+    } finally {
+      delayed.mockRestore();
+      await started.stopAll();
+    }
+  });
+});
+
 describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
   const roots: string[] = [];
   const planes: PostgresServerDataPlane[] = [];
@@ -143,6 +238,7 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
     }
 
     await started.dropDatabase('p/1', 'inst', database);
+    await started.dropDatabase('p/1', 'inst', 'postgres');
     await started.dropInstance('p/1', 'inst');
 
     expect(await Bun.file(join(root, 'cloudsql', 'p%2F1', 'inst', 'PG_VERSION')).exists()).toBe(
@@ -205,6 +301,49 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
       expect((await again`select id from kept`)[0].id).toBe(1);
     } finally {
       await again.close({ timeout: 0 });
+    }
+  });
+
+  test('drops the default database and a role that still has a session', async () => {
+    const { plane: started, root } = await plane('sqlite');
+    const port = await started.startInstance('p', 'inst', ['postgres']);
+    const dataDir = join(root, 'cloudsql', 'p', 'inst');
+
+    await started.upsertUser('p', 'inst', {
+      name: 'app',
+      password: 'secret',
+      memberOf: ['cloudsqlsuperuser'],
+    });
+    await expect(
+      started.upsertUser('p', 'inst', {
+        name: 'kinglet_admin',
+        password: 'taken',
+        memberOf: [],
+      })
+    ).rejects.toThrow(/reserved/);
+
+    const held = new SQL({
+      url: `postgres://app:secret@127.0.0.1:${port}/postgres`,
+      tls: false,
+      max: 1,
+    });
+
+    expect((await held<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
+    await started.dropUser('p', 'inst', 'app');
+    await expect(Promise.resolve(held`select 1`)).rejects.toThrow();
+    await held.close({ timeout: 0 });
+    await started.dropDatabase('p', 'inst', 'postgres');
+
+    const manager = new PostgresProcessManager(logger);
+    const dropped = manager.openAdminConnection(dataDir, port ?? 0, 'postgres');
+    const maintenance = manager.openAdminConnection(dataDir, port ?? 0, 'template1');
+
+    try {
+      await expect(Promise.resolve(dropped`select 1`)).rejects.toThrow();
+      expect((await maintenance<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
+    } finally {
+      await dropped.close({ timeout: 0 });
+      await maintenance.close({ timeout: 0 });
     }
   });
 

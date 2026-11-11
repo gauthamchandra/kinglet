@@ -419,6 +419,14 @@ describe('SqlAdminService', () => {
         'NOT_FOUND'
       );
     });
+
+    test('deleteDatabase keeps the record when the data plane cannot drop it', async () => {
+      await service.createDatabase('p1', 'db-a', { name: 'appdb' });
+      dataPlane.dropDatabaseFailure = new Error('not running');
+
+      await expect(service.deleteDatabase('p1', 'db-a', 'appdb')).rejects.toThrow('not running');
+      expect(await repo.getDatabase('p1', 'db-a', 'appdb')).not.toBeNull();
+    });
   });
 
   describe('users', () => {
@@ -525,6 +533,33 @@ describe('SqlAdminService', () => {
       const list = await service.listUsers('p1', 'db-a');
 
       expect(list.items.find(u => u.name === 'app')).toBeUndefined();
+    });
+
+    test('createUser rejects a reserved role and stores nothing', async () => {
+      const promise = service.createUser('p1', 'db-a', {
+        name: 'kinglet_admin',
+        password: 'x',
+      });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+      expect(await repo.getUser('p1', 'db-a', 'kinglet_admin')).toBeNull();
+    });
+
+    test('createUser removes the row when the role cannot be created', async () => {
+      dataPlane.upsertFailure = new Error('role name is reserved');
+
+      await expect(
+        service.createUser('p1', 'db-a', { name: 'app', password: 'x' })
+      ).rejects.toThrow('reserved');
+      expect(await repo.getUser('p1', 'db-a', 'app')).toBeNull();
+    });
+
+    test('deleteUser restores the row when the role cannot be dropped', async () => {
+      await service.createUser('p1', 'db-a', { name: 'app', password: 'x' });
+      dataPlane.dropUserFailure = new Error('still logged in');
+
+      await expect(service.deleteUser('p1', 'db-a', 'app')).rejects.toThrow('still logged in');
+      expect(await repo.getUser('p1', 'db-a', 'app')).not.toBeNull();
     });
 
     test('deleteUser without a name throws INVALID_ARGUMENT', async () => {

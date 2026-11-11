@@ -5,7 +5,7 @@
  * process and issues the DDL the admin API asked for. See ADR-019.
  */
 
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import type { SQL } from 'bun';
@@ -41,6 +41,12 @@ interface RunningInstance {
 }
 
 const SUPERUSER_ROLE = 'cloudsqlsuperuser';
+const RESERVED_ROLES = new Set(['kinglet_admin', SUPERUSER_ROLE]);
+
+/** Names the data plane owns, plus Postgres's `pg_` prefix. The admin API must not alter them. */
+export function isReservedCloudSqlRole(name: string): boolean {
+  return RESERVED_ROLES.has(name) || name.startsWith('pg_');
+}
 
 /** Quote a Postgres identifier. Names come from the admin API, so `"` is doubled. */
 export function quoteIdentifier(name: string): string {
@@ -83,6 +89,7 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
   private readonly mutex = new ResourceMutex();
   private readonly running = new Map<string, RunningInstance>();
   private tempRoot: string | undefined;
+  private tempRootPromise: Promise<string> | undefined;
   private warnedUnavailable = false;
 
   constructor(
@@ -137,11 +144,24 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     return this.mutex.runExclusively(instanceKey(project, instance), async () => {
       const current = this.running.get(instanceKey(project, instance));
 
-      if (current == null) return;
+      if (current == null) {
+        if (!(await this.clusterExists(project, instance))) return;
 
-      await this.admin(current, async sql => {
-        await sql.unsafe(`DROP DATABASE IF EXISTS ${quoteIdentifier(database)} WITH (FORCE)`);
-      });
+        throw new Error(
+          `Cloud SQL instance ${project}/${instance} is not running, so database ${database} was not dropped`
+        );
+      }
+
+      // DROP DATABASE cannot run inside the database being dropped.
+      const maintenance = database === 'postgres' ? 'template1' : 'postgres';
+
+      await this.admin(
+        current,
+        async sql => {
+          await sql.unsafe(`DROP DATABASE IF EXISTS ${quoteIdentifier(database)} WITH (FORCE)`);
+        },
+        maintenance
+      );
     });
   }
 
@@ -160,6 +180,7 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
 
     await rm(this.tempRoot, { recursive: true, force: true });
     this.tempRoot = undefined;
+    this.tempRootPromise = undefined;
   }
 
   getPort(project: string, instance: string): number | null {
@@ -168,6 +189,10 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
 
   async upsertUser(project: string, instance: string, user: DataPlaneLogin): Promise<void> {
     return this.mutex.runExclusively(instanceKey(project, instance), async () => {
+      if (isReservedCloudSqlRole(user.name)) {
+        throw new Error(`Role ${user.name} is reserved`);
+      }
+
       const current = this.running.get(instanceKey(project, instance));
 
       if (current == null) return;
@@ -203,6 +228,10 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
 
   async dropUser(project: string, instance: string, userName: string): Promise<void> {
     return this.mutex.runExclusively(instanceKey(project, instance), async () => {
+      if (isReservedCloudSqlRole(userName)) {
+        throw new Error(`Role ${userName} is reserved`);
+      }
+
       const current = this.running.get(instanceKey(project, instance));
 
       if (current == null) return;
@@ -211,6 +240,8 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
         const existing = await sql`SELECT 1 AS one FROM pg_roles WHERE rolname = ${userName}`;
 
         if (existing.length === 0) return [] as string[];
+
+        await sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = ${userName} AND pid <> pg_backend_pid()`;
 
         const rows = await sql<{ datname: string }[]>`
           SELECT datname FROM pg_database WHERE datallowconn
@@ -234,9 +265,23 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
         );
       }
 
-      await this.admin(current, async sql => {
-        await sql.unsafe(`DROP ROLE IF EXISTS ${ident}`);
-      });
+      try {
+        await this.dropRole(current, ident);
+      } catch (error) {
+        if (postgresErrorCode(error) !== '55006') throw error;
+
+        await Bun.sleep(100);
+        await this.admin(current, async sql => {
+          await sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = ${userName} AND pid <> pg_backend_pid()`;
+        });
+        await this.dropRole(current, ident);
+      }
+    });
+  }
+
+  private async dropRole(current: RunningInstance, ident: string): Promise<void> {
+    await this.admin(current, async sql => {
+      await sql.unsafe(`DROP ROLE IF EXISTS ${ident}`);
     });
   }
 
@@ -277,6 +322,7 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
 
     try {
       await mkdir(dirname(dataDir), { recursive: true });
+      await this.refusePgliteLayout(dataDir);
       await this.options.processManager.ensureInitialized(dataDir);
       await this.options.processManager.start(dataDir, port);
       const current = { port, dataDir };
@@ -333,12 +379,58 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     );
   }
 
-  private async rootDirectory(): Promise<string> {
-    if (this.options.dataDirectory != null) return this.options.dataDirectory;
+  private rootDirectory(): Promise<string> {
+    if (this.options.dataDirectory != null) return Promise.resolve(this.options.dataDirectory);
 
-    this.tempRoot ??= await mkdtemp(join(tmpdir(), 'kinglet-pg-'));
+    // Assign the promise before the first await so two creates share one root.
+    this.tempRootPromise ??= this.createTempRoot();
 
-    return this.tempRoot;
+    return this.tempRootPromise;
+  }
+
+  private async createTempRoot(): Promise<string> {
+    try {
+      const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-'));
+
+      this.tempRoot = root;
+
+      return root;
+    } catch (error) {
+      this.tempRootPromise = undefined;
+      throw error;
+    }
+  }
+
+  private async clusterExists(project: string, instance: string): Promise<boolean> {
+    const root = this.options.dataDirectory ?? this.tempRoot;
+
+    if (root == null) return false;
+
+    try {
+      const info = await stat(this.instanceDirectory(root, project, instance));
+
+      return info.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  private async refusePgliteLayout(dataDir: string): Promise<void> {
+    let entries: string[];
+
+    try {
+      entries = await readdir(dataDir);
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') return;
+
+      throw error;
+    }
+
+    if (entries.includes('PG_VERSION') || entries.length === 0) return;
+
+    throw new Error(
+      `Refusing to replace ${dataDir} with an empty Postgres cluster. It still has files from the PGlite data plane. Move that directory aside and start the instance again; it will come up empty.`
+    );
   }
 
   private instanceDirectory(root: string, project: string, instance: string): string {
