@@ -329,6 +329,30 @@ describe('PostgresContainerSupervisor.start', () => {
     }
   });
 
+  test('fails immediately when the container has already exited', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-container-test-'));
+
+    try {
+      const supervisor = new PostgresContainerSupervisor({
+        image: 'postgres:18',
+        runner: async args => {
+          if (args[1] === 'inspect') return { exitCode: 0, stderr: '', stdout: 'exited\n' };
+
+          return { exitCode: 0, stderr: '' };
+        },
+        readinessTimeoutMs: 30_000,
+      });
+
+      const started = Date.now();
+      const promise = supervisor.start(root, 54326);
+
+      await expect(promise).rejects.toThrow(/exited before it was ready/);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('times out and stops the container when postgres is not ready', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kinglet-container-test-'));
     const calls: string[][] = [];
@@ -422,7 +446,11 @@ describe('PostgresContainerSupervisor.openAdminConnection', () => {
 
       const sql = supervisor.openAdminConnection(root, 54325);
 
-      expect(sql).toBeDefined();
+      expect(sql.options.hostname).toBe('127.0.0.1');
+      expect(sql.options.port).toBe(54325);
+      expect(sql.options.username).toBe('kinglet_admin');
+      expect(sql.options.password).toBe('secret');
+      expect(sql.options.database).toBe('template1');
       await sql.close({ timeout: 0 });
     } finally {
       await rm(root, { recursive: true, force: true });

@@ -26,7 +26,9 @@ import { type PostgresSupervisor, quoteLiteral } from './postgres-server-data-pl
  * A function that runs a docker CLI command and returns the exit code and
  * captured stderr. Injected so unit tests can stub docker without a daemon.
  */
-export type DockerCommandRunner = (args: string[]) => Promise<{ exitCode: number; stderr: string }>;
+export type DockerCommandResult = { exitCode: number; stderr: string; stdout?: string };
+
+export type DockerCommandRunner = (args: string[]) => Promise<DockerCommandResult>;
 
 export interface PostgresContainerSupervisorOptions {
   /** The image to run for each Postgres instance (e.g. `postgres:18`). */
@@ -60,6 +62,10 @@ function isMissingContainer(stderr: string): boolean {
   return /no such container/i.test(stderr);
 }
 
+function containerAdminUrl(password: string, port: number, database: string): string {
+  return `postgres://kinglet_admin:${encodeURIComponent(password)}@127.0.0.1:${port}/${encodeURIComponent(database)}`;
+}
+
 function readAdminPassword(dataDir: string): string {
   try {
     const password = readFileSync(join(dataDir, ADMIN_PASSWORD_FILE), 'utf8').trim();
@@ -85,32 +91,39 @@ function containerUser(): string {
   return `${uid}:${gid}`;
 }
 
-async function spawnRunner(args: string[]): Promise<{ exitCode: number; stderr: string }> {
+async function readPipe(
+  stream: ReadableStream<Uint8Array> | number | null | undefined
+): Promise<string> {
+  if (stream == null || typeof stream === 'number') return '';
+
   const chunks: string[] = [];
-  const child = Bun.spawn(args, { stdout: 'ignore', stderr: 'pipe' });
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
 
-  const stderrStream = child.stderr;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
 
-  if (stderrStream != null && typeof stderrStream !== 'number') {
-    const reader = stderrStream.getReader();
-    const decoder = new TextDecoder();
+      if (done) break;
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) break;
-
-        if (value != null) chunks.push(decoder.decode(value, { stream: true }));
-      }
-    } catch {
-      // Pipe closes when child exits.
+      if (value != null) chunks.push(decoder.decode(value, { stream: true }));
     }
+  } catch {
+    // Pipe closes when child exits.
   }
 
-  const exitCode = await child.exited;
+  return chunks.join('');
+}
 
-  return { exitCode, stderr: chunks.join('').slice(-500) };
+async function spawnRunner(args: string[]): Promise<DockerCommandResult> {
+  const child = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    readPipe(child.stdout),
+    readPipe(child.stderr),
+    child.exited,
+  ]);
+
+  return { exitCode, stderr: stderr.slice(-500), stdout: stdout.slice(-500) };
 }
 
 export class PostgresContainerSupervisor implements PostgresSupervisor {
@@ -248,7 +261,7 @@ export class PostgresContainerSupervisor implements PostgresSupervisor {
     const password = readAdminPassword(resolve(dataDir));
 
     return new SQL({
-      url: `postgres://kinglet_admin:${encodeURIComponent(password)}@127.0.0.1:${port}/${encodeURIComponent(database)}`,
+      url: containerAdminUrl(password, port, database),
       tls: false,
       connectionTimeout: 1,
       max: 1,
@@ -276,6 +289,8 @@ export class PostgresContainerSupervisor implements PostgresSupervisor {
     let stderr = '';
 
     do {
+      await this.assertContainerRunning(name);
+
       const result = await this.runner([
         'docker',
         'exec',
@@ -303,10 +318,22 @@ export class PostgresContainerSupervisor implements PostgresSupervisor {
     );
   }
 
+  private async assertContainerRunning(name: string): Promise<void> {
+    const result = await this.runner(['docker', 'inspect', '-f', '{{.State.Status}}', name]);
+    const status = (result.stdout ?? '').trim();
+
+    if (result.exitCode === 0 && status.length > 0 && status !== 'running') {
+      throw new Error(`Container ${name} exited before it was ready (${status})`);
+    }
+  }
+
   private async waitForReady(dataDir: string, port: number): Promise<void> {
     const deadline = Date.now() + (this.options.readinessTimeoutMs ?? 30000);
+    const name = containerNameForTest(dataDir);
 
     while (Date.now() < deadline) {
+      await this.assertContainerRunning(name);
+
       if (await isPortListening(port)) {
         const sql = this.openAdminConnection(dataDir, port);
 
