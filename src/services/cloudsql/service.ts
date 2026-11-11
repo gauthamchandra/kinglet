@@ -64,7 +64,7 @@ export interface ListOperationsResponse {
   nextPageToken?: string | undefined;
 }
 
-/** Cloud SQL users are roles in `cloudsqlsuperuser`. An empty password cannot log in. */
+/** Cloud SQL built-in users are in `cloudsqlsuperuser` and can create databases and roles. An empty password cannot log in. */
 export function cloudSqlLogin(name: string, password: string): DataPlaneLogin {
   return {
     name,

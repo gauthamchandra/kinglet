@@ -356,6 +356,35 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
     }
   });
 
+  test('a built-in user can create a database and a role', async () => {
+    const { plane: started } = await plane('sqlite');
+    const port = await started.startInstance('p', 'inst', ['postgres']);
+
+    await started.upsertUser('p', 'inst', {
+      name: 'app',
+      password: 'secret',
+      memberOf: ['cloudsqlsuperuser'],
+    });
+
+    const client = new SQL({
+      url: `postgres://app:secret@127.0.0.1:${port}/postgres`,
+      tls: false,
+      max: 1,
+    });
+
+    try {
+      await client`create database appdb`;
+      await client`create role app_reader`;
+      const rows = await client<{ name: string }[]>`
+        select datname as name from pg_database where datname = 'appdb'
+      `;
+
+      expect(rows[0]?.name).toBe('appdb');
+    } finally {
+      await client.close({ timeout: 0 });
+    }
+  });
+
   test('drops the default database and a role that still has a session', async () => {
     const { plane: started, root } = await plane('sqlite');
     const port = await started.startInstance('p', 'inst', ['postgres']);

@@ -204,9 +204,12 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
         const ident = quoteIdentifier(user.name);
         const existing = await sql`SELECT 1 AS one FROM pg_roles WHERE rolname = ${user.name}`;
         const login = user.password != null && user.password !== '';
-        const attributes = `${user.superuser === true ? 'SUPERUSER' : 'NOSUPERUSER'} ${
-          login ? 'LOGIN' : 'NOLOGIN'
-        }`;
+        // Cloud SQL built-in users have CREATEDB and CREATEROLE on the login.
+        // Membership in cloudsqlsuperuser does not grant those attributes.
+        const attributes =
+          user.superuser === true
+            ? `SUPERUSER ${login ? 'LOGIN' : 'NOLOGIN'}`
+            : `NOSUPERUSER ${login ? 'LOGIN CREATEDB CREATEROLE' : 'NOLOGIN NOCREATEDB NOCREATEROLE'}`;
 
         if (existing.length === 0 && login && user.password != null) {
           await sql.unsafe(
