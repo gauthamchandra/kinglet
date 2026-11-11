@@ -230,11 +230,21 @@ export class SqlAdminService {
 
     const databases = await this.repo.listDatabases(project, name);
 
-    await this.dataPlane.restartInstance(
-      project,
-      name,
-      databases.map(database => database.name)
-    );
+    try {
+      await this.dataPlane.restartInstance(
+        project,
+        name,
+        databases.map(database => database.name)
+      );
+
+      // Startup rehydration already does this. An explicit restart has to as
+      // well, so a cluster created again comes back with the roles sqlite has.
+      for (const user of await this.repo.listUsers(project, name)) {
+        await this.dataPlane.upsertUser(project, name, cloudSqlLogin(user.name, user.password));
+      }
+    } catch (error) {
+      throw this.dataPlaneError(error, `Failed to restart ${project}/${name}`);
+    }
 
     return this.recordOperation(project, OperationType.RESTART, name);
   }
@@ -410,7 +420,7 @@ export class SqlAdminService {
         charset: existing.charset,
         collation: existing.collation,
       });
-      throw error;
+      throw this.dataPlaneError(error, `Failed to drop database ${name} on ${project}/${instance}`);
     }
 
     return this.recordOperation(project, OperationType.DELETE_DATABASE, instance);
@@ -460,7 +470,10 @@ export class SqlAdminService {
       );
     } catch (error) {
       await this.repo.deleteUser(project, instance, request.name, request.host);
-      throw error;
+      throw this.dataPlaneError(
+        error,
+        `Failed to create user ${request.name} on ${project}/${instance}`
+      );
     }
 
     return this.recordOperation(project, OperationType.CREATE_USER, instance);
@@ -555,7 +568,10 @@ export class SqlAdminService {
         await this.repo.updateUser(project, instance, targetName, targetHost, {
           password: previous.password,
         });
-        throw error;
+        throw this.dataPlaneError(
+          error,
+          `Failed to update user ${targetName} on ${project}/${instance}`
+        );
       }
     }
 
@@ -611,13 +627,21 @@ export class SqlAdminService {
         type: existing.type,
         password: existing.password,
       });
-      throw error;
+      throw this.dataPlaneError(error, `Failed to delete user ${name} on ${project}/${instance}`);
     }
 
     return this.recordOperation(project, OperationType.DELETE_USER, instance);
   }
 
   // ── Internals ──
+
+  private dataPlaneError(error: unknown, action: string): SqlAdminError {
+    if (error instanceof SqlAdminError) return error;
+
+    const detail = error instanceof Error ? error.message : String(error);
+
+    return new SqlAdminError('INTERNAL', `${action}: ${detail}`);
+  }
 
   private async requireInstance(project: string, name: string): Promise<SqlInstanceRecord> {
     const record = await this.repo.getInstance(project, name);

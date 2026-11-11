@@ -94,6 +94,10 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
   private readonly ports: PortAllocator;
   private readonly mutex = new ResourceMutex();
   private readonly running = new Map<string, RunningInstance>();
+  /** Starts that have not registered in {@link running} yet. Shutdown has to wait for them. */
+  private readonly pendingStarts = new Set<Promise<unknown>>();
+  /** Non-zero while {@link stopAll} is tearing instances down. New starts fail until it returns. */
+  private stopping = 0;
   private tempRoot: string | undefined;
   private tempRootPromise: Promise<string> | undefined;
   private warnedUnavailable = false;
@@ -113,9 +117,21 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     instance: string,
     databases: string[]
   ): Promise<number | null> {
-    return this.mutex.runExclusively(instanceKey(project, instance), () =>
+    if (this.stopping > 0) {
+      throw new Error(`${this.options.product.productLabel} data plane is shutting down`);
+    }
+
+    const work = this.mutex.runExclusively(instanceKey(project, instance), () =>
       this.startInstanceLocked(project, instance, databases)
     );
+
+    const tracked = work.finally(() => {
+      this.pendingStarts.delete(tracked);
+    });
+
+    this.pendingStarts.add(tracked);
+
+    return tracked;
   }
 
   async stopInstance(project: string, instance: string): Promise<void> {
@@ -148,15 +164,13 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
 
   async dropDatabase(project: string, instance: string, database: string): Promise<void> {
     return this.mutex.runExclusively(instanceKey(project, instance), async () => {
-      const current = this.running.get(instanceKey(project, instance));
+      const current = await this.runningInstance(
+        project,
+        instance,
+        `database ${database} was not dropped`
+      );
 
-      if (current == null) {
-        if (!(await this.clusterExists(project, instance))) return;
-
-        throw new Error(
-          `Cloud SQL instance ${project}/${instance} is not running, so database ${database} was not dropped`
-        );
-      }
+      if (current == null) return;
 
       if (database === 'template0' || database === 'template1') {
         throw new Error(`Database ${database} is required to administer the instance`);
@@ -169,21 +183,32 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
   }
 
   async stopAll(): Promise<void> {
-    const keys = [...this.running.keys()];
+    // A start registers only after initdb and the first databases exist.
+    // Snapshotting `running` before that returns leaves the child running,
+    // and in memory mode the temp root is removed under it.
+    this.stopping++;
 
-    await Promise.all(
-      keys.map(key => {
-        const { project, instance } = splitInstanceKey(key);
+    try {
+      await Promise.allSettled([...this.pendingStarts]);
 
-        return this.stopInstance(project, instance);
-      })
-    );
+      const keys = [...this.running.keys()];
 
-    if (this.tempRoot == null) return;
+      await Promise.all(
+        keys.map(key => {
+          const { project, instance } = splitInstanceKey(key);
 
-    await rm(this.tempRoot, { recursive: true, force: true });
-    this.tempRoot = undefined;
-    this.tempRootPromise = undefined;
+          return this.stopInstance(project, instance);
+        })
+      );
+
+      if (this.tempRoot == null) return;
+
+      await rm(this.tempRoot, { recursive: true, force: true });
+      this.tempRoot = undefined;
+      this.tempRootPromise = undefined;
+    } finally {
+      this.stopping--;
+    }
   }
 
   getPort(project: string, instance: string): number | null {
@@ -196,7 +221,14 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
         throw new Error(`Role ${user.name} is reserved`);
       }
 
-      const current = this.running.get(instanceKey(project, instance));
+      // A stopped cluster cannot take the password. Returning would let the
+      // admin row move ahead of the role, and the next start would come up
+      // with the password the client thinks it replaced.
+      const current = await this.runningInstance(
+        project,
+        instance,
+        `user ${user.name} was not changed`
+      );
 
       if (current == null) return;
 
@@ -238,15 +270,13 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
         throw new Error(`Role ${userName} is reserved`);
       }
 
-      const current = this.running.get(instanceKey(project, instance));
+      const current = await this.runningInstance(
+        project,
+        instance,
+        `user ${userName} was not dropped`
+      );
 
-      if (current == null) {
-        if (!(await this.clusterExists(project, instance))) return;
-
-        throw new Error(
-          `Cloud SQL instance ${project}/${instance} is not running, so user ${userName} was not dropped`
-        );
-      }
+      if (current == null) return;
 
       const databases = await this.admin(current, async sql => {
         const existing = await sql`SELECT 1 AS one FROM pg_roles WHERE rolname = ${userName}`;
@@ -297,11 +327,29 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     });
   }
 
+  private async runningInstance(
+    project: string,
+    instance: string,
+    action: string
+  ): Promise<RunningInstance | null> {
+    const current = this.running.get(instanceKey(project, instance));
+
+    if (current != null) return current;
+
+    if (!(await this.clusterExists(project, instance))) return null;
+
+    throw new Error(`Cloud SQL instance ${project}/${instance} is not running, so ${action}`);
+  }
+
   private async startInstanceLocked(
     project: string,
     instance: string,
     databases: string[]
   ): Promise<number | null> {
+    if (this.stopping > 0) {
+      throw new Error(`${this.options.product.productLabel} data plane is shutting down`);
+    }
+
     if (!this.options.processManager.isPostgresAvailable()) {
       this.warnUnavailable();
 

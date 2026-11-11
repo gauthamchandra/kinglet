@@ -166,7 +166,7 @@ describe('PostgresServerDataPlane directory safety', () => {
     }
   });
 
-  test('refuses to drop a database whose cluster is on disk but not running', async () => {
+  test('refuses to change a database or user whose cluster is on disk but not running', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kinglet-stopped-'));
     const version = join(root, 'cloudsql', 'p', 'inst', 'PG_VERSION');
 
@@ -186,9 +186,96 @@ describe('PostgresServerDataPlane directory safety', () => {
     try {
       await expect(started.dropDatabase('p', 'inst', 'app')).rejects.toThrow(/not running/);
       await expect(started.dropUser('p', 'inst', 'app')).rejects.toThrow(/not running/);
+      await expect(
+        started.upsertUser('p', 'inst', { name: 'app', password: 'next', memberOf: [] })
+      ).rejects.toThrow(/not running/);
       expect(await Bun.file(version).exists()).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('stopAll waits for a start still in progress and rejects a new one', async () => {
+    let releaseStart: () => void = () => {};
+    const release = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    let entered: () => void = () => {};
+    const startEntered = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    const stopped: string[] = [];
+    let dataDir = '';
+    const sql = Object.assign(async () => [{ one: 1 }], {
+      unsafe: async () => {},
+      close: async () => {},
+    });
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: null,
+      portRangeStart: 47930,
+      portRangeEnd: 47931,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async (dir: string) => {
+          await mkdir(dir, { recursive: true });
+        },
+        start: async (dir: string) => {
+          if (dataDir.length === 0) {
+            dataDir = dir;
+            entered();
+            await release;
+
+            return;
+          }
+
+          throw new Error(`unexpected start ${dir}`);
+        },
+        stop: async (dir: string) => {
+          stopped.push(dir);
+        },
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    const starting = plane.startInstance('p', 'inst', ['postgres']);
+
+    try {
+      await startEntered;
+
+      const stopping = plane.stopAll();
+      let finished = false;
+
+      void stopping.then(() => {
+        finished = true;
+      });
+      await Bun.sleep(30);
+      expect(finished).toBe(false);
+      expect(
+        await fsPromises.stat(dataDir).then(
+          () => true,
+          () => false
+        )
+      ).toBe(true);
+
+      const late = plane.startInstance('p', 'other', ['postgres']);
+
+      await expect(late).rejects.toThrow(/shutting down/);
+
+      releaseStart();
+      await stopping;
+      await expect(starting).resolves.toBe(47930);
+      expect(stopped).toEqual([dataDir]);
+      expect(plane.getPort('p', 'inst')).toBeNull();
+      expect(
+        await fsPromises.stat(dataDir).then(
+          () => true,
+          () => false
+        )
+      ).toBe(false);
+    } finally {
+      releaseStart();
     }
   });
 
