@@ -36,4 +36,16 @@ export class UserRepository extends ResourceRepository<UserRecord> {
 
     return { users: records, nextPageToken };
   }
+
+  /**
+   * Every user in one cluster without pagination, for applying roles to a new
+   * instance or propagating a change across all running instances.
+   */
+  async listAllUsersInCluster(
+    project: string,
+    location: string,
+    clusterId: string
+  ): Promise<UserRecord[]> {
+    return this.listAllByPrefix(buildUserListPrefix(project, location, clusterId));
+  }
 }

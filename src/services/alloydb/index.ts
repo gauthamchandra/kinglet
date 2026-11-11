@@ -4,9 +4,9 @@
  * <p>Specification: `https://alloydb.googleapis.com/$discovery/rest?version=v1`
  * (revision 20260805).
  *
- * <p>Wires together repositories, HTTP handlers, and the PGlite-backed data
+ * <p>Wires together repositories, HTTP handlers, and the real Postgres data
  * plane that makes an emulated instance something a Postgres client can
- * actually connect to (see docs/adrs/013-cloudsql-pglite-data-plane.md — the
+ * actually connect to (see docs/adrs/019-real-postgres-data-plane.md — the
  * shared data plane lives under `@/shared/postgres-data-plane`).
  *
  * <p>Backup and restore are metadata stubs (persist + echo; no bytes, WAL, or
@@ -53,9 +53,8 @@ import { LocationHandlers } from './location-handlers.ts';
 import {
   ALLOYDB_OPERATIONS_TABLE,
   AlloyDbError,
-  alloydbDataPlaneUser,
+  alloydbDataPlaneLogin,
   buildDataPlaneInstanceKey,
-  buildUserName,
   DEFAULT_DATABASE_NAME,
   parseDataPlaneInstanceKey,
   parseInstanceName,
@@ -132,18 +131,9 @@ export class AlloyDbService {
       this.logger,
       ALLOYDB_DATA_PLANE_PRODUCT,
       this.dataPlaneOptions,
-      async (project, instanceKey, user) => {
-        const parsed = parseDataPlaneInstanceKey(instanceKey);
-
-        if (!parsed) return null;
-
-        // Users are cluster-scoped, so the instance segment plays no part.
-        const record = await users.getByName(
-          buildUserName(project, parsed.location, parsed.clusterId, user)
-        );
-
-        return record ? alloydbDataPlaneUser(record.password) : null;
-      }
+      // lookupUser is no longer called: PostgresServerDataPlane authenticates
+      // over SCRAM-SHA-256 using roles applied via upsertUser.
+      async () => null
     );
 
     // One mutex shared by every service that mutates a cluster's subtree, all
@@ -171,12 +161,13 @@ export class AlloyDbService {
         operations,
         clusterMutex,
         this.logger,
-        this.dataPlane
+        this.dataPlane,
+        users
       ),
       this.responseUtils
     );
     this.userHandlers = new UserHandlers(
-      new UserService(users, clusters, clusterMutex),
+      new UserService(users, clusters, clusterMutex, this.dataPlane, instances),
       this.responseUtils
     );
     this.backupHandlers = new BackupHandlers(
@@ -186,7 +177,7 @@ export class AlloyDbService {
     this.locationHandlers = new LocationHandlers(this.responseUtils);
 
     if (this.dataPlaneOptions.enabled) {
-      await this.rehydrateDataPlane(instances);
+      await this.rehydrateDataPlane(instances, users);
     }
 
     this.logger.info('AlloyDB service initialized');
@@ -281,8 +272,13 @@ export class AlloyDbService {
   /**
    * Rows that outlived the last run, keyed the way the data plane knows them.
    * Rehydration itself — and why it matters — is {@link restartPersistedInstances}.
+   * After restarting each instance, all cluster users are re-applied so the roles
+   * match the stored state — same pattern Cloud SQL follows.
    */
-  private async rehydrateDataPlane(instances: InstanceRepository): Promise<void> {
+  private async rehydrateDataPlane(
+    instances: InstanceRepository,
+    users: UserRepository
+  ): Promise<void> {
     const persisted: PersistedInstance[] = [];
 
     for (const instance of await instances.listAllInstances()) {
@@ -309,6 +305,37 @@ export class AlloyDbService {
       this.dataPlane,
       persisted
     );
+
+    for (const entry of persisted) {
+      const parsed = parseDataPlaneInstanceKey(entry.instance);
+
+      if (!parsed) continue;
+
+      const clusterUsers = await users.listAllUsersInCluster(
+        entry.project,
+        parsed.location,
+        parsed.clusterId
+      );
+
+      for (const user of clusterUsers) {
+        const userId = user.name.split('/users/')[1];
+
+        if (!userId) continue;
+
+        try {
+          await this.dataPlane.upsertUser(
+            entry.project,
+            entry.instance,
+            alloydbDataPlaneLogin(userId, user.password)
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Failed to restore AlloyDB user ${user.name} on ${entry.project}/${entry.instance}, leaving that role unset`,
+            error
+          );
+        }
+      }
+    }
   }
 
   private buildOperationsRoutes(): RouteDefinition[] {

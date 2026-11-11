@@ -13,6 +13,7 @@ import type { InstanceRepository } from './instance-repository.ts';
 import type { ConnectionInfo, InstanceRecord, InstanceResponse } from './types.ts';
 import {
   AlloyDbError,
+  alloydbDataPlaneLogin,
   buildClusterName,
   buildConnectionInfo,
   buildDataPlaneInstanceKey,
@@ -30,6 +31,7 @@ import {
   parseSpecJson,
 } from './types.ts';
 import { resolveMaskedFields } from './update-mask.ts';
+import type { UserRepository } from './user-repository.ts';
 
 const RESOURCE_TYPE = 'Instance';
 
@@ -66,6 +68,7 @@ export class InstanceService {
   private readonly clusterMutex: ResourceMutex;
   private readonly logger: Logger;
   private readonly dataPlane: PostgresDataPlane;
+  private readonly users: UserRepository | undefined;
 
   constructor(
     instances: InstanceRepository,
@@ -73,7 +76,8 @@ export class InstanceService {
     operations: OperationsStore,
     clusterMutex: ResourceMutex,
     logger: Logger,
-    dataPlane: PostgresDataPlane = new DisabledDataPlane()
+    dataPlane: PostgresDataPlane = new DisabledDataPlane(),
+    users?: UserRepository
   ) {
     this.instances = instances;
     this.clusters = clusters;
@@ -81,6 +85,7 @@ export class InstanceService {
     this.clusterMutex = clusterMutex;
     this.logger = logger;
     this.dataPlane = dataPlane;
+    this.users = users;
   }
 
   async createInstance(
@@ -146,6 +151,7 @@ export class InstanceService {
     // Cloud SQL's data plane gives (see ADR-013).
     try {
       await this.dataPlane.startInstance(project, dataPlaneKey, [DEFAULT_DATABASE_NAME]);
+      await this.applyClusterUsersToInstance(project, location, clusterId, dataPlaneKey);
     } catch (error) {
       // An instance whose rows exist but whose endpoint never came up would
       // advertise an address nothing answers on. Undoing the rows keeps create
@@ -221,6 +227,36 @@ export class InstanceService {
       instances: result.instances.map(instanceRecordToResponse),
       nextPageToken: result.nextPageToken,
     };
+  }
+
+  /**
+   * Apply every user currently stored for `clusterId` to the data plane of
+   * `instanceKey`. Called immediately after `startInstance` so each instance
+   * has the full set of roles from the moment it boots.
+   *
+   * <p>No-op when no user repository is wired (control-plane-only tests).
+   */
+  private async applyClusterUsersToInstance(
+    project: string,
+    location: string,
+    clusterId: string,
+    instanceKey: string
+  ): Promise<void> {
+    if (!this.users) return;
+
+    const clusterUsers = await this.users.listAllUsersInCluster(project, location, clusterId);
+
+    for (const user of clusterUsers) {
+      const userId = user.name.split('/users/')[1];
+
+      if (!userId) continue;
+
+      await this.dataPlane.upsertUser(
+        project,
+        instanceKey,
+        alloydbDataPlaneLogin(userId, user.password)
+      );
+    }
   }
 
   /**

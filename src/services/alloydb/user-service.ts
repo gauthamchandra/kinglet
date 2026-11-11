@@ -13,17 +13,23 @@
  * users gate connections; they are not Postgres roles.
  */
 
+import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
+import type { InstanceRepository } from './instance-repository.ts';
 import type { UserRecord, UserResponse } from './types.ts';
 import {
   AlloyDbError,
+  alloydbDataPlaneLogin,
   buildClusterName,
+  buildDataPlaneInstanceKey,
   buildUserName,
   isValidUserId,
   MUTABLE_USER_FIELDS,
   normalizeEnum,
   normalizeSpecFieldValue,
+  parseInstanceName,
   parseSpecJson,
   USER_SPEC_ENUM_FIELDS,
   USER_TYPE_ENUM,
@@ -54,11 +60,21 @@ export class UserService {
   private readonly users: UserRepository;
   private readonly clusters: ClusterRepository;
   private readonly clusterMutex: ResourceMutex;
+  private readonly dataPlane: PostgresDataPlane;
+  private readonly instances: InstanceRepository | undefined;
 
-  constructor(users: UserRepository, clusters: ClusterRepository, clusterMutex: ResourceMutex) {
+  constructor(
+    users: UserRepository,
+    clusters: ClusterRepository,
+    clusterMutex: ResourceMutex,
+    dataPlane: PostgresDataPlane = new DisabledDataPlane(),
+    instances?: InstanceRepository
+  ) {
     this.users = users;
     this.clusters = clusters;
     this.clusterMutex = clusterMutex;
+    this.dataPlane = dataPlane;
+    this.instances = instances;
   }
 
   async createUser(
@@ -102,7 +118,23 @@ export class UserService {
       return userRecordToResponse(record);
     }
 
-    return userRecordToResponse(await this.users.create(record));
+    const created = await this.users.create(record);
+
+    try {
+      await this.applyUserToAllInstances(project, location, clusterId, userId, record.password);
+    } catch (error) {
+      await this.users.delete(name);
+
+      throw new AlloyDbError(
+        'INTERNAL',
+        `Failed to create user ${name} on the data plane: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        name
+      );
+    }
+
+    return userRecordToResponse(created);
   }
 
   async getUser(
@@ -184,6 +216,22 @@ export class UserService {
       throw new AlloyDbError('NOT_FOUND', `User ${name} not found`, name);
     }
 
+    if (updates.password !== undefined) {
+      try {
+        await this.applyUserToAllInstances(project, location, clusterId, userId, updates.password);
+      } catch (error) {
+        await this.users.update(name, { password: existing.password });
+
+        throw new AlloyDbError(
+          'INTERNAL',
+          `Failed to update user ${name} on the data plane: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          name
+        );
+      }
+    }
+
     return userRecordToResponse(applied);
   }
 
@@ -207,12 +255,25 @@ export class UserService {
     options: ValidatableOptions
   ): Promise<void> {
     const name = buildUserName(project, location, clusterId, userId);
-
-    await this.getUserOrThrow(name);
+    const existing = await this.getUserOrThrow(name);
 
     if (options.validateOnly === true) return;
 
     await this.users.delete(name);
+
+    try {
+      await this.dropUserFromAllInstances(project, location, clusterId, userId);
+    } catch (error) {
+      await this.users.create(existing);
+
+      throw new AlloyDbError(
+        'INTERNAL',
+        `Failed to drop user ${name} from the data plane: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        name
+      );
+    }
   }
 
   private async getUserOrThrow(name: string): Promise<UserRecord> {
@@ -223,6 +284,66 @@ export class UserService {
     }
 
     return record;
+  }
+
+  /**
+   * Upsert the role for `userId` on every instance currently running in the
+   * cluster. No-op when no instance repository is wired (control-plane-only
+   * tests that never set up real Postgres).
+   */
+  private async applyUserToAllInstances(
+    project: string,
+    location: string,
+    clusterId: string,
+    userId: string,
+    password: string
+  ): Promise<void> {
+    if (!this.instances) return;
+
+    const clusterInstances = await this.instances.listAllInstancesInCluster(
+      project,
+      location,
+      clusterId
+    );
+
+    for (const instance of clusterInstances) {
+      const parsed = parseInstanceName(instance.name);
+
+      if (!parsed) continue;
+
+      const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
+
+      await this.dataPlane.upsertUser(project, key, alloydbDataPlaneLogin(userId, password));
+    }
+  }
+
+  /**
+   * Drop the role for `userId` from every instance currently running in the
+   * cluster. No-op when no instance repository is wired.
+   */
+  private async dropUserFromAllInstances(
+    project: string,
+    location: string,
+    clusterId: string,
+    userId: string
+  ): Promise<void> {
+    if (!this.instances) return;
+
+    const clusterInstances = await this.instances.listAllInstancesInCluster(
+      project,
+      location,
+      clusterId
+    );
+
+    for (const instance of clusterInstances) {
+      const parsed = parseInstanceName(instance.name);
+
+      if (!parsed) continue;
+
+      const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
+
+      await this.dataPlane.dropUser(project, key, userId);
+    }
   }
 
   private async requireCluster(
