@@ -229,8 +229,9 @@ export class PostgresProcessManager {
     };
   }
 
-  private readPgConfig(option: string): string | null {
-    const pgConfig = Bun.which('pg_config');
+  private readPgConfig(option: string, binDir?: string | null): string | null {
+    const besideServer = binDir == null ? null : Bun.which(join(binDir, 'pg_config'));
+    const pgConfig = besideServer ?? Bun.which('pg_config');
 
     if (pgConfig == null) return null;
 
@@ -311,7 +312,10 @@ export class PostgresProcessManager {
       join(templateDir, 'pg_hba.conf'),
       'local all kinglet_admin trust\nhost all all 0.0.0.0/0 scram-sha-256\nhost all all ::/0 scram-sha-256\n'
     );
-    const shareDir = this.readPgConfig('--sharedir');
+    // PATH pg_config can be an older client, or the PGDG wrapper that exits
+    // when it cannot see a server binary. The share directory has to belong
+    // to the server this process will exec.
+    const shareDir = this.readPgConfig('--sharedir', this.resolveBinDir());
     const hasStatisticsExtension =
       shareDir != null &&
       (await Bun.file(join(shareDir, 'extension', 'pg_stat_statements.control')).exists());

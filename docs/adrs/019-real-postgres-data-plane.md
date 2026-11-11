@@ -107,9 +107,11 @@ opt-in, not the default.
 - An empty admin-API password cannot mean "connect with no challenge" under
   scram-only TCP the way the PGlite wire server treated it.
 - Cloud SQL instances are real Postgres servers. AlloyDB is still PGlite.
-  The image does not yet install the server packages, so a stock `docker run`
-  of kinglet has no `postgres` binary and Cloud SQL degrades to metadata-only
-  until that install lands. Nested containers are not that install.
+  The image installs `postgresql-18`, PostGIS, pgvector, and `pg_partman`
+  from PGDG, so a stock `docker run` has a `postgres` binary. Nested
+  containers are not that install. The install uses `--no-install-recommends`,
+  about 420 MiB uncompressed. `setpriv` is already in the slim base through
+  `util-linux`.
 
 ## Follow-ups
 
@@ -117,8 +119,6 @@ Not built here:
 
 - Point AlloyDB at these servers. Cloud SQL already uses them. Keep the
   admin API's response shapes, operations, and errors.
-- Install `postgresql-18`, `pg_partman`, PostGIS, and pgvector in the
-  kinglet image, and confirm `setpriv` is present for the root drop.
 - Optional per-instance container mode, off unless an image is configured.
 - `databaseFlags` applied to `postgresql.conf` / `ALTER SYSTEM`.
 - AlloyDB read pools as streaming replicas.
