@@ -6,7 +6,37 @@ import { SQL } from 'bun';
 import { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
 import { isRealPostgresAvailable } from '../../../test-utils/postgres.ts';
-import { PostgresProcessManager } from './postgres-process-manager.ts';
+import {
+  PostgresProcessManager,
+  preferredServerBinDir,
+} from './postgres-process-manager.ts';
+
+describe('preferredServerBinDir', () => {
+  test('prefers the newest server over an older pg_config bindir', () => {
+    expect(
+      preferredServerBinDir([
+        { directory: '/usr/lib/postgresql/16/bin', version: 16, hasServer: true },
+        { directory: '/usr/bin', version: null, hasServer: true },
+        { directory: '/usr/lib/postgresql/18/bin', version: 18, hasServer: true },
+      ])
+    ).toBe('/usr/lib/postgresql/18/bin');
+  });
+
+  test('ignores a version directory that has no server binaries', () => {
+    expect(
+      preferredServerBinDir([
+        { directory: '/usr/lib/postgresql/18/bin', version: 18, hasServer: false },
+        { directory: '/usr/lib/postgresql/16/bin', version: 16, hasServer: true },
+      ])
+    ).toBe('/usr/lib/postgresql/16/bin');
+  });
+
+  test('uses an unversioned binary when no versioned server exists', () => {
+    expect(
+      preferredServerBinDir([{ directory: '/usr/local/bin', version: null, hasServer: true }])
+    ).toBe('/usr/local/bin');
+  });
+});
 
 describe('Postgres command construction', () => {
   test('reports an unavailable explicit binary directory', () => {

@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -172,13 +173,47 @@ export class PostgresProcessManager {
   private resolveBinDir(): string | null {
     if (this.options.binDir != null) return resolve(this.options.binDir);
 
+    return preferredServerBinDir(this.binDirCandidates());
+  }
+
+  private binDirCandidates(): PostgresBinCandidate[] {
+    const candidates: PostgresBinCandidate[] = [];
     const configured = this.readPgConfig('--bindir');
 
-    if (configured != null) return configured;
+    if (configured != null) candidates.push(this.describeBinDir(configured));
 
     const postgres = Bun.which('postgres');
 
-    return postgres == null ? null : dirname(postgres);
+    if (postgres != null) candidates.push(this.describeBinDir(dirname(postgres)));
+
+    // PGDG keeps each major version here and does not put the server on PATH.
+    // A distro pg_config can point at an older client while 18 is installed beside it.
+    try {
+      for (const version of readdirSync('/usr/lib/postgresql')) {
+        const major = Number(version);
+
+        if (!Number.isInteger(major)) continue;
+
+        candidates.push(this.describeBinDir(join('/usr/lib/postgresql', version, 'bin'), major));
+      }
+    } catch {
+      // No PGDG layout on this machine.
+    }
+
+    return candidates;
+  }
+
+  private describeBinDir(directory: string, version?: number): PostgresBinCandidate {
+    const hasServer = ['postgres', 'initdb'].every(
+      name => Bun.which(join(directory, name)) != null
+    );
+    const parsed = version ?? postgresMajorVersion(directory);
+
+    return {
+      directory,
+      version: parsed != null && Number.isInteger(parsed) ? parsed : null,
+      hasServer,
+    };
   }
 
   private readPgConfig(option: string): string | null {
@@ -410,4 +445,36 @@ class StderrTail {
 
 function withDetail(message: string, detail: string): string {
   return detail.length === 0 ? message : `${message}: ${detail}`;
+}
+
+export interface PostgresBinCandidate {
+  directory: string;
+  version: number | null;
+  hasServer: boolean;
+}
+
+/** Highest installed server. An unversioned PATH entry is only the fallback. */
+export function preferredServerBinDir(candidates: readonly PostgresBinCandidate[]): string | null {
+  const servers = candidates.filter(candidate => candidate.hasServer);
+  const versioned = servers.filter(candidate => candidate.version != null);
+  const pool = versioned.length > 0 ? versioned : servers;
+  let best = pool[0];
+
+  if (best == null) return null;
+
+  for (const candidate of pool.slice(1)) {
+    if ((candidate.version ?? -1) > (best.version ?? -1)) best = candidate;
+  }
+
+  return best.directory;
+}
+
+function postgresMajorVersion(directory: string): number | null {
+  const match = directory.match(/postgresql(?:@|[/\\])(\d+)/);
+
+  if (match?.[1] == null) return null;
+
+  const version = Number(match[1]);
+
+  return Number.isInteger(version) ? version : null;
 }
