@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { ClusterRepository } from './cluster-repository.ts';
+import { InstanceRepository } from './instance-repository.ts';
 import {
   AlloyDbError,
   buildClusterName,
+  buildDataPlaneInstanceKey,
+  buildInstanceName,
   buildUserName,
   clusterRequestToRecord,
+  instanceRequestToRecord,
   UserType,
 } from './types.ts';
 import { UserRepository } from './user-repository.ts';
@@ -15,28 +20,40 @@ import { UserService } from './user-service.ts';
 const PROJECT = 'p';
 const LOCATION = 'us-central1';
 const CLUSTER_ID = 'c1';
+const INSTANCE_ID = 'i1';
 const USER_ID = 'admin';
 const USER_NAME = buildUserName(PROJECT, LOCATION, CLUSTER_ID, USER_ID);
+const INSTANCE_KEY = buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID);
 
 let storage: StorageManager;
 let clusters: ClusterRepository;
+let instances: InstanceRepository;
 let users: UserRepository;
 let service: UserService;
+let dataPlane: RecordingDataPlane;
 
 beforeEach(async () => {
   storage = new StorageManager();
   await storage.initialize({ type: 'memory' });
 
   clusters = new ClusterRepository(storage);
+  instances = new InstanceRepository(storage);
   users = new UserRepository(storage);
 
-  await Promise.all([clusters.initialize(), users.initialize()]);
+  await Promise.all([clusters.initialize(), instances.initialize(), users.initialize()]);
 
-  service = new UserService(users, clusters, new ResourceMutex());
+  dataPlane = new RecordingDataPlane({ port: 5540 });
+  service = new UserService(users, clusters, new ResourceMutex(), dataPlane, instances);
 
   await clusters.create(
     clusterRequestToRecord(buildClusterName(PROJECT, LOCATION, CLUSTER_ID), {
       initialUser: { user: 'postgres' },
+    })
+  );
+
+  await instances.create(
+    instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_ID), {
+      instanceType: 'PRIMARY',
     })
   );
 });
@@ -163,6 +180,44 @@ describe('createUser', () => {
     );
 
     expect(user.name).toBe(USER_NAME);
+    await expect(service.getUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID)).rejects.toHaveProperty(
+      'code',
+      'NOT_FOUND'
+    );
+  });
+
+  test('createUser_callsUpsertUserForEachRunningInstance', async () => {
+    await service.createUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, { password: 'hunter2' }, {});
+
+    expect(dataPlane.calls).toContain(`upsertUser:${PROJECT}/${INSTANCE_KEY}:${USER_ID}`);
+  });
+
+  test('createUser_withValidateOnly_doesNotCallDataPlane', async () => {
+    await service.createUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'hunter2' },
+      { validateOnly: true }
+    );
+
+    expect(dataPlane.calls).toHaveLength(0);
+  });
+
+  test('createUser_whenUpsertFails_rollsBackTheRow', async () => {
+    dataPlane.upsertFailure = new Error('data plane unavailable');
+
+    const promise = service.createUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'hunter2' },
+      {}
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
     await expect(service.getUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID)).rejects.toHaveProperty(
       'code',
       'NOT_FOUND'
@@ -378,6 +433,36 @@ describe('updateUser', () => {
       (await users.getByName(buildUserName(PROJECT, LOCATION, CLUSTER_ID, USER_ID)))?.password
     ).toBe('hunter2');
   });
+
+  test('updateUser_whenPasswordChanges_callsUpsertUserOnEachInstance', async () => {
+    dataPlane.calls.length = 0;
+
+    await service.updateUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'new-pass' },
+      { updateMask: 'password' }
+    );
+
+    expect(dataPlane.calls).toContain(`upsertUser:${PROJECT}/${INSTANCE_KEY}:${USER_ID}`);
+  });
+
+  test('updateUser_withValidateOnly_doesNotCallDataPlane', async () => {
+    dataPlane.calls.length = 0;
+
+    await service.updateUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'new-pass' },
+      { updateMask: 'password', validateOnly: true }
+    );
+
+    expect(dataPlane.calls).toHaveLength(0);
+  });
 });
 
 describe('deleteUser', () => {
@@ -404,5 +489,21 @@ describe('deleteUser', () => {
     await service.deleteUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, { validateOnly: true });
 
     expect((await service.getUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID)).name).toBe(USER_NAME);
+  });
+
+  test('deleteUser_callsDropUserOnEachInstance', async () => {
+    dataPlane.calls.length = 0;
+
+    await service.deleteUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, {});
+
+    expect(dataPlane.calls).toContain(`dropUser:${PROJECT}/${INSTANCE_KEY}:${USER_ID}`);
+  });
+
+  test('deleteUser_withValidateOnly_doesNotCallDataPlane', async () => {
+    dataPlane.calls.length = 0;
+
+    await service.deleteUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, { validateOnly: true });
+
+    expect(dataPlane.calls).toHaveLength(0);
   });
 });

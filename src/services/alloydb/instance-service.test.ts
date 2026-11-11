@@ -14,10 +14,13 @@ import {
   buildClusterName,
   buildDataPlaneInstanceKey,
   buildInstanceName,
+  buildUserName,
   clusterRequestToRecord,
   InstanceState,
   InstanceType,
+  userRequestToRecord,
 } from './types.ts';
+import { UserRepository } from './user-repository.ts';
 
 const PROJECT = 'p';
 const LOCATION = 'us-central1';
@@ -28,6 +31,7 @@ const INSTANCE_NAME = buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, INSTANCE_
 let storage: StorageManager;
 let clusters: ClusterRepository;
 let instances: InstanceRepository;
+let users: UserRepository;
 let service: InstanceService;
 let logger: Logger;
 let dataPlane: RecordingDataPlane;
@@ -42,13 +46,19 @@ beforeEach(async () => {
 
   clusters = new ClusterRepository(storage);
   instances = new InstanceRepository(storage);
+  users = new UserRepository(storage);
 
   const operations = new OperationsStore(storage, {
     tableName: ALLOYDB_OPERATIONS_TABLE,
     apiTypePrefix: 'google.cloud.alloydb.v1',
   });
 
-  await Promise.all([clusters.initialize(), instances.initialize(), operations.initialize()]);
+  await Promise.all([
+    clusters.initialize(),
+    instances.initialize(),
+    users.initialize(),
+    operations.initialize(),
+  ]);
 
   dataPlane = new RecordingDataPlane({ port: 5540 });
   logger = createMockLogger();
@@ -58,7 +68,8 @@ beforeEach(async () => {
     operations,
     new ResourceMutex(),
     logger,
-    dataPlane
+    dataPlane,
+    users
   );
 
   await clusters.create(
@@ -82,6 +93,28 @@ describe('createInstance', () => {
     expect(dataPlane.calls).toEqual([
       `start:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}:postgres`,
     ]);
+  });
+
+  test('createInstance_appliesExistingClusterUsersToTheNewInstance', async () => {
+    await users.create(
+      userRequestToRecord(buildUserName(PROJECT, LOCATION, CLUSTER_ID, 'postgres'), {
+        password: 'secret',
+        userType: 'ALLOYDB_BUILT_IN',
+      })
+    );
+
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      INSTANCE_ID,
+      { instanceType: 'PRIMARY' },
+      {}
+    );
+
+    expect(dataPlane.calls).toContain(
+      `upsertUser:${PROJECT}/${buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID)}:postgres`
+    );
   });
 
   /**
