@@ -226,11 +226,18 @@ describe('PostgresContainerSupervisor.start', () => {
   test('removes any existing container then starts a new one', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kinglet-container-test-'));
     const calls: string[][] = [];
+    const stdin: string[] = [];
 
     try {
       const supervisor = new PostgresContainerSupervisor({
         image: 'postgres:18',
-        runner: okRunner(calls),
+        runner: async (args, input) => {
+          calls.push(args);
+
+          if (input != null) stdin.push(input);
+
+          return { exitCode: 0, stderr: '' };
+        },
         readinessTimeoutMs: 0,
       });
 
@@ -249,10 +256,10 @@ describe('PostgresContainerSupervisor.start', () => {
 
       const passwordCall = calls.find(c => c[1] === 'exec');
 
+      expect(passwordCall).toContain('-i');
       expect(passwordCall).toContain('psql');
-      expect(passwordCall?.some(arg => arg.includes('ALTER ROLE kinglet_admin PASSWORD'))).toBe(
-        true
-      );
+      expect(passwordCall?.some(arg => arg.includes('PASSWORD'))).toBe(false);
+      expect(stdin.some(line => line.startsWith('ALTER ROLE kinglet_admin PASSWORD'))).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

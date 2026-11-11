@@ -28,7 +28,7 @@ import { type PostgresSupervisor, quoteLiteral } from './postgres-server-data-pl
  */
 export type DockerCommandResult = { exitCode: number; stderr: string; stdout?: string };
 
-export type DockerCommandRunner = (args: string[]) => Promise<DockerCommandResult>;
+export type DockerCommandRunner = (args: string[], stdin?: string) => Promise<DockerCommandResult>;
 
 export interface PostgresContainerSupervisorOptions {
   /** The image to run for each Postgres instance (e.g. `postgres:18`). */
@@ -115,8 +115,12 @@ async function readPipe(
   return chunks.join('');
 }
 
-async function spawnRunner(args: string[]): Promise<DockerCommandResult> {
-  const child = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' });
+async function spawnRunner(args: string[], stdin?: string): Promise<DockerCommandResult> {
+  const child = Bun.spawn(args, {
+    stdin: stdin == null ? 'ignore' : new Blob([stdin]),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const [stdout, stderr, exitCode] = await Promise.all([
     readPipe(child.stdout),
     readPipe(child.stderr),
@@ -291,18 +295,11 @@ export class PostgresContainerSupervisor implements PostgresSupervisor {
     do {
       await this.assertContainerRunning(name);
 
-      const result = await this.runner([
-        'docker',
-        'exec',
-        name,
-        'psql',
-        '-U',
-        'kinglet_admin',
-        '-d',
-        'template1',
-        '-c',
-        `ALTER ROLE kinglet_admin PASSWORD ${quoteLiteral(password)}`,
-      ]);
+      const statement = `ALTER ROLE kinglet_admin PASSWORD ${quoteLiteral(password)}`;
+      const result = await this.runner(
+        ['docker', 'exec', '-i', name, 'psql', '-U', 'kinglet_admin', '-d', 'template1'],
+        statement
+      );
 
       if (result.exitCode === 0) return;
 
