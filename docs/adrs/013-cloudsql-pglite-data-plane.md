@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-019](019-real-postgres-data-plane.md)
 
 ## Context
 

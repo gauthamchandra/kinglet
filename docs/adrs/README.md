@@ -19,11 +19,13 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [010](010-sqlite-schema-synchronization.md) | SQLite Schema Synchronization | Accepted |
 | [011](011-terraform-validation-harness.md) | Terraform Validation Harness | Accepted |
 | [012](012-cloud-armor-emulation.md) | Cloud Armor Security Policy Emulation | Proposed |
-| [013](013-cloudsql-pglite-data-plane.md) | Cloud SQL Data Plane on PGlite | Accepted |
+| [013](013-cloudsql-pglite-data-plane.md) | Cloud SQL Data Plane on PGlite | Superseded by 019 |
 | [014](014-cloud-armor-asn-region-headers.md) | Cloud Armor ASN, Region, TLS Fingerprint, and SNI Request Headers (addendum to 012) | Proposed |
 | [015](015-cloud-armor-evaluate-address-group.md) | Cloud Armor `evaluateAddressGroup` (addendum to 012) | Proposed |
 | [016](016-memory-and-sqlite-storage.md) | Memory and SQLite Storage Modes | Accepted |
 | [017](017-cloud-armor-waf-adaptive-headers.md) | Cloud Armor Preconfigured WAF and Adaptive Protection Request Headers (addendum to 012) | Proposed |
+| [018](018-native-grpc-server.md) | Native gRPC Server for Cloud Tasks | Accepted |
+| [019](019-real-postgres-data-plane.md) | Real Postgres Data Plane | Accepted |
 
 ## A note on the project's former name
 
