@@ -55,12 +55,14 @@ exactly as ADR-003 describes.
   re-opens their PGlite directories. That depends on kinglet's own storage
   actually persisting, which it did not until the storage fix in this same
   change — every storage type had been running in-memory.
-- **Extensions are fixed at build time.** PGlite links each extension's wasm
-  when the database is created, so every database is built with all 26 contrib
-  extensions PGlite ships plus pgvector. That is what lets `CREATE EXTENSION
-  pg_trgm` work later without rebuilding the database under a live connection.
-  pgvector is a separate package peer-pinned to the same PGlite version, so the
-  two move together.
+- **Extensions are fixed at build time.** PGlite links each extension when the
+  database is created. The linked set is whatever `extensions.ts` imports: a
+  selection of contrib modules, `auto_explain`, pgvector, and pg_partman.
+  PGlite ships further contrib modules that stay unloaded. Linking them up
+  front is what lets `CREATE EXTENSION pg_trgm` work later without rebuilding
+  the database under a live connection. pgvector, PostGIS, and pg_partman are
+  separate packages peer-pinned to the same PGlite version, so they move
+  together.
 - The data plane is **on by default**, for ADR-007's reason: an instance a
   client cannot connect to is metadata, not emulation. `CLOUDSQL_DATA_PLANE=false`
   turns it off. Unlike Memorystore there is no external binary to be missing, so
@@ -75,7 +77,7 @@ exactly as ADR-003 describes.
 
 ## Rationale
 
-- PGlite is a real Postgres (18.3), not a reimplementation, so the emulated
+- PGlite is a real Postgres (18.6), not a reimplementation, so the emulated
   data plane inherits actual Postgres semantics — transactions, extended query
   protocol, `COPY`, types, planner behavior — rather than approximating them.
 - It is a plain npm dependency (~25 MB unpacked, wasm loaded from
@@ -173,11 +175,23 @@ answers "does my Terraform work?" but not "does my application code work?".
   one PGlite is one database, and PGlite has no `CREATE DATABASE`.
 - **The engine is Postgres 18 whatever `databaseVersion` says.** A
   `POSTGRES_14` instance still answers `SELECT version()` with 18.
+- **pg_partman maintenance is caller-driven.** The linked build is pg_partman
+  5.5.0 without `pg_partman_bgw`. Cloud SQL and AlloyDB document 5.4.3, and
+  neither runs that background worker: Cloud SQL says so, and AlloyDB does not
+  expose `shared_preload_libraries`, which the worker requires. Both expect the
+  user to schedule `SELECT partman.run_maintenance()` or
+  `CALL partman.run_maintenance_proc()` (Cloud SQL's documented schedulers are
+  pg_cron and an external job such as Cloud Scheduler invoking a Cloud Run
+  function). This emulator does not call either on a timer and does not emulate
+  pg_cron. Install with the Cloud SQL recipe: `CREATE SCHEMA partman;` then
+  `CREATE EXTENSION pg_partman SCHEMA partman`. `run_maintenance` leaves an
+  empty partition set unchanged unless `infinite_time_partitions` is on, which
+  is pg_partman's own rule.
 - **PostGIS is opt-in.** Set `CLOUDSQL_POSTGIS=true` or `ALLOYDB_POSTGIS=true`
   to link PostGIS into every database for that product. It is off by default
   because it significantly increases per-database boot time. Existing on-disk
   databases gain PostGIS after a restart with the flag enabled — no recreation
-  needed. All 26 contrib extensions plus pgvector are always available.
+  needed. The default extension set, including pg_partman, is always available.
 - `settings.ipConfiguration` and `authorizedNetworks` are metadata only —
   nothing restricts who may connect beyond user and password.
 - `User.type` values other than `BUILT_IN` behave like `BUILT_IN`.
@@ -230,10 +244,11 @@ mapping onto a per-instance PGlite.
   `pglite-session-queue.ts` (per-database serialisation and transaction
   affinity), `extensions.ts`, and `host.ts` (`createPostgresDataPlane` stamps
   each product's label and on-disk namespace).
-- `@electric-sql/pglite`, `@electric-sql/pglite-pgvector`, and
-  `@electric-sql/pglite-postgis` are pinned to exact versions: pgvector 0.0.9
-  and pglite-postgis 0.2.8 both peer-pin PGlite to 0.5.8, so the three have
-  to move together.
+- `@electric-sql/pglite`, `@electric-sql/pglite-pgvector`,
+  `@electric-sql/pglite-postgis`, and `@electric-sql/pglite-pg_partman` are
+  pinned to exact versions. pgvector 0.0.17, pglite-postgis 0.2.16, and
+  pglite-pg_partman 0.0.9 all peer-pin PGlite to 0.5.16, so the four move
+  together.
 - `CloudSqlService.stop()` / `AlloyDbService.stop()` close every PGlite and
   stop every listener as part of the emulator's normal shutdown.
 - AlloyDB defaults to ports 5540-5639 so it does not fight Cloud SQL's

@@ -41,9 +41,12 @@ describe('DATA_PLANE_EXTENSIONS', () => {
     await db.close();
 
     expect(failures).toEqual([]);
-    // pgvector is the one non-contrib extension, and the reason it is a
-    // separate dependency — worth naming so a lost dependency is obvious.
-    expect(installed.rows.map(row => row.extname)).toContain('vector');
+    // These two are separate packages, so a dropped dependency fails here
+    // rather than as a missing import.
+    const installedNames = installed.rows.map(row => row.extname);
+
+    expect(installedNames).toContain('pg_partman');
+    expect(installedNames).toContain('vector');
     expect(Object.keys(DATA_PLANE_EXTENSIONS).length).toBeGreaterThan(20);
   });
 
@@ -81,5 +84,52 @@ describe('resolveExtensions', () => {
     await db.close();
 
     expect(result.rows[0]?.wkt).toBe('POINT(1 2)');
+  }, 30_000);
+});
+
+describe('pg_partman', () => {
+  test('creates a daily partition set and run_maintenance honors a higher premake', async () => {
+    const db = await PGlite.create('memory://', { extensions: DATA_PLANE_EXTENSIONS });
+
+    await db.exec(`
+      SET TIME ZONE 'UTC';
+      CREATE SCHEMA partman;
+      CREATE EXTENSION pg_partman SCHEMA partman;
+      CREATE TABLE events (
+        id int,
+        created_at timestamptz NOT NULL
+      ) PARTITION BY RANGE (created_at);
+      SELECT partman.create_parent('public.events', 'created_at', '1 day');
+    `);
+
+    const version = await db.query<{ extversion: string }>(
+      "SELECT extversion FROM pg_extension WHERE extname = 'pg_partman'"
+    );
+    const before = await db.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM partman.show_partitions('public.events')"
+    );
+
+    // An empty set is left alone unless infinite_time_partitions is on, and the
+    // extra children run_maintenance adds depends on the time of day, so the
+    // assertion is that the set grew rather than an exact new count.
+    await db.exec(`
+      UPDATE partman.part_config
+      SET premake = 6, infinite_time_partitions = true
+      WHERE parent_table = 'public.events';
+      SELECT partman.run_maintenance('public.events');
+    `);
+
+    const after = await db.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM partman.show_partitions('public.events')"
+    );
+
+    await db.close();
+
+    const beforeCount = before.rows[0]?.n ?? -1;
+    const afterCount = after.rows[0]?.n ?? -1;
+
+    expect(version.rows[0]?.extversion).toBe('5.5.0');
+    expect(beforeCount).toBe(9);
+    expect(afterCount).toBeGreaterThan(beforeCount);
   }, 30_000);
 });

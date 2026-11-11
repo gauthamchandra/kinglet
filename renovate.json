@@ -31,6 +31,13 @@
       "platformAutomerge": true
     },
     {
+      "description": "PGlite extension packages peer-pin an exact PGlite version. A partial bump does not install, so Renovate has to move the family together.",
+      "matchPackageNames": ["@electric-sql/pglite", "@electric-sql/pglite-**"],
+      "groupName": "pglite",
+      "automerge": false,
+      "addLabels": ["needs-review"]
+    },
+    {
       "description": "Runtime dependencies ship to users and can change emulated behaviour. Always review, never auto-merge.",
       "matchDepTypes": ["dependencies"],
       "automerge": false,
