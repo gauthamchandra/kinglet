@@ -584,16 +584,9 @@ export function classifyPsCommand(text: string, dataDir: string): 'match' | 'oth
 
   if (executable == null || basename(executable) !== 'postgres') return 'other';
 
-  if (/\s/.test(dataDir)) {
-    const marker = `-D ${dataDir}`;
-    const index = trimmed.indexOf(marker);
-
-    if (index < 0) return 'unknown';
-
-    const after = trimmed[index + marker.length];
-
-    return after == null || /\s/.test(after) ? 'match' : 'unknown';
-  }
+  // ps joins arguments with spaces and does not quote them, so a data directory
+  // that itself contains whitespace cannot be proved to be the -D argument.
+  if (/\s/.test(dataDir)) return 'unknown';
 
   return classifyPostmasterArgs(trimmed.split(/\s+/), dataDir);
 }
