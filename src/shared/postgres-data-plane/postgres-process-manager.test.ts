@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { SQL } from 'bun';
 import { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
@@ -43,6 +43,54 @@ describe('Postgres command construction', () => {
       ]);
     } finally {
       uid.mockRestore();
+    }
+  });
+});
+
+describe('Postgres process cleanup', () => {
+  test('does not signal a live process that is not the postmaster', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-pid-'));
+    const dataDir = join(root, 'data');
+    await mkdir(dataDir);
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
+    const bystander = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)']);
+
+    try {
+      await Bun.write(join(dataDir, 'postmaster.pid'), `${bystander.pid}\n${resolve(dataDir)}\n`);
+      await manager.stopStaleServer(dataDir);
+
+      expect(bystander.exitCode).toBeNull();
+      expect(bystander.signalCode).toBeNull();
+      expect(await Bun.file(join(dataDir, 'postmaster.pid')).exists()).toBe(false);
+    } finally {
+      bystander.kill();
+      await bystander.exited;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('includes the child error output when initdb fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-err-'));
+    const binDir = join(root, 'bin');
+    await mkdir(binDir);
+    await Bun.write(
+      join(binDir, 'initdb'),
+      '#!/bin/sh\necho "initdb: data directory is not empty" >&2\nexit 1\n'
+    );
+    await Bun.write(join(binDir, 'postgres'), '#!/bin/sh\nexit 1\n');
+    await chmod(join(binDir, 'initdb'), 0o755);
+    await chmod(join(binDir, 'postgres'), 0o755);
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'), {
+      binDir,
+      templateDir: join(root, 'template'),
+    });
+
+    try {
+      await expect(manager.ensureInitialized(join(root, 'data'))).rejects.toThrow(
+        'data directory is not empty'
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });
@@ -99,6 +147,53 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresProcessManager', () => {
     await manager.stop(dataDir);
     expect(await isPortListening(port)).toBe(false);
     await manager.stop(dataDir);
+  });
+
+  test('a failed copy does not make the next start skip the rest of the cluster', async () => {
+    await manager.ensureInitialized(dataDir);
+    const broken = join(root, 'broken');
+    const runnable = manager as unknown as {
+      runCommand(command: string[]): Promise<void>;
+    };
+    const original = runnable.runCommand.bind(runnable);
+    const copy = spyOn(runnable, 'runCommand').mockImplementation(async (command: string[]) => {
+      if (command[0] !== 'cp') return original(command);
+
+      const destination = command[command.length - 1];
+
+      if (destination != null) {
+        await mkdir(destination, { recursive: true });
+        await Bun.write(join(destination, 'PG_VERSION'), '18\n');
+      }
+
+      throw new Error('cp failed');
+    });
+
+    try {
+      await expect(manager.ensureInitialized(broken)).rejects.toThrow('cp failed');
+      expect(await Bun.file(join(broken, 'PG_VERSION')).exists()).toBe(false);
+    } finally {
+      copy.mockRestore();
+    }
+
+    await manager.ensureInitialized(broken);
+    expect(await Bun.file(join(broken, 'PG_VERSION')).exists()).toBe(true);
+    expect(await Bun.file(join(broken, 'postgresql.conf')).exists()).toBe(true);
+  });
+
+  test('starts when the data directory path is longer than a unix socket name', async () => {
+    const port = await freePort();
+    const longData = join(root, 'p'.repeat(120), 'data');
+    await manager.ensureInitialized(longData);
+    await manager.start(longData, port);
+    const sql = manager.openAdminConnection(longData, port);
+
+    try {
+      expect((await sql<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
+    } finally {
+      await sql.close();
+      await manager.stop(longData);
+    }
   });
 
   test('copies the initialized template without running initdb again', async () => {

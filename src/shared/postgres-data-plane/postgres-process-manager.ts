@@ -1,6 +1,6 @@
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { SQL, type Subprocess } from 'bun';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
@@ -45,9 +45,21 @@ export class PostgresProcessManager {
     });
 
     const templateDir = await this.templateInitialization;
-    await mkdir(dataDir, { recursive: true });
-    await this.runCommand(['cp', '-r', `${templateDir}/.`, dataDir]);
-    await this.prepareDirectoryForPostgres(dataDir);
+    const parent = dirname(dataDir);
+    await mkdir(parent, { recursive: true });
+    // Publish only a finished copy. PG_VERSION is copied before the rest of the
+    // cluster, so a partial directory must not count as initialized.
+    const staging = await mkdtemp(join(parent, '.kinglet-pg-'));
+
+    try {
+      await this.runCommand(['cp', '-r', `${templateDir}/.`, staging]);
+      await this.prepareDirectoryForPostgres(staging);
+      await rm(dataDir, { recursive: true, force: true });
+      await rename(staging, dataDir);
+    } catch (error) {
+      await rm(staging, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   async start(dataDir: string, port: number): Promise<void> {
@@ -55,7 +67,11 @@ export class PostgresProcessManager {
     await this.stop(dataDir);
     await this.stopStaleServer(dataDir);
     await this.prepareDirectoryForPostgres(dataDir);
+    const socketDir = this.socketDirectory(dataDir);
+    await mkdir(socketDir, { recursive: true });
+    await this.prepareDirectoryForPostgres(socketDir);
 
+    const stderr = new StderrTail();
     const child = Bun.spawn(
       this.buildUnprivilegedCommand(this.requireBinary('postgres'), [
         '-D',
@@ -65,10 +81,11 @@ export class PostgresProcessManager {
         '-c',
         'listen_addresses=*',
         '-c',
-        `unix_socket_directories=${dataDir}`,
+        `unix_socket_directories=${socketDir}`,
       ]),
-      { stdout: 'ignore', stderr: 'ignore' }
+      { stdout: 'ignore', stderr: 'pipe' }
     );
+    const drained = this.collectStderr(child.stderr, stderr);
 
     try {
       await this.waitForAdminConnection(dataDir, port, child);
@@ -76,8 +93,10 @@ export class PostgresProcessManager {
     } catch (error) {
       child.kill('SIGINT');
       await child.exited;
+      await drained;
+      const message = error instanceof Error ? error.message : 'Postgres did not become ready';
       this.logger.warn(`Postgres on port ${port} did not become ready; its child has been stopped`);
-      throw error;
+      throw new Error(withDetail(message, stderr.text()));
     }
   }
 
@@ -110,17 +129,31 @@ export class PostgresProcessManager {
         throw new Error('Refusing to stop a Postgres pid belonging to a different data directory');
       }
 
-      this.signalPid(pid, 'SIGQUIT');
+      const identity = await this.postmasterIdentity(pid, dataDir);
 
-      if (!(await this.waitForPidExit(pid))) {
-        this.signalPid(pid, 'SIGKILL');
-
-        if (!(await this.waitForPidExit(pid))) {
-          throw new Error('Stale Postgres process did not exit; pid file has been retained');
-        }
+      if (identity === 'unknown') {
+        throw new Error('Refusing to stop a Postgres pid whose process could not be confirmed');
       }
 
-      this.logger.warn('Stopped an orphaned Postgres server; its data directory can be restarted');
+      if (identity === 'other') {
+        this.logger.warn(
+          'A reused pid was recorded for this data directory; the live process was left running'
+        );
+      } else {
+        this.signalPid(pid, 'SIGQUIT');
+
+        if (!(await this.waitForPidExit(pid))) {
+          this.signalPid(pid, 'SIGKILL');
+
+          if (!(await this.waitForPidExit(pid))) {
+            throw new Error('Stale Postgres process did not exit; pid file has been retained');
+          }
+        }
+
+        this.logger.warn(
+          'Stopped an orphaned Postgres server; its data directory can be restarted'
+        );
+      }
     }
 
     await rm(join(dataDir, 'postmaster.pid'), { force: true });
@@ -130,7 +163,7 @@ export class PostgresProcessManager {
     // Bun 1.3.4 needs the socket filename, not its directory or a URL host parameter.
     return new SQL({
       url: `postgres://kinglet_admin:x@localhost:${port}/postgres`,
-      path: join(resolve(dataDir), `.s.PGSQL.${port}`),
+      path: join(this.socketDirectory(resolve(dataDir)), `.s.PGSQL.${port}`),
       tls: false,
       connectionTimeout: 1,
     });
@@ -227,12 +260,74 @@ export class PostgresProcessManager {
     return templateDir;
   }
 
-  private async runCommand(command: string[]): Promise<void> {
-    const child = Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore' });
+  private socketDirectory(dataDir: string): string {
+    // sockaddr_un.sun_path is 108 bytes. A data directory under the sqlite path
+    // does not fit, so the admin socket lives in a short private directory.
+    const digest = new Bun.CryptoHasher('sha256').update(dataDir).digest('hex').substring(0, 16);
 
-    if ((await child.exited) !== 0) {
-      throw new Error(`Postgres setup command ${command[0]} failed`);
+    return join(tmpdir(), `kpg-${digest}`);
+  }
+
+  private async postmasterIdentity(
+    pid: number,
+    dataDir: string
+  ): Promise<'match' | 'other' | 'unknown'> {
+    let cmdline: string;
+
+    try {
+      // /proc entries do not report as existing through Bun.file.exists().
+      cmdline = await Bun.file(`/proc/${pid}/cmdline`).text();
+    } catch {
+      return 'unknown';
     }
+
+    if (cmdline.length === 0) return 'unknown';
+
+    const args = cmdline.split('\0').filter(argument => argument.length > 0);
+    const executable = args[0];
+
+    if (executable == null || basename(executable) !== 'postgres') return 'other';
+
+    const dataFlag = args.indexOf('-D');
+    const recorded = dataFlag >= 0 ? args[dataFlag + 1] : undefined;
+
+    return recorded != null && resolve(recorded) === dataDir ? 'match' : 'other';
+  }
+
+  private async runCommand(command: string[]): Promise<void> {
+    const stderr = new StderrTail();
+    const child = Bun.spawn(command, { stdout: 'ignore', stderr: 'pipe' });
+    const drained = this.collectStderr(child.stderr, stderr);
+    const exitCode = await child.exited;
+    await drained;
+
+    if (exitCode !== 0) {
+      throw new Error(withDetail(`Postgres setup command ${command[0]} failed`, stderr.text()));
+    }
+  }
+
+  private collectStderr(
+    stream: ReadableStream<Uint8Array> | number | null | undefined,
+    stderr: StderrTail
+  ): Promise<void> {
+    if (stream == null || typeof stream === 'number') return Promise.resolve();
+
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+
+    return (async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) return;
+
+          if (value != null) stderr.append(decoder.decode(value, { stream: true }));
+        }
+      } catch {
+        // The pipe closes when the child exits.
+      }
+    })();
   }
 
   private async waitForAdminConnection(
@@ -299,4 +394,20 @@ export class PostgresProcessManager {
 
     return true;
   }
+}
+
+class StderrTail {
+  private value = '';
+
+  append(chunk: string): void {
+    this.value = (this.value + chunk).slice(-500);
+  }
+
+  text(): string {
+    return this.value.trim();
+  }
+}
+
+function withDetail(message: string, detail: string): string {
+  return detail.length === 0 ? message : `${message}: ${detail}`;
 }
