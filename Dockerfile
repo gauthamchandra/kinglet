@@ -21,8 +21,26 @@ LABEL org.opencontainers.image.title="kinglet" \
 # valkey-server is the Memorystore for Valkey data plane (see
 # docs/adrs/007-memorystore-valkey-data-plane.md) — on by default, so the image
 # ships the binary; set MEMORYSTORE_DATA_PLANE=false for metadata-only.
+#
+# PostgreSQL 18 from PGDG is the Cloud SQL data plane (ADR-019). These
+# packages put the server and the PostGIS, pgvector, and pg_partman files on
+# disk. The image does not run CREATE EXTENSION. AlloyDB is still PGlite.
+# --no-install-recommends keeps the JIT libraries out. That install is about
+# 420 MiB uncompressed and about 100 MiB compressed, mostly GDAL, SFCGAL,
+# PROJ data, ICU, and Perl. setpriv comes from util-linux, which Debian
+# already marks required, so the slim base supplies the root drop.
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends valkey-server \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl \
+ && curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql.asc \
+ && . /etc/os-release \
+ && echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      valkey-server \
+      postgresql-18 \
+      postgresql-18-pgvector \
+      postgresql-18-postgis-3 \
+      postgresql-18-partman \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=install /app/node_modules ./node_modules
@@ -31,10 +49,8 @@ COPY src/ ./src/
 
 # Default ports: 8765 (HTTP), 8766 (gRPC), 8787 (Cloud Armor evaluation server),
 # 6380-6479 (Memorystore data plane),
-# 5432-5531 (Cloud SQL data plane — see docs/adrs/013-cloudsql-pglite-data-plane.md),
-# 5540-5639 (AlloyDB data plane — same PGlite stack, separate port range).
-# The Postgres data planes need no package here: PGlite ships as an npm
-# dependency, unlike valkey-server above.
+# 5432-5531 (Cloud SQL data plane — the PostgreSQL 18 server installed above),
+# 5540-5639 (AlloyDB data plane — still PGlite, a separate port range).
 #
 # The evaluation server is unauthenticated. Default bind for `bun run` is
 # 127.0.0.1; the image listens on all interfaces so `docker run -p 8787:8787`
