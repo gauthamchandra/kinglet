@@ -602,6 +602,17 @@ describe('SqlAdminService', () => {
       expect(await repo.getUser('p1', 'db-a', 'app')).toBeNull();
     });
 
+    test('createUser rejects a name postgres would truncate and stores nothing', async () => {
+      const name = `${'a'.repeat(63)}b`;
+      dataPlane.calls.length = 0;
+
+      const promise = service.createUser('p1', 'db-a', { name, password: 's3cret' });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+      expect(await repo.getUser('p1', 'db-a', name)).toBeNull();
+      expect(dataPlane.calls.some(call => call.includes(name))).toBe(false);
+    });
+
     test('createUser returns CREATE_USER op and user appears without password', async () => {
       const op = await service.createUser('p1', 'db-a', { name: 'app', password: 's3cret' });
 

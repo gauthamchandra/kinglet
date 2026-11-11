@@ -151,6 +151,16 @@ describe('InsertUserRequestSchema', () => {
     expect(parsed.host).toBe('');
     expect(parsed.type).toBe('BUILT_IN');
   });
+
+  test('accepts a name at the 63-byte PostgreSQL identifier limit', () => {
+    expect(InsertUserRequestSchema.safeParse({ name: 'a'.repeat(63) }).success).toBe(true);
+    expect(InsertUserRequestSchema.safeParse({ name: 'é'.repeat(31) }).success).toBe(true);
+  });
+
+  test('rejects a name postgres would truncate to 63 bytes', () => {
+    expect(InsertUserRequestSchema.safeParse({ name: `${'a'.repeat(63)}b` }).success).toBe(false);
+    expect(InsertUserRequestSchema.safeParse({ name: 'é'.repeat(32) }).success).toBe(false);
+  });
 });
 
 describe('InsertDatabaseRequestSchema', () => {
