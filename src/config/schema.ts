@@ -119,6 +119,7 @@ const ServicesConfigSchema = z.object({
           // package on the server, not a link-time flag. AlloyDB still does.
           postgis: z.boolean().default(false),
           postgresBinDir: z.string().min(1).optional(),
+          postgresImage: z.string().min(1).optional(),
         })
         .refine(dataPlane => dataPlane.portRangeStart <= dataPlane.portRangeEnd, {
           message: 'portRangeStart must be less than or equal to portRangeEnd',
@@ -283,6 +284,7 @@ export const EnvConfigSchema = z.object({
     .transform(val => val.toLowerCase() === 'true')
     .optional(),
   CLOUDSQL_POSTGRES_BIN_DIR: z.string().min(1).optional(),
+  CLOUDSQL_POSTGRES_IMAGE: z.string().min(1).optional(),
   ENABLE_COMPUTE: z
     .string()
     .transform(val => val.toLowerCase() === 'true')
@@ -377,6 +379,7 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     env.CLOUDSQL_PORT_RANGE_END !== undefined ||
     env.CLOUDSQL_POSTGIS !== undefined ||
     env.CLOUDSQL_POSTGRES_BIN_DIR !== undefined ||
+    env.CLOUDSQL_POSTGRES_IMAGE !== undefined ||
     env.ENABLE_COMPUTE !== undefined ||
     env.COMPUTE_LISTENER_PORT !== undefined ||
     env.COMPUTE_ARMOR_DEFAULT_POLICY !== undefined ||
@@ -524,6 +527,10 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
       if (env.CLOUDSQL_POSTGIS !== undefined) dataPlane.postgis = env.CLOUDSQL_POSTGIS;
       if (env.CLOUDSQL_POSTGRES_BIN_DIR !== undefined) {
         dataPlane.postgresBinDir = env.CLOUDSQL_POSTGRES_BIN_DIR;
+      }
+
+      if (env.CLOUDSQL_POSTGRES_IMAGE !== undefined) {
+        dataPlane.postgresImage = env.CLOUDSQL_POSTGRES_IMAGE;
       }
 
       config.services.cloudsql.dataPlane = dataPlane;

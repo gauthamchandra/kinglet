@@ -2,7 +2,7 @@
  * Tests for createPostgresDataPlane product wiring
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,6 +15,7 @@ import {
   createPostgresDataPlane,
   type PostgresDataPlaneProduct,
 } from './host.ts';
+import { PostgresServerDataPlane } from './postgres-server-data-plane.ts';
 
 const logger = new Logger('PostgresDataPlaneHostTest', 'error');
 const anyUser = async () => ({ password: '' });
@@ -151,5 +152,65 @@ describe('createPostgresDataPlane', () => {
     await plane.dropInstance('p1', 'inst');
 
     expect(existsSync(cloudsqlInstance)).toBe(false);
+  });
+
+  /**
+   * When postgresImage is set, the container supervisor is chosen.
+   * Its isPostgresAvailable() checks for docker, so spying on Bun.which
+   * with 'docker' returning null makes startInstance return null —
+   * the same "unavailable" signal the process supervisor gives when
+   * postgres binaries are absent. That confirms the container path is live.
+   */
+  test('uses the container supervisor when postgresImage is set', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-host-'));
+
+    temporaryDirectories.push(root);
+
+    const which = spyOn(Bun, 'which').mockReturnValue(null);
+
+    try {
+      const plane = createPostgresDataPlane(
+        logger,
+        CLOUDSQL_DATA_PLANE_PRODUCT,
+        {
+          enabled: true,
+          portRangeStart: 46420,
+          portRangeEnd: 46424,
+          storageType: 'sqlite',
+          sqlitePath: join(root, 'emulator.db'),
+          postgis: false,
+          postgresImage: 'postgres:18',
+        },
+        anyUser
+      );
+
+      expect(plane).toBeInstanceOf(PostgresServerDataPlane);
+      // Container supervisor reports unavailable when docker is absent.
+      expect(await plane.startInstance('p', 'i', [])).toBeNull();
+    } finally {
+      which.mockRestore();
+    }
+  });
+
+  test('uses the process manager when postgresImage is not set', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-host-'));
+
+    temporaryDirectories.push(root);
+
+    const plane = createPostgresDataPlane(
+      logger,
+      CLOUDSQL_DATA_PLANE_PRODUCT,
+      {
+        enabled: true,
+        portRangeStart: 46425,
+        portRangeEnd: 46429,
+        storageType: 'sqlite',
+        sqlitePath: join(root, 'emulator.db'),
+        postgis: false,
+      },
+      anyUser
+    );
+
+    expect(plane).toBeInstanceOf(PostgresServerDataPlane);
   });
 });
