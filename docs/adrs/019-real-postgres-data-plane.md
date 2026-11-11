@@ -106,20 +106,18 @@ opt-in, not the default.
   postmaster (on the order of 30 MB RSS) and about 42 MB of disk.
 - An empty admin-API password cannot mean "connect with no challenge" under
   scram-only TCP the way the PGlite wire server treated it.
-- Cloud SQL instances are real Postgres servers. AlloyDB is still PGlite.
-  The image installs `postgresql-18`, PostGIS, pgvector, and `pg_partman`
-  from PGDG, so a stock `docker run` has a `postgres` binary. Nested
-  containers are not that install. The install uses `--no-install-recommends`,
-  about 420 MiB uncompressed. `setpriv` is already in the slim base through
-  `util-linux`.
+- Both Cloud SQL and AlloyDB instances are real Postgres servers. The image
+  installs `postgresql-18`, PostGIS, pgvector, and `pg_partman` from PGDG,
+  so a stock `docker run` has a `postgres` binary. Nested containers are not
+  that install. The install uses `--no-install-recommends`, about 420 MiB
+  uncompressed. `setpriv` is already in the slim base through `util-linux`.
 
 ## Follow-ups
 
 Not built here:
 
-- Point AlloyDB at these servers. Cloud SQL already uses them. Keep the
-  admin API's response shapes, operations, and errors.
 - Optional per-instance container mode, off unless an image is configured.
 - `databaseFlags` applied to `postgresql.conf` / `ALTER SYSTEM`.
-- AlloyDB read pools as streaming replicas.
+- AlloyDB read pools as streaming replicas. Each READ_POOL instance is
+  presently its own independent Postgres server, not a streaming replica.
 - Remove the PGlite data plane once nothing calls it.

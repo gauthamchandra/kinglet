@@ -8,13 +8,14 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Logger } from '@/shared/utils/logger.ts';
-import { DataPlaneManager, DisabledDataPlane } from './data-plane-manager.ts';
+import { DisabledDataPlane } from './data-plane-manager.ts';
 import {
   ALLOYDB_DATA_PLANE_PRODUCT,
   CLOUDSQL_DATA_PLANE_PRODUCT,
   createPostgresDataPlane,
   type PostgresDataPlaneProduct,
 } from './host.ts';
+import { PostgresServerDataPlane } from './postgres-server-data-plane.ts';
 
 const logger = new Logger('PostgresDataPlaneHostTest', 'error');
 const anyUser = async () => ({ password: '' });
@@ -70,10 +71,10 @@ describe('createPostgresDataPlane', () => {
     expect(plane).toBeInstanceOf(DisabledDataPlane);
   });
 
-  test('returnsAManagerStampedWithTheAlloyDbProduct', async () => {
+  test('returnsAPostgresServerDataPlaneStampedWithTheAlloyDbProduct', async () => {
     const { plane } = await planeForProduct(ALLOYDB_DATA_PLANE_PRODUCT, 46395);
 
-    expect(plane).toBeInstanceOf(DataPlaneManager);
+    expect(plane).toBeInstanceOf(PostgresServerDataPlane);
   });
 
   /**
