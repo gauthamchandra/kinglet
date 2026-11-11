@@ -39,9 +39,8 @@ describe('CloudSqlService', () => {
   beforeEach(async () => {
     storage = new StorageManager();
     await storage.initialize({ type: 'memory' });
-    // Control-plane wiring only: booting a PGlite per instance would make
-    // these tests bind real ports and build wasm Postgres they never connect
-    // to. The data plane has its own tests below and in e2e/.
+    // Control-plane wiring only: the data plane has its own tests in
+    // src/shared/postgres-data-plane/ and in e2e/.
     service = new CloudSqlService(storage, new Logger('CloudSqlTest', 'error'), {
       enabled: false,
     });

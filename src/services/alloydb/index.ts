@@ -71,8 +71,8 @@ const OPERATIONS_COLLECTION_PATH = '/v1/projects/:project/locations/:location/op
 const OPERATION_PATH = `${OPERATIONS_COLLECTION_PATH}/:operationId`;
 
 // Mirrors the config schema's defaults (see src/config/schema.ts). Tests that
-// only exercise the control plane pass `{ enabled: false }` to avoid building
-// wasm Postgres instances they never connect to.
+// only exercise the control plane pass `{ enabled: false }` to avoid spawning
+// Postgres processes they never connect to.
 export const DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOptions> = {
   enabled: true,
   portRangeStart: 5540,
@@ -107,7 +107,7 @@ export class AlloyDbService {
 
   async initialize(): Promise<void> {
     // Idempotent: a second call would build a second data plane and orphan the
-    // first's listeners and PGlites, since stop() only reaches the one held.
+    // first's listeners, since stop() only reaches the one held.
     if (this.operationsStore) return;
 
     const clusters = new ClusterRepository(this.storage);
@@ -132,10 +132,7 @@ export class AlloyDbService {
     this.dataPlane = createPostgresDataPlane(
       this.logger,
       ALLOYDB_DATA_PLANE_PRODUCT,
-      this.dataPlaneOptions,
-      // lookupUser is no longer called: PostgresServerDataPlane authenticates
-      // over SCRAM-SHA-256 using roles applied via upsertUser.
-      async () => null
+      this.dataPlaneOptions
     );
 
     // One mutex shared by every service that mutates a cluster's subtree, all

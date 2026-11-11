@@ -6,21 +6,26 @@
  */
 
 import { dirname } from 'node:path';
+import type { StorageType } from '@/core/storage/types.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
-import type {
-  DataPlaneManagerOptions,
-  LookupUser,
-  PostgresDataPlane,
-} from './data-plane-manager.ts';
+import type { PostgresDataPlane } from './data-plane-manager.ts';
 import { DisabledDataPlane } from './data-plane-manager.ts';
 import { PostgresContainerSupervisor } from './postgres-container-supervisor.ts';
 import { PostgresProcessManager } from './postgres-process-manager.ts';
 import { PostgresServerDataPlane } from './postgres-server-data-plane.ts';
 
-export type ProductDataPlaneOptions = Omit<
-  DataPlaneManagerOptions,
-  'productLabel' | 'dataDirectoryName'
-> & {
+/**
+ * What a service entry point accepts for its data plane: the product's port
+ * range and PostGIS choice, plus whether to run one at all. Shared so the two
+ * products cannot drift on the shape.
+ */
+export interface ProductDataPlaneOptions {
+  portRangeStart: number;
+  portRangeEnd: number;
+  storageType: StorageType;
+  sqlitePath: string;
+  /** Accepted and ignored; PostGIS now comes from the installed packages. */
+  postgis: boolean;
   /** Directory of `postgres` and `initdb`. Unset searches `pg_config`, then `PATH`. */
   postgresBinDir?: string | undefined;
   /**
@@ -30,13 +35,8 @@ export type ProductDataPlaneOptions = Omit<
    * See ADR-019 and {@link PostgresContainerSupervisor}.
    */
   postgresImage?: string | undefined;
-};
+}
 
-/**
- * What a service entry point accepts for its data plane: the product's port
- * range and PostGIS choice, plus whether to run one at all. Shared so the two
- * products cannot drift on the shape.
- */
 export interface ServiceDataPlaneOptions extends Partial<ProductDataPlaneOptions> {
   enabled?: boolean;
 }
@@ -68,12 +68,11 @@ export const ALLOYDB_DATA_PLANE_PRODUCT: PostgresDataPlaneProduct = {
 export function createPostgresDataPlane(
   logger: Logger,
   product: PostgresDataPlaneProduct,
-  options: ProductDataPlaneOptions & { enabled: boolean },
-  _lookupUser: LookupUser
+  options: ProductDataPlaneOptions & { enabled: boolean }
 ): PostgresDataPlane {
   if (!options.enabled) return new DisabledDataPlane();
 
-  const { enabled: _enabled, postgresBinDir, postgresImage, ...managerOptions } = options;
+  const { enabled: _enabled, postgresBinDir, postgresImage, ...rest } = options;
   const supervisor =
     product === CLOUDSQL_DATA_PLANE_PRODUCT && postgresImage != null
       ? new PostgresContainerSupervisor({ image: postgresImage })
@@ -83,10 +82,9 @@ export function createPostgresDataPlane(
 
   return new PostgresServerDataPlane(logger, {
     product,
-    dataDirectory:
-      managerOptions.storageType === 'memory' ? null : dirname(managerOptions.sqlitePath),
-    portRangeStart: managerOptions.portRangeStart,
-    portRangeEnd: managerOptions.portRangeEnd,
+    dataDirectory: rest.storageType === 'memory' ? null : dirname(rest.sqlitePath),
+    portRangeStart: rest.portRangeStart,
+    portRangeEnd: rest.portRangeEnd,
     processManager: supervisor,
   });
 }

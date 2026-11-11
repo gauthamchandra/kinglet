@@ -18,7 +18,6 @@ import {
 import { PostgresServerDataPlane } from './postgres-server-data-plane.ts';
 
 const logger = new Logger('PostgresDataPlaneHostTest', 'error');
-const anyUser = async () => ({ password: '' });
 
 let temporaryDirectories: string[] = [];
 
@@ -35,38 +34,28 @@ async function planeForProduct(product: PostgresDataPlaneProduct, portRangeStart
 
   temporaryDirectories.push(root);
 
-  const plane = createPostgresDataPlane(
-    logger,
-    product,
-    {
-      enabled: true,
-      portRangeStart,
-      portRangeEnd: portRangeStart + 4,
-      storageType: 'sqlite',
-      sqlitePath: join(root, 'emulator.db'),
-      postgis: false,
-    },
-    anyUser
-  );
+  const plane = createPostgresDataPlane(logger, product, {
+    enabled: true,
+    portRangeStart,
+    portRangeEnd: portRangeStart + 4,
+    storageType: 'sqlite',
+    sqlitePath: join(root, 'emulator.db'),
+    postgis: false,
+  });
 
   return { plane, root };
 }
 
 describe('createPostgresDataPlane', () => {
   test('returnsDisabledDataPlaneWhenNotEnabled', () => {
-    const plane = createPostgresDataPlane(
-      logger,
-      CLOUDSQL_DATA_PLANE_PRODUCT,
-      {
-        enabled: false,
-        portRangeStart: 46390,
-        portRangeEnd: 46394,
-        storageType: 'memory',
-        sqlitePath: './data/emulator.db',
-        postgis: false,
-      },
-      anyUser
-    );
+    const plane = createPostgresDataPlane(logger, CLOUDSQL_DATA_PLANE_PRODUCT, {
+      enabled: false,
+      portRangeStart: 46390,
+      portRangeEnd: 46394,
+      storageType: 'memory',
+      sqlitePath: './data/emulator.db',
+      postgis: false,
+    });
 
     expect(plane).toBeInstanceOf(DisabledDataPlane);
   });
@@ -115,18 +104,16 @@ describe('createPostgresDataPlane', () => {
       sqlitePath: join(root, 'emulator.db'),
       postgis: false,
     } as const;
-    const cloudsql = createPostgresDataPlane(
-      logger,
-      CLOUDSQL_DATA_PLANE_PRODUCT,
-      { ...options, portRangeStart: 46410, portRangeEnd: 46414 },
-      anyUser
-    );
-    const alloydb = createPostgresDataPlane(
-      logger,
-      ALLOYDB_DATA_PLANE_PRODUCT,
-      { ...options, portRangeStart: 46415, portRangeEnd: 46419 },
-      anyUser
-    );
+    const cloudsql = createPostgresDataPlane(logger, CLOUDSQL_DATA_PLANE_PRODUCT, {
+      ...options,
+      portRangeStart: 46410,
+      portRangeEnd: 46414,
+    });
+    const alloydb = createPostgresDataPlane(logger, ALLOYDB_DATA_PLANE_PRODUCT, {
+      ...options,
+      portRangeStart: 46415,
+      portRangeEnd: 46419,
+    });
     const cloudsqlTree = join(root, 'cloudsql/p1/us-central1%2Fc1%2Fi1');
     const alloydbTree = join(root, 'alloydb/p1/us-central1%2Fc1%2Fi1');
 
@@ -180,8 +167,7 @@ describe('createPostgresDataPlane', () => {
           sqlitePath: join(root, 'emulator.db'),
           postgis: false,
           postgresImage: 'postgres:18',
-        },
-        anyUser
+        }
       );
 
       expect(plane).toBeInstanceOf(PostgresServerDataPlane);
@@ -207,8 +193,7 @@ describe('createPostgresDataPlane', () => {
         storageType: 'sqlite',
         sqlitePath: join(root, 'emulator.db'),
         postgis: false,
-      },
-      anyUser
+      }
     );
 
     expect(plane).toBeInstanceOf(PostgresServerDataPlane);

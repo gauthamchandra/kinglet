@@ -25,8 +25,8 @@ import { CloudSqlRepository } from './repository.ts';
 import { cloudSqlLogin, SqlAdminService } from './service.ts';
 
 // Mirrors the config schema's defaults (see src/config/schema.ts). Tests that
-// only exercise the control plane pass `{ enabled: false }` to avoid building
-// wasm Postgres instances they never connect to.
+// only exercise the control plane pass `{ enabled: false }` to avoid spawning
+// Postgres processes they never connect to.
 export const DEFAULT_CLOUDSQL_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOptions> = {
   enabled: true,
   portRangeStart: 5432,
@@ -54,7 +54,7 @@ export class CloudSqlService {
 
   async initialize(): Promise<void> {
     // Idempotent: a second call would build a second data plane and orphan the
-    // first's listeners and PGlites, since stop() only reaches the one held.
+    // first's listeners, since stop() only reaches the one held.
     if (this.adminService) return;
 
     const repository = new CloudSqlRepository(this.storage);
@@ -64,12 +64,7 @@ export class CloudSqlService {
     this.dataPlane = createPostgresDataPlane(
       this.logger,
       CLOUDSQL_DATA_PLANE_PRODUCT,
-      this.dataPlaneOptions,
-      async (project, instance, user) => {
-        const record = await repository.getUser(project, instance, user);
-
-        return record ? { password: record.password } : null;
-      }
+      this.dataPlaneOptions
     );
 
     this.adminService = new SqlAdminService(repository, this.dataPlane);

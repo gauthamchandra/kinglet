@@ -28,8 +28,8 @@ import { buildRouter } from './e2e-helpers.ts';
 const PORT_RANGE_START = 15700;
 const PORT_RANGE_END = 15720;
 
-// Creating an instance boots a wasm Postgres per database, which is fast but
-// not uniformly so across CI runners. The tests that do it get an explicit
+// Creating an instance boots a real Postgres server, which is fast but not
+// uniformly so across CI runners. The tests that do it get an explicit
 // budget rather than relying on the 5s default they would otherwise sit at
 // roughly half of.
 const INSTANCE_BOOT_TIMEOUT_MS = 30_000;
@@ -292,11 +292,8 @@ describe('Cloud SQL data plane e2e', () => {
     await first.unsafe('CREATE TABLE lookups (id int primary key, label text)');
     await first.unsafe("INSERT INTO lookups VALUES (1, 'one'), (2, 'two')");
 
-    // Every connection to a database shares one PGlite backend, and clients
-    // derive a prepared-statement name from the query text — so the same
-    // parameterised query on two connections used to collide in the shared
-    // statement namespace with SQLSTATE 42P05. This is what a connection pool
-    // does constantly.
+    // Concurrent connections to the same database must not collide on prepared
+    // statement names. This is what a connection pool does constantly.
     const firstRows = await first`SELECT label FROM lookups WHERE id = ${1}`;
     const secondRows = await second`SELECT label FROM lookups WHERE id = ${2}`;
 

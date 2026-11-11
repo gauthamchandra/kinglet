@@ -4,10 +4,10 @@
 
 **Status:** Experimental
 **API version:** v1
-**Data plane:** PGlite (Postgres 18) in-process
+**Data plane:** Real Postgres 18 server
 **Endpoint coverage:** 29/40 (73%)
 
-Cluster, instance, and user CRUD with LRO operations; each instance exposes a PGlite Postgres endpoint (per-instance storage — READ_POOL does not share PRIMARY data; only the postgres database exists).
+Cluster, instance, and user CRUD with LRO operations; each instance exposes a real Postgres endpoint (per-instance storage — READ_POOL does not share PRIMARY data; only the postgres database exists).
 
 ## Implemented endpoints
 

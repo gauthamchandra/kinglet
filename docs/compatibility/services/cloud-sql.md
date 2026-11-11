@@ -4,10 +4,10 @@
 
 **Status:** Implemented
 **API version:** v1
-**Data plane:** PGlite (Postgres 18) in-process
+**Data plane:** Real Postgres 18 server
 **Endpoint coverage:** 20/80 (25%)
 
-Instance, database, and user admin API — PostgreSQL only; instances expose a real Postgres endpoint backed by PGlite.
+Instance, database, and user admin API — PostgreSQL only; instances expose a real Postgres endpoint.
 
 ## Implemented endpoints
 

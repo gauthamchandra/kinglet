@@ -2,8 +2,8 @@
   "services": {
     "alloydb": {
       "status": "experimental",
-      "dataPlane": "PGlite (Postgres 18) in-process",
-      "summary": "Cluster, instance, and user CRUD with LRO operations; each instance exposes a PGlite Postgres endpoint (per-instance storage — READ_POOL does not share PRIMARY data; only the postgres database exists)."
+      "dataPlane": "Real Postgres 18 server",
+      "summary": "Cluster, instance, and user CRUD with LRO operations; each instance exposes a real Postgres endpoint (per-instance storage — READ_POOL does not share PRIMARY data; only the postgres database exists)."
     },
     "cloud-kms": {
       "status": "implemented",
@@ -17,8 +17,8 @@
     },
     "cloud-sql": {
       "status": "implemented",
-      "dataPlane": "PGlite (Postgres 18) in-process",
-      "summary": "Instance, database, and user admin API — PostgreSQL only; instances expose a real Postgres endpoint backed by PGlite."
+      "dataPlane": "Real Postgres 18 server",
+      "summary": "Instance, database, and user admin API — PostgreSQL only; instances expose a real Postgres endpoint."
     },
     "cloud-storage": {
       "status": "experimental",
