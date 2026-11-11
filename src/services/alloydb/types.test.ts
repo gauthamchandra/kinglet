@@ -48,6 +48,7 @@ import {
   resolveInitialUser,
   USER_TYPE_ENUM,
   UserType,
+  userIdFromName,
   userRecordToResponse,
   userRequestToRecord,
   userTableSchema,
@@ -82,6 +83,11 @@ describe('resource names', () => {
   test('buildUserName_usesThePluralClustersSegmentFromTheNameParameterPattern', () => {
     expect(buildUserName('p', 'us-central1', 'c1', 'admin')).toBe(`${CLUSTER_NAME}/users/admin`);
     expect(buildUserName('p', 'us-central1', 'c1', 'admin')).not.toContain('/cluster/');
+  });
+
+  test('userIdFromName_usesTheSegmentAfterTheLastUsersMarker', () => {
+    expect(userIdFromName(buildUserName('users', 'us-central1', 'users', 'admin'))).toBe('admin');
+    expect(userIdFromName('projects/p/locations/l/clusters/c')).toBeUndefined();
   });
 
   test('buildConnectionInfoName_isTheSingletonSubresourceOfAnInstance', () => {

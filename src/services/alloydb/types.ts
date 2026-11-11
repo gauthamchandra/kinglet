@@ -303,6 +303,23 @@ export function buildUserName(
   return `${buildClusterName(project, location, clusterId)}/users/${userId}`;
 }
 
+/**
+ * The user id is the segment after the last `/users/`. The first match is wrong
+ * when a project or cluster id is itself `users`.
+ */
+export function userIdFromName(name: string): string | undefined {
+  const marker = '/users/';
+  const index = name.lastIndexOf(marker);
+
+  if (index < 0) return undefined;
+
+  const userId = name.substring(index + marker.length);
+
+  if (userId.length === 0 || userId.includes('/')) return undefined;
+
+  return userId;
+}
+
 export function buildBackupName(project: string, location: string, backupId: string): string {
   return `projects/${project}/locations/${location}/backups/${backupId}`;
 }

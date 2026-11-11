@@ -29,6 +29,7 @@ import {
   normalizeEnum,
   normalizeSpecFieldValue,
   parseSpecJson,
+  userIdFromName,
 } from './types.ts';
 import { resolveMaskedFields } from './update-mask.ts';
 import type { UserRepository } from './user-repository.ts';
@@ -247,7 +248,7 @@ export class InstanceService {
     const clusterUsers = await this.users.listAllUsersInCluster(project, location, clusterId);
 
     for (const user of clusterUsers) {
-      const userId = user.name.split('/users/')[1];
+      const userId = userIdFromName(user.name);
 
       if (!userId) continue;
 

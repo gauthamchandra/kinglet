@@ -58,6 +58,7 @@ import {
   DEFAULT_DATABASE_NAME,
   parseDataPlaneInstanceKey,
   parseInstanceName,
+  userIdFromName,
 } from './types.ts';
 import { UserHandlers } from './user-handlers.ts';
 import { UserRepository } from './user-repository.ts';
@@ -318,7 +319,7 @@ export class AlloyDbService {
       );
 
       for (const user of clusterUsers) {
-        const userId = user.name.split('/users/')[1];
+        const userId = userIdFromName(user.name);
 
         if (!userId) continue;
 

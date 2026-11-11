@@ -13,7 +13,10 @@
  * Postgres role on every instance in the cluster.
  */
 
-import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import type {
+  DataPlaneLogin,
+  PostgresDataPlane,
+} from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
@@ -218,9 +221,16 @@ export class UserService {
 
     if (updates.password !== undefined) {
       try {
-        await this.applyUserToAllInstances(project, location, clusterId, userId, updates.password);
+        await this.applyUserToAllInstances(
+          project,
+          location,
+          clusterId,
+          userId,
+          updates.password,
+          alloydbDataPlaneLogin(userId, existing.password)
+        );
       } catch (error) {
-        await this.users.update(name, { password: existing.password });
+        await this.users.update(name, revertUserUpdates(existing, updates));
 
         throw new AlloyDbError(
           'INTERNAL',
@@ -262,7 +272,13 @@ export class UserService {
     await this.users.delete(name);
 
     try {
-      await this.dropUserFromAllInstances(project, location, clusterId, userId);
+      await this.dropUserFromAllInstances(
+        project,
+        location,
+        clusterId,
+        userId,
+        alloydbDataPlaneLogin(userId, existing.password)
+      );
     } catch (error) {
       await this.users.create(existing);
 
@@ -296,7 +312,8 @@ export class UserService {
     location: string,
     clusterId: string,
     userId: string,
-    password: string
+    password: string,
+    previous: DataPlaneLogin | null = null
   ): Promise<void> {
     if (!this.instances) return;
 
@@ -305,15 +322,23 @@ export class UserService {
       location,
       clusterId
     );
+    const applied: string[] = [];
 
-    for (const instance of clusterInstances) {
-      const parsed = parseInstanceName(instance.name);
+    try {
+      for (const instance of clusterInstances) {
+        const parsed = parseInstanceName(instance.name);
 
-      if (!parsed) continue;
+        if (!parsed) continue;
 
-      const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
+        const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
 
-      await this.dataPlane.upsertUser(project, key, alloydbDataPlaneLogin(userId, password));
+        await this.dataPlane.upsertUser(project, key, alloydbDataPlaneLogin(userId, password));
+        applied.push(key);
+      }
+    } catch (error) {
+      await this.undoUserChanges(project, userId, applied, previous, error);
+
+      throw error;
     }
   }
 
@@ -325,7 +350,8 @@ export class UserService {
     project: string,
     location: string,
     clusterId: string,
-    userId: string
+    userId: string,
+    previous: DataPlaneLogin
   ): Promise<void> {
     if (!this.instances) return;
 
@@ -334,15 +360,55 @@ export class UserService {
       location,
       clusterId
     );
+    const dropped: string[] = [];
 
-    for (const instance of clusterInstances) {
-      const parsed = parseInstanceName(instance.name);
+    try {
+      for (const instance of clusterInstances) {
+        const parsed = parseInstanceName(instance.name);
 
-      if (!parsed) continue;
+        if (!parsed) continue;
 
-      const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
+        const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
 
-      await this.dataPlane.dropUser(project, key, userId);
+        await this.dataPlane.dropUser(project, key, userId);
+        dropped.push(key);
+      }
+    } catch (error) {
+      await this.undoUserChanges(project, userId, dropped, previous, error);
+
+      throw error;
+    }
+  }
+
+  /**
+   * Put the instances that already changed back to `previous`. A create has no
+   * previous role, so those instances drop the role that was just created.
+   */
+  private async undoUserChanges(
+    project: string,
+    userId: string,
+    keys: string[],
+    previous: DataPlaneLogin | null,
+    cause: unknown
+  ): Promise<void> {
+    const failures: string[] = [];
+
+    for (const key of keys) {
+      try {
+        if (previous == null) {
+          await this.dataPlane.dropUser(project, key, userId);
+        } else {
+          await this.dataPlane.upsertUser(project, key, previous);
+        }
+      } catch (error) {
+        failures.push(`${key}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (failures.length > 0) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+
+      throw new Error(`${message}; undo failed: ${failures.join('; ')}`);
     }
   }
 
@@ -379,6 +445,21 @@ function validateUserType(userType: unknown): void {
     'INVALID_ARGUMENT',
     `User.userType "${String(userType)}" must be one of ${[...USER_TYPES].join(', ')}`
   );
+}
+
+function revertUserUpdates(
+  existing: UserRecord,
+  updates: Partial<Pick<UserRecord, 'userType' | 'password' | 'spec'>>
+): Partial<Pick<UserRecord, 'userType' | 'password' | 'spec'>> {
+  const reverted: Partial<Pick<UserRecord, 'userType' | 'password' | 'spec'>> = {};
+
+  if (updates.userType !== undefined) reverted.userType = existing.userType;
+
+  if (updates.password !== undefined) reverted.password = existing.password;
+
+  if (updates.spec !== undefined) reverted.spec = existing.spec;
+
+  return reverted;
 }
 
 function buildUserUpdates(

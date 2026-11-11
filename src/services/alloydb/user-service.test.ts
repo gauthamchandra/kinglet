@@ -25,6 +25,36 @@ const USER_ID = 'admin';
 const USER_NAME = buildUserName(PROJECT, LOCATION, CLUSTER_ID, USER_ID);
 const INSTANCE_KEY = buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID);
 
+async function addReadPool(): Promise<void> {
+  await instances.create(
+    instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'pool'), {
+      instanceType: 'READ_POOL',
+    })
+  );
+}
+
+function failUpsertOnCall(which: number): void {
+  let seen = 0;
+
+  dataPlane.upsertUser = async (project, instance, user) => {
+    dataPlane.calls.push(`upsertUser:${project}/${instance}:${user.name}`);
+    seen += 1;
+
+    if (seen === which) throw new Error('read pool down');
+  };
+}
+
+function failDropOnCall(which: number): void {
+  let seen = 0;
+
+  dataPlane.dropUser = async (project, instance, userName) => {
+    dataPlane.calls.push(`dropUser:${project}/${instance}:${userName}`);
+    seen += 1;
+
+    if (seen === which) throw new Error('read pool down');
+  };
+}
+
 let storage: StorageManager;
 let clusters: ClusterRepository;
 let instances: InstanceRepository;
@@ -222,6 +252,31 @@ describe('createUser', () => {
       'code',
       'NOT_FOUND'
     );
+  });
+
+  test('createUser_whenALaterInstanceFails_dropsTheRoleItAlreadyCreated', async () => {
+    await addReadPool();
+    failUpsertOnCall(2);
+
+    const promise = service.createUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'hunter2' },
+      {}
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
+    await expect(service.getUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID)).rejects.toHaveProperty(
+      'code',
+      'NOT_FOUND'
+    );
+
+    const created = dataPlane.calls.find(call => call.startsWith('upsertUser:')) ?? '';
+
+    expect(created.startsWith('upsertUser:')).toBe(true);
+    expect(dataPlane.calls).toContain(created.replace('upsertUser:', 'dropUser:'));
   });
 });
 
@@ -449,6 +504,35 @@ describe('updateUser', () => {
     expect(dataPlane.calls).toContain(`upsertUser:${PROJECT}/${INSTANCE_KEY}:${USER_ID}`);
   });
 
+  test('updateUser_whenUpsertFails_restoresPasswordAndOtherFields', async () => {
+    await addReadPool();
+    dataPlane.calls.length = 0;
+    failUpsertOnCall(2);
+
+    const promise = service.updateUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'new-pass', databaseRoles: ['pg_read_all_data'] },
+      { updateMask: 'password,databaseRoles' }
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
+
+    const stored = await users.getByName(USER_NAME);
+
+    expect(stored?.password).toBe('');
+    expect((await service.getUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID)).databaseRoles).toEqual([
+      'original',
+    ]);
+
+    const applied = dataPlane.calls.filter(call => call.startsWith('upsertUser:'));
+
+    expect(applied.length).toBeGreaterThanOrEqual(3);
+    expect(applied[0]).toBe(applied[2]);
+  });
+
   test('updateUser_withValidateOnly_doesNotCallDataPlane', async () => {
     dataPlane.calls.length = 0;
 
@@ -497,6 +581,22 @@ describe('deleteUser', () => {
     await service.deleteUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, {});
 
     expect(dataPlane.calls).toContain(`dropUser:${PROJECT}/${INSTANCE_KEY}:${USER_ID}`);
+  });
+
+  test('deleteUser_whenDropFails_restoresTheRowAndTheRoleAlreadyDropped', async () => {
+    await addReadPool();
+    dataPlane.calls.length = 0;
+    failDropOnCall(2);
+
+    const promise = service.deleteUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, {});
+
+    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
+    expect((await service.getUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID)).name).toBe(USER_NAME);
+
+    const dropped = dataPlane.calls.find(call => call.startsWith('dropUser:')) ?? '';
+
+    expect(dropped.startsWith('dropUser:')).toBe(true);
+    expect(dataPlane.calls).toContain(dropped.replace('dropUser:', 'upsertUser:'));
   });
 
   test('deleteUser_withValidateOnly_doesNotCallDataPlane', async () => {
