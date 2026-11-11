@@ -428,10 +428,12 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresProcessManager', () => {
   test('reclaims an orphaned server and removes a dead stale pid file', async () => {
     const port = await freePort();
     await manager.ensureInitialized(dataDir);
-    const binDir = Bun.spawnSync(['pg_config', '--bindir']).stdout.toString().trim();
+    const postgres = (
+      manager as unknown as { requireBinary(name: string): string }
+    ).requireBinary('postgres');
     const orphan = Bun.spawn(
       [
-        join(binDir, 'postgres'),
+        postgres,
         '-D',
         dataDir,
         '-c',
