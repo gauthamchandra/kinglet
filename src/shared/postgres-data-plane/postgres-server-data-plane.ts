@@ -5,7 +5,7 @@
  * process and issues the DDL the admin API asked for. See ADR-019.
  */
 
-import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import type { SQL } from 'bun';
@@ -481,6 +481,13 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
   private async createTempRoot(): Promise<string> {
     try {
       const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-'));
+
+      // mkdtemp is 0700 and owned by this process. When Kinglet is root the
+      // server runs as bun, and that user cannot traverse this parent even
+      // after the cluster directory itself is handed over.
+      if (process.getuid?.() === 0) {
+        await chmod(root, 0o711);
+      }
 
       this.tempRoot = root;
 

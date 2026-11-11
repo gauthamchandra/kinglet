@@ -316,6 +316,43 @@ describe('PostgresServerDataPlane directory safety', () => {
       await started.stopAll();
     }
   });
+
+  test('a root-owned memory root stays traversable by the unprivileged server', async () => {
+    const uid = spyOn(process, 'getuid').mockReturnValue(0);
+    const dirs: string[] = [];
+    const started = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: null,
+      portRangeStart: 47980,
+      portRangeEnd: 47990,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async (dir: string) => {
+          dirs.push(dir);
+        },
+        start: async () => {
+          throw new Error('stop after the directory is chosen');
+        },
+      },
+    });
+
+    try {
+      await expect(started.startInstance('p', 'a', ['postgres'])).rejects.toThrow(
+        'stop after the directory is chosen'
+      );
+      const dataDir = dirs[0];
+
+      expect(dataDir?.includes('/cloudsql/')).toBe(true);
+
+      const info = await fsPromises.stat(dataDir?.split('/cloudsql/')[0] ?? '');
+
+      expect(info.mode & 0o777).toBe(0o711);
+    } finally {
+      uid.mockRestore();
+      await started.stopAll();
+    }
+  });
 });
 
 describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
