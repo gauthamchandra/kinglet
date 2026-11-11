@@ -97,9 +97,9 @@ describe('Postgres process cleanup', () => {
     ).toBe('match');
     expect(classifyPsCommand('postgres -D /elsewhere', dataDir)).toBe('other');
     expect(classifyPsCommand('postgres -D /tmp/my data -c port=1', '/tmp/my data')).toBe('unknown');
-    expect(
-      classifyPsCommand('postgres -c note=-D /tmp/my data -D /other', '/tmp/my data')
-    ).toBe('unknown');
+    expect(classifyPsCommand('postgres -c note=-D /tmp/my data -D /other', '/tmp/my data')).toBe(
+      'unknown'
+    );
   });
 
   test('does not follow a socket symlink when changing permissions', async () => {
