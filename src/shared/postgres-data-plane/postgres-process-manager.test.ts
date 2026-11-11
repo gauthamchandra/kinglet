@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SQL } from 'bun';
 import { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
 import { isRealPostgresAvailable } from '../../../test-utils/postgres.ts';
-import { PostgresProcessManager, preferredServerBinDir } from './postgres-process-manager.ts';
+import {
+  classifyPostmasterArgs,
+  classifyPsCommand,
+  PostgresProcessManager,
+  preferredServerBinDir,
+} from './postgres-process-manager.ts';
 
 describe('preferredServerBinDir', () => {
   test('prefers the newest server over an older pg_config bindir', () => {
@@ -75,6 +80,77 @@ describe('Postgres command construction', () => {
 });
 
 describe('Postgres process cleanup', () => {
+  test('classifies a postmaster without signaling an unreadable command', () => {
+    const dataDir = '/tmp/kinglet/data';
+
+    expect(classifyPostmasterArgs([], dataDir)).toBe('unknown');
+    expect(classifyPostmasterArgs(['/usr/bin/bun', '-e', '1'], dataDir)).toBe('other');
+    expect(
+      classifyPostmasterArgs(['/usr/lib/postgresql/18/bin/postgres', '-D', dataDir], dataDir)
+    ).toBe('match');
+    expect(classifyPostmasterArgs(['postgres', '-D', '/other'], dataDir)).toBe('other');
+    expect(classifyPostmasterArgs(['postgres'], dataDir)).toBe('unknown');
+    expect(classifyPsCommand('', dataDir)).toBe('unknown');
+    expect(classifyPsCommand('/usr/bin/bun -e 1', dataDir)).toBe('other');
+    expect(
+      classifyPsCommand(`/usr/lib/postgresql/18/bin/postgres -D ${dataDir} -c port=1`, dataDir)
+    ).toBe('match');
+    expect(classifyPsCommand('postgres -D /elsewhere', dataDir)).toBe('other');
+    expect(classifyPsCommand('postgres -D /tmp/my data -c port=1', '/tmp/my data')).toBe('match');
+    expect(classifyPsCommand('postgres -D /tmp/my database', '/tmp/my data')).toBe('unknown');
+  });
+
+  test('does not follow a socket symlink when changing permissions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-link-'));
+    const sentinel = join(root, 'sentinel');
+    const link = join(root, 'link');
+
+    await mkdir(sentinel);
+    await chmod(sentinel, 0o755);
+    await symlink(sentinel, link);
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
+    const prepare = manager as unknown as {
+      prepareDirectoryForPostgres(directory: string): Promise<void>;
+    };
+
+    try {
+      await expect(prepare.prepareDirectoryForPostgres(link)).rejects.toThrow(/permissions/);
+      expect((await lstat(sentinel)).mode & 0o777).toBe(0o755);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('creates a private socket directory another manager can find', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-sock-'));
+    const dataDir = join(root, 'data');
+
+    await mkdir(dataDir);
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
+    const created = manager as unknown as {
+      createSocketDirectory(directory: string): Promise<string>;
+      socketDirectory(directory: string): string;
+    };
+    const other = new PostgresProcessManager(new Logger('postgres-test', 'error')) as unknown as {
+      socketDirectory(directory: string): string;
+    };
+
+    try {
+      const socketDir = await created.createSocketDirectory(resolve(dataDir));
+      const info = await lstat(socketDir);
+
+      expect(socketDir.startsWith(join(resolve(tmpdir()), 'kpg-'))).toBe(true);
+      expect(info.isSymbolicLink()).toBe(false);
+      expect(info.isDirectory()).toBe(true);
+      expect(info.mode & 0o777).toBe(0o700);
+      expect(other.socketDirectory(resolve(dataDir))).toBe(socketDir);
+      expect(created.socketDirectory(resolve(dataDir))).toBe(socketDir);
+    } finally {
+      await manager.stop(dataDir);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('does not signal a live process that is not the postmaster', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-pid-'));
     const dataDir = join(root, 'data');

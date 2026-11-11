@@ -1,7 +1,7 @@
-import { readdirSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { constants, lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { lstat, mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { SQL, type Subprocess } from 'bun';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
@@ -18,8 +18,11 @@ interface PostgresProcessManagerOptions {
  * The template is initialized once and never started, so copies are clean clusters.
  * Lifecycle calls for the same directory must be serialized by the caller.
  */
+const SOCKET_RECORD = 'kinglet.socket-dir';
+
 export class PostgresProcessManager {
   private servers = new Map<string, Subprocess>();
+  private socketDirs = new Map<string, string>();
   private templateInitialization: Promise<string> | undefined;
 
   constructor(
@@ -68,9 +71,7 @@ export class PostgresProcessManager {
     await this.stop(dataDir);
     await this.stopStaleServer(dataDir);
     await this.prepareDirectoryForPostgres(dataDir);
-    const socketDir = this.socketDirectory(dataDir);
-    await mkdir(socketDir, { recursive: true });
-    await this.prepareDirectoryForPostgres(socketDir);
+    const socketDir = await this.createSocketDirectory(dataDir);
 
     const stderr = new StderrTail();
     const child = Bun.spawn(
@@ -97,6 +98,7 @@ export class PostgresProcessManager {
       await drained;
       const message = error instanceof Error ? error.message : 'Postgres did not become ready';
       this.logger.warn(`Postgres on port ${port} did not become ready; its child has been stopped`);
+      await this.removeSocketDirectory(dataDir);
       throw new Error(withDetail(message, stderr.text()));
     }
   }
@@ -105,11 +107,13 @@ export class PostgresProcessManager {
     dataDir = resolve(dataDir);
     const child = this.servers.get(dataDir);
 
-    if (child == null) return;
+    if (child != null) {
+      child.kill('SIGINT');
+      await child.exited;
+      this.servers.delete(dataDir);
+    }
 
-    child.kill('SIGINT');
-    await child.exited;
-    this.servers.delete(dataDir);
+    await this.removeSocketDirectory(dataDir);
   }
 
   async stopStaleServer(dataDir: string): Promise<void> {
@@ -245,7 +249,24 @@ export class PostgresProcessManager {
   }
 
   private async prepareDirectoryForPostgres(directory: string): Promise<void> {
-    await chmod(directory, 0o700);
+    let handle: Awaited<ReturnType<typeof open>>;
+
+    try {
+      // O_NOFOLLOW refuses a symlink, so chmod cannot land on a directory the
+      // caller did not create.
+      handle = await open(
+        directory,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+      );
+    } catch (error) {
+      throw new Error(`Refusing to change permissions for ${directory}`, { cause: error });
+    }
+
+    try {
+      await handle.chmod(0o700);
+    } finally {
+      await handle.close();
+    }
 
     if (process.getuid?.() === 0) {
       await this.runCommand(['chown', '-R', 'bun:bun', directory]);
@@ -295,38 +316,72 @@ export class PostgresProcessManager {
     return templateDir;
   }
 
-  private socketDirectory(dataDir: string): string {
-    // sockaddr_un.sun_path is 108 bytes. A data directory under the sqlite path
-    // does not fit, so the admin socket lives in a short private directory.
-    const digest = new Bun.CryptoHasher('sha256').update(dataDir).digest('hex').substring(0, 16);
+  private async createSocketDirectory(dataDir: string): Promise<string> {
+    // A hash of the data directory is predictable in a shared tmp. mkdtemp
+    // creates a new 0700 directory that no other user could have planted.
+    await this.removeSocketDirectory(dataDir);
+    const directory = await mkdtemp(join(tmpdir(), 'kpg-'));
 
-    return join(tmpdir(), `kpg-${digest}`);
+    await this.prepareDirectoryForPostgres(directory);
+    this.socketDirs.set(dataDir, directory);
+    await Bun.write(join(dataDir, SOCKET_RECORD), `${directory}\n`);
+
+    return directory;
+  }
+
+  private async removeSocketDirectory(dataDir: string): Promise<void> {
+    const recorded = this.socketDirs.get(dataDir) ?? readSocketRecord(dataDir);
+
+    this.socketDirs.delete(dataDir);
+    await rm(join(dataDir, SOCKET_RECORD), { force: true });
+
+    if (recorded == null || !isPrivateSocketPath(recorded)) return;
+
+    let info: Awaited<ReturnType<typeof lstat>>;
+
+    try {
+      info = await lstat(recorded);
+    } catch {
+      return;
+    }
+
+    if (info.isSymbolicLink()) {
+      await rm(recorded, { force: true });
+
+      return;
+    }
+
+    if (info.isDirectory()) await rm(recorded, { recursive: true, force: true });
+  }
+
+  private socketDirectory(dataDir: string): string {
+    const cached = this.socketDirs.get(dataDir);
+
+    if (cached != null) return cached;
+
+    const recorded = readSocketRecord(dataDir);
+
+    if (recorded == null || !isPrivateSocketDirectory(recorded)) {
+      throw new Error('Postgres admin socket directory is not recorded');
+    }
+
+    this.socketDirs.set(dataDir, recorded);
+
+    return recorded;
   }
 
   private async postmasterIdentity(
     pid: number,
     dataDir: string
   ): Promise<'match' | 'other' | 'unknown'> {
-    let cmdline: string;
+    if (process.platform === 'linux')
+      return classifyPostmasterArgs(await linuxCommandArgs(pid), dataDir);
 
-    try {
-      // /proc entries do not report as existing through Bun.file.exists().
-      cmdline = await Bun.file(`/proc/${pid}/cmdline`).text();
-    } catch {
-      return 'unknown';
-    }
+    // macOS has no /proc. ps is the identity check, and a failed read stays unknown
+    // so an unconfirmed pid is never signaled.
+    if (process.platform === 'darwin') return classifyPsCommand(darwinCommandLine(pid), dataDir);
 
-    if (cmdline.length === 0) return 'unknown';
-
-    const args = cmdline.split('\0').filter(argument => argument.length > 0);
-    const executable = args[0];
-
-    if (executable == null || basename(executable) !== 'postgres') return 'other';
-
-    const dataFlag = args.indexOf('-D');
-    const recorded = dataFlag >= 0 ? args[dataFlag + 1] : undefined;
-
-    return recorded != null && resolve(recorded) === dataDir ? 'match' : 'other';
+    return 'unknown';
   }
 
   private async runCommand(command: string[]): Promise<void> {
@@ -445,6 +500,102 @@ class StderrTail {
 
 function withDetail(message: string, detail: string): string {
   return detail.length === 0 ? message : `${message}: ${detail}`;
+}
+
+function readSocketRecord(dataDir: string): string | null {
+  try {
+    const recorded = readFileSync(join(dataDir, SOCKET_RECORD), 'utf8').trim();
+
+    return recorded.length === 0 ? null : recorded;
+  } catch {
+    return null;
+  }
+}
+
+function socketPrefix(): string {
+  return `${resolve(tmpdir())}${sep}kpg-`;
+}
+
+function isPrivateSocketPath(directory: string): boolean {
+  return resolve(directory).startsWith(socketPrefix());
+}
+
+function isPrivateSocketDirectory(directory: string): boolean {
+  const resolved = resolve(directory);
+
+  if (!resolved.startsWith(socketPrefix())) return false;
+
+  try {
+    return lstatSync(resolved).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function linuxCommandArgs(pid: number): Promise<readonly string[]> {
+  try {
+    // /proc entries do not report as existing through Bun.file.exists().
+    const cmdline = await Bun.file(`/proc/${pid}/cmdline`).text();
+
+    if (cmdline.length === 0) return [];
+
+    return cmdline.split('\0').filter(argument => argument.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function darwinCommandLine(pid: number): string {
+  const result = Bun.spawnSync(['ps', '-ww', '-o', 'args=', '-p', String(pid)], {
+    stderr: 'ignore',
+  });
+
+  if (result.exitCode !== 0) return '';
+
+  return result.stdout.toString();
+}
+
+/** `match` is this data directory's postmaster. `unknown` must not be signaled. */
+export function classifyPostmasterArgs(
+  args: readonly string[],
+  dataDir: string
+): 'match' | 'other' | 'unknown' {
+  const executable = args[0];
+
+  if (executable == null || executable.length === 0) return 'unknown';
+
+  if (basename(executable) !== 'postgres') return 'other';
+
+  const dataFlag = args.indexOf('-D');
+  const recorded = dataFlag >= 0 ? args[dataFlag + 1] : undefined;
+
+  if (recorded == null || recorded.length === 0) return 'unknown';
+
+  return resolve(recorded) === resolve(dataDir) ? 'match' : 'other';
+}
+
+/** Parse `ps -o args=` without signaling when the data directory cannot be proved. */
+export function classifyPsCommand(text: string, dataDir: string): 'match' | 'other' | 'unknown' {
+  const trimmed = text.trim();
+
+  if (trimmed.length === 0) return 'unknown';
+
+  const executable = trimmed.split(/\s+/)[0];
+
+  if (executable == null || basename(executable) !== 'postgres') return 'other';
+
+  if (/\s/.test(dataDir)) {
+    const marker = `-D ${dataDir}`;
+    const index = trimmed.indexOf(marker);
+
+    if (index < 0) return 'unknown';
+
+    const after = trimmed[index + marker.length];
+
+    return after == null || /\s/.test(after) ? 'match' : 'unknown';
+  }
+
+  return classifyPostmasterArgs(trimmed.split(/\s+/), dataDir);
 }
 
 export interface PostgresBinCandidate {
