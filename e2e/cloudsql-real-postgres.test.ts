@@ -165,9 +165,11 @@ describe('Cloud SQL on real Postgres', () => {
 
   test('now() has microseconds', async () => {
     const sql = connect();
-    const rows: { now: string }[] = await sql.unsafe('SELECT now()::text AS now');
+    const rows: { now: string }[] = await sql.unsafe(
+      "SELECT to_char(now(), 'YYYY-MM-DD HH24:MI:SS.US') AS now"
+    );
 
-    expect(rows[0]?.now).toMatch(/\.\d{6}/);
+    expect(rows[0]?.now).toMatch(/\.\d{6}$/);
   });
 
   test('pg_stat_statements can be created and read', async () => {
