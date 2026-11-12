@@ -18,8 +18,19 @@ import {
   RoleAlreadyExistsError,
 } from './data-plane-manager.ts';
 import type { PostgresDataPlaneProduct } from './host.ts';
-import { encodePathSegment } from './pglite-database-manager.ts';
 import type { PostgresProcessManager } from './postgres-process-manager.ts';
+
+/**
+ * Make one project/instance/database name safe to use as a directory name.
+ *
+ * <p>Percent-encoding keeps fidelity while making traversal impossible: `..`
+ * becomes `%2E%2E`, `a/b` becomes `a%2Fb`, and an ordinary name like `postgres`
+ * is left untouched. `encodeURIComponent` already escapes separators and handles
+ * UTF-8; `.` is the one character it leaves through that matters here.
+ */
+export function encodePathSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(/\./g, '%2E');
+}
 
 /** The methods {@link PostgresServerDataPlane} calls. A container runtime can match this later. */
 export type PostgresSupervisor = Pick<

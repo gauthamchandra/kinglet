@@ -1,11 +1,9 @@
 /**
  * Coverage gate for CI.
  *
- * <p>Bun 1.3.4 runs the suite in one process, and `--max-concurrency` only
- * applies to `test.concurrent` / `--concurrent`, which this suite does not
- * use. PGlite keeps a large wasm heap after `close()`. Running those tests
- * in a second process keeps that heap off the rest of the suite. The two
- * lcov reports are merged before the aggregate gate.
+ * <p>Real-Postgres tests spawn child processes and hold disk state; running
+ * them in a second process keeps that overhead off the rest of the suite.
+ * The two lcov reports are merged before the aggregate gate.
  */
 
 import { mkdir } from 'node:fs/promises';
@@ -19,8 +17,8 @@ const HEAVY_FILES = new Set([
 
 const ROOTS = ['src', 'test-utils', 'scripts'];
 
-/** PGlite boots live in these files. They run in their own process. */
-export function isPgliteCoverageTest(path: string): boolean {
+/** Postgres data-plane tests and service wiring tests run in the heavy process. */
+export function isHeavyCoverageTest(path: string): boolean {
   return path.startsWith('src/shared/postgres-data-plane/') || HEAVY_FILES.has(path);
 }
 
@@ -33,7 +31,7 @@ export async function collectTestFiles(): Promise<{ light: string[]; heavy: stri
     for await (const relative of glob.scan({ cwd: root, onlyFiles: true })) {
       const path = `${root}/${relative}`;
 
-      if (isPgliteCoverageTest(path)) {
+      if (isHeavyCoverageTest(path)) {
         heavy.push(path);
       } else {
         light.push(path);
@@ -47,7 +45,7 @@ export async function collectTestFiles(): Promise<{ light: string[]; heavy: stri
   return { light, heavy };
 }
 
-/** Bun's panic handler exits 132. A segfault is 139. Both are Bun/wasm crashes, not test failures. */
+/** Bun's panic handler exits 132. A segfault is 139. Both are Bun crashes, not test failures. */
 export function shouldRetryCrashedSuite(exitCode: number, attempt: number): boolean {
   return attempt === 1 && (exitCode === 132 || exitCode === 139);
 }
@@ -78,14 +76,14 @@ async function main(): Promise<void> {
   const { light, heavy } = await collectTestFiles();
 
   if (light.length === 0 || heavy.length === 0) {
-    console.error('Expected both a main suite and a PGlite suite');
+    console.error('Expected both a main suite and a Postgres suite');
     process.exit(1);
   }
 
   await mkdir('coverage', { recursive: true });
 
   const lightReport = await runSuite('main suite', light);
-  const heavyReport = await runSuite('PGlite suite', heavy);
+  const heavyReport = await runSuite('Postgres suite', heavy);
   const merged = mergeLcov([lightReport, heavyReport]);
 
   await Bun.write('coverage/lcov.info', merged);

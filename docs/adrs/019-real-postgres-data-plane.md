@@ -121,4 +121,8 @@ Not built here:
 - `databaseFlags` applied to `postgresql.conf` / `ALTER SYSTEM`.
 - AlloyDB read pools as streaming replicas. Each READ_POOL instance is
   presently its own independent Postgres server, not a streaming replica.
-- Remove the PGlite data plane once nothing calls it.
+
+The PGlite data plane (`DataPlaneManager`, the hand-written wire server, and
+the `@electric-sql/pglite` dependency) has been removed. Both Cloud SQL and
+AlloyDB use `PostgresServerDataPlane` (real Postgres, ADR-019). `DisabledDataPlane`
+remains the metadata-only path when `*_DATA_PLANE=false`.

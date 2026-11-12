@@ -1,27 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 import {
   collectTestFiles,
-  isPgliteCoverageTest,
+  isHeavyCoverageTest,
   shouldRetryCrashedSuite,
 } from './test-coverage-check.ts';
 
-describe('isPgliteCoverageTest', () => {
+describe('isHeavyCoverageTest', () => {
   test('keeps every postgres data-plane test in the heavy process', () => {
-    expect(isPgliteCoverageTest('src/shared/postgres-data-plane/extensions.test.ts')).toBe(true);
+    expect(isHeavyCoverageTest('src/shared/postgres-data-plane/host.test.ts')).toBe(true);
     expect(
-      isPgliteCoverageTest('src/shared/postgres-data-plane/pglite-database-manager.test.ts')
+      isHeavyCoverageTest('src/shared/postgres-data-plane/postgres-server-data-plane.test.ts')
     ).toBe(true);
   });
 
   test('keeps the service files that boot a real data plane in the heavy process', () => {
-    expect(isPgliteCoverageTest('src/services/cloudsql/index.test.ts')).toBe(true);
-    expect(isPgliteCoverageTest('src/services/alloydb/index.test.ts')).toBe(true);
+    expect(isHeavyCoverageTest('src/services/cloudsql/index.test.ts')).toBe(true);
+    expect(isHeavyCoverageTest('src/services/alloydb/index.test.ts')).toBe(true);
   });
 
   test('leaves the rest of the suite in the main process', () => {
-    expect(isPgliteCoverageTest('src/services/cloudsql/service.test.ts')).toBe(false);
-    expect(isPgliteCoverageTest('src/index.test.ts')).toBe(false);
-    expect(isPgliteCoverageTest('test-utils/dev-dependencies.test.ts')).toBe(false);
+    expect(isHeavyCoverageTest('src/services/cloudsql/service.test.ts')).toBe(false);
+    expect(isHeavyCoverageTest('src/index.test.ts')).toBe(false);
+    expect(isHeavyCoverageTest('test-utils/dev-dependencies.test.ts')).toBe(false);
   });
 });
 
@@ -43,7 +43,7 @@ describe('collectTestFiles', () => {
 
     expect(heavy).toContain('src/services/cloudsql/index.test.ts');
     expect(heavy).toContain('src/services/alloydb/index.test.ts');
-    expect(heavy).toContain('src/shared/postgres-data-plane/extensions.test.ts');
+    expect(heavy).toContain('src/shared/postgres-data-plane/host.test.ts');
     expect(light).toContain('src/index.test.ts');
     expect(light.some(path => heavy.includes(path))).toBe(false);
     expect(light.length).toBeGreaterThan(0);
