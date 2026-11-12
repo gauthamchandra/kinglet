@@ -156,19 +156,15 @@ describe('createPostgresDataPlane', () => {
     const which = spyOn(Bun, 'which').mockReturnValue(null);
 
     try {
-      const plane = createPostgresDataPlane(
-        logger,
-        CLOUDSQL_DATA_PLANE_PRODUCT,
-        {
-          enabled: true,
-          portRangeStart: 46420,
-          portRangeEnd: 46424,
-          storageType: 'sqlite',
-          sqlitePath: join(root, 'emulator.db'),
-          postgis: false,
-          postgresImage: 'postgres:18',
-        }
-      );
+      const plane = createPostgresDataPlane(logger, CLOUDSQL_DATA_PLANE_PRODUCT, {
+        enabled: true,
+        portRangeStart: 46420,
+        portRangeEnd: 46424,
+        storageType: 'sqlite',
+        sqlitePath: join(root, 'emulator.db'),
+        postgis: false,
+        postgresImage: 'postgres:18',
+      });
 
       expect(plane).toBeInstanceOf(PostgresServerDataPlane);
       // Container supervisor reports unavailable when docker is absent.
@@ -183,18 +179,14 @@ describe('createPostgresDataPlane', () => {
 
     temporaryDirectories.push(root);
 
-    const plane = createPostgresDataPlane(
-      logger,
-      CLOUDSQL_DATA_PLANE_PRODUCT,
-      {
-        enabled: true,
-        portRangeStart: 46425,
-        portRangeEnd: 46429,
-        storageType: 'sqlite',
-        sqlitePath: join(root, 'emulator.db'),
-        postgis: false,
-      }
-    );
+    const plane = createPostgresDataPlane(logger, CLOUDSQL_DATA_PLANE_PRODUCT, {
+      enabled: true,
+      portRangeStart: 46425,
+      portRangeEnd: 46429,
+      storageType: 'sqlite',
+      sqlitePath: join(root, 'emulator.db'),
+      postgis: false,
+    });
 
     expect(plane).toBeInstanceOf(PostgresServerDataPlane);
   });
