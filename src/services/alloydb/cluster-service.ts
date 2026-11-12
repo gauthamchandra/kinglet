@@ -6,6 +6,7 @@ import type { OperationResponse, OperationsStore } from '@/core/operations/opera
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { isReservedCloudSqlRole } from '@/shared/postgres-data-plane/postgres-server-data-plane.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
@@ -479,6 +480,13 @@ function validateInitialUser(body: Record<string, unknown>): void {
     throw new AlloyDbError(
       'INVALID_ARGUMENT',
       `Cluster.initialUser.user "${username}" must not contain "/"`
+    );
+  }
+
+  if (isReservedCloudSqlRole(username)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `Cluster.initialUser.user "${username}" is reserved`
     );
   }
 }

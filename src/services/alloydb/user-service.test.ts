@@ -179,6 +179,9 @@ describe('createUser', () => {
   test.each([
     '',
     'has/slash',
+    'kinglet_admin',
+    'cloudsqlsuperuser',
+    'pg_monitor',
   ])('createUser_givenTheUnusableUserId_%p_reportsInvalidArgument', async userId => {
     const promise = service.createUser(PROJECT, LOCATION, CLUSTER_ID, userId, {}, {});
 

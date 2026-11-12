@@ -19,6 +19,7 @@ import {
   type PostgresDataPlane,
   RoleAlreadyExistsError,
 } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { isReservedCloudSqlRole } from '@/shared/postgres-data-plane/postgres-server-data-plane.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
 import type { InstanceRepository } from './instance-repository.ts';
@@ -437,12 +438,16 @@ export class UserService {
 
 /** Throwing wrapper over {@link isValidUserId}. */
 function validateUserId(userId: string): void {
-  if (isValidUserId(userId)) return;
+  if (!isValidUserId(userId)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `User ID "${userId}" must be non-empty and must not contain "/"`
+    );
+  }
 
-  throw new AlloyDbError(
-    'INVALID_ARGUMENT',
-    `User ID "${userId}" must be non-empty and must not contain "/"`
-  );
+  if (isReservedCloudSqlRole(userId)) {
+    throw new AlloyDbError('INVALID_ARGUMENT', `User ID "${userId}" is reserved`);
+  }
 }
 
 /** Normalized before validating — see {@link normalizeEnum}. */
