@@ -14,6 +14,7 @@ import type {
   PostgresDataPlane,
 } from './data-plane-manager.ts';
 import { DataPlaneManager, DisabledDataPlane } from './data-plane-manager.ts';
+import { PostgresContainerSupervisor } from './postgres-container-supervisor.ts';
 import { PostgresProcessManager } from './postgres-process-manager.ts';
 import { PostgresServerDataPlane } from './postgres-server-data-plane.ts';
 
@@ -23,6 +24,13 @@ export type ProductDataPlaneOptions = Omit<
 > & {
   /** Directory of `postgres` and `initdb`. Unset searches `pg_config`, then `PATH`. */
   postgresBinDir?: string | undefined;
+  /**
+   * Docker image to use for Cloud SQL instances. When set, each instance
+   * starts inside a container running this image instead of a supervised
+   * child process. Unset (default) keeps the existing process-manager path.
+   * See ADR-019 and {@link PostgresContainerSupervisor}.
+   */
+  postgresImage?: string | undefined;
 };
 
 /**
@@ -66,18 +74,23 @@ export function createPostgresDataPlane(
 ): PostgresDataPlane {
   if (!options.enabled) return new DisabledDataPlane();
 
-  const { enabled: _enabled, postgresBinDir, ...managerOptions } = options;
+  const { enabled: _enabled, postgresBinDir, postgresImage, ...managerOptions } = options;
 
   if (product === CLOUDSQL_DATA_PLANE_PRODUCT) {
+    const supervisor =
+      postgresImage != null
+        ? new PostgresContainerSupervisor({ image: postgresImage })
+        : new PostgresProcessManager(logger, {
+            ...(postgresBinDir != null ? { binDir: postgresBinDir } : {}),
+          });
+
     return new PostgresServerDataPlane(logger, {
       product,
       dataDirectory:
         managerOptions.storageType === 'memory' ? null : dirname(managerOptions.sqlitePath),
       portRangeStart: managerOptions.portRangeStart,
       portRangeEnd: managerOptions.portRangeEnd,
-      processManager: new PostgresProcessManager(logger, {
-        ...(postgresBinDir != null ? { binDir: postgresBinDir } : {}),
-      }),
+      processManager: supervisor,
     });
   }
 

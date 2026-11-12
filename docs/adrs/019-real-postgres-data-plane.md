@@ -40,10 +40,12 @@ part application code actually depends on.
   is not a nested container. `initdb` runs once into a template; each new
   instance is a copy of that template plus a postmaster start.
 - A nested Postgres container (one container per instance, talking to the
-  Docker engine over its socket) is a later opt-in for a caller who names an
-  image. It is not the way startup gets faster. Starting a container pays for
-  the engine call and the image entrypoint on top of Postgres itself, and the
-  official `postgres:18-alpine` image has neither `pg_partman` nor PostGIS.
+  Docker engine over its socket) is an opt-in for a caller who names an
+  image via `CLOUDSQL_POSTGRES_IMAGE`. It is not the way startup gets faster.
+  Starting a container pays for the engine call and the image entrypoint on
+  top of Postgres itself, and the official `postgres:18-alpine` image has
+  neither `pg_partman` nor PostGIS. Container mode is wired for Cloud SQL
+  only; AlloyDB still uses PGlite on this branch.
 - `CLOUDSQL_DATA_PLANE=false` and `ALLOYDB_DATA_PLANE=false` stay
   metadata-only. When the binaries are missing, an instance still comes up
   with a null port and Kinglet logs one warning per process, matching
@@ -119,7 +121,6 @@ Not built here:
 
 - Point AlloyDB at these servers. Cloud SQL already uses them. Keep the
   admin API's response shapes, operations, and errors.
-- Optional per-instance container mode, off unless an image is configured.
 - `databaseFlags` applied to `postgresql.conf` / `ALTER SYSTEM`.
 - AlloyDB read pools as streaming replicas.
 - Remove the PGlite data plane once nothing calls it.

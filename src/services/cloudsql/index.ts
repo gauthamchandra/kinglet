@@ -35,6 +35,7 @@ export const DEFAULT_CLOUDSQL_DATA_PLANE_OPTIONS: Required<ServiceDataPlaneOptio
   sqlitePath: './data/emulator.db',
   postgis: false,
   postgresBinDir: undefined,
+  postgresImage: undefined,
 };
 
 export class CloudSqlService {
