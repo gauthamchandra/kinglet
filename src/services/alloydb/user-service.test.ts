@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { RoleAlreadyExistsError } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { ClusterRepository } from './cluster-repository.ts';
@@ -277,6 +278,42 @@ describe('createUser', () => {
 
     expect(created.startsWith('upsertUser:')).toBe(true);
     expect(dataPlane.calls).toContain(created.replace('upsertUser:', 'dropUser:'));
+  });
+
+  test('createUser_whenASqlRoleAlreadyExists_doesNotDropThatRole', async () => {
+    await addReadPool();
+
+    let seen = 0;
+
+    dataPlane.upsertUser = async (project, instance, user) => {
+      dataPlane.calls.push(`upsertUser:${project}/${instance}:${user.name}`);
+      seen += 1;
+
+      if (seen === 2) throw new RoleAlreadyExistsError(user.name);
+    };
+
+    const promise = service.createUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'hunter2' },
+      {}
+    );
+
+    await expect(promise).rejects.toHaveProperty('code', 'ALREADY_EXISTS');
+    await expect(service.getUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID)).rejects.toHaveProperty(
+      'code',
+      'NOT_FOUND'
+    );
+
+    const upserts = dataPlane.calls.filter(call => call.startsWith('upsertUser:'));
+    const drops = dataPlane.calls.filter(call => call.startsWith('dropUser:'));
+    const created = upserts[0] ?? '';
+
+    expect(upserts).toHaveLength(2);
+    expect(created.startsWith('upsertUser:')).toBe(true);
+    expect(drops).toEqual([created.replace('upsertUser:', 'dropUser:')]);
   });
 });
 

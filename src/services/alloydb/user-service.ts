@@ -13,11 +13,12 @@
  * Postgres role on every instance in the cluster.
  */
 
-import type {
-  DataPlaneLogin,
-  PostgresDataPlane,
+import {
+  type DataPlaneLogin,
+  DisabledDataPlane,
+  type PostgresDataPlane,
+  RoleAlreadyExistsError,
 } from '@/shared/postgres-data-plane/data-plane-manager.ts';
-import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
 import type { InstanceRepository } from './instance-repository.ts';
@@ -127,6 +128,10 @@ export class UserService {
       await this.applyUserToAllInstances(project, location, clusterId, userId, record.password);
     } catch (error) {
       await this.users.delete(name);
+
+      if (error instanceof RoleAlreadyExistsError) {
+        throw new AlloyDbError('ALREADY_EXISTS', `Role ${userId} already exists`, name);
+      }
 
       throw new AlloyDbError(
         'INTERNAL',
@@ -332,7 +337,12 @@ export class UserService {
 
         const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
 
-        await this.dataPlane.upsertUser(project, key, alloydbDataPlaneLogin(userId, password));
+        await this.dataPlane.upsertUser(
+          project,
+          key,
+          alloydbDataPlaneLogin(userId, password),
+          previous == null ? { createOnly: true } : undefined
+        );
         applied.push(key);
       }
     } catch (error) {
