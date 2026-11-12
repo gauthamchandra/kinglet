@@ -28,7 +28,7 @@ import type { PostgresProcessManager } from './postgres-process-manager.ts';
  * is left untouched. `encodeURIComponent` already escapes separators and handles
  * UTF-8; `.` is the one character it leaves through that matters here.
  */
-function encodePathSegment(segment: string): string {
+export function encodePathSegment(segment: string): string {
   return encodeURIComponent(segment).replace(/\./g, '%2E');
 }
 

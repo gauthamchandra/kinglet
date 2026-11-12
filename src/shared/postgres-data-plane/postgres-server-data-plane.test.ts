@@ -12,6 +12,7 @@ import { CLOUDSQL_DATA_PLANE_PRODUCT } from './host.ts';
 import { PostgresProcessManager } from './postgres-process-manager.ts';
 import type { PostgresSupervisor } from './postgres-server-data-plane.ts';
 import {
+  encodePathSegment,
   PostgresServerDataPlane,
   quoteIdentifier,
   quoteLiteral,
@@ -32,6 +33,19 @@ function unavailableSupervisor(): PostgresSupervisor {
     },
   };
 }
+
+describe('encodePathSegment', () => {
+  test('leaves an ordinary name readable', () => {
+    expect(encodePathSegment('postgres')).toBe('postgres');
+    expect(encodePathSegment('my-app_db1')).toBe('my-app_db1');
+  });
+
+  test('defuses traversal and separators', () => {
+    expect(encodePathSegment('..')).toBe('%2E%2E');
+    expect(encodePathSegment('a/b')).toBe('a%2Fb');
+    expect(encodePathSegment('../../etc')).toBe('%2E%2E%2F%2E%2E%2Fetc');
+  });
+});
 
 describe('quoteIdentifier', () => {
   test('doubles a quote inside the name', () => {
