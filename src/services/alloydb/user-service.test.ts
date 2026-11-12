@@ -639,6 +639,25 @@ describe('deleteUser', () => {
     expect(dataPlane.calls).toContain(dropped.replace('dropUser:', 'upsertUser:'));
   });
 
+  test('deleteUser_whenDropFails_restoredRowCanStillBeUpdated', async () => {
+    failDropOnCall(1);
+
+    const promise = service.deleteUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, {});
+
+    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
+
+    await service.updateUser(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      USER_ID,
+      { password: 'after-rollback' },
+      { updateMask: 'password' }
+    );
+
+    expect((await users.getByName(USER_NAME))?.password).toBe('after-rollback');
+  });
+
   test('deleteUser_withValidateOnly_doesNotCallDataPlane', async () => {
     dataPlane.calls.length = 0;
 

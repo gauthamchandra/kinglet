@@ -286,7 +286,9 @@ export class UserService {
         alloydbDataPlaneLogin(userId, existing.password)
       );
     } catch (error) {
-      await this.users.create(existing);
+      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...restored } = existing;
+
+      await this.users.create(restored);
 
       throw new AlloyDbError(
         'INTERNAL',
