@@ -31,6 +31,14 @@ import {
  * kinglet in Docker with the data-plane range published. */
 export const ADVERTISED_HOST = '127.0.0.1';
 
+/** A create found a role that SQL already owned. It was left unchanged. */
+export class RoleAlreadyExistsError extends Error {
+  constructor(readonly roleName: string) {
+    super(`Role ${roleName} already exists`);
+    this.name = 'RoleAlreadyExistsError';
+  }
+}
+
 export interface PostgresDataPlane {
   /**
    * Bring up an instance's endpoint with the given databases open, returning
@@ -49,8 +57,14 @@ export interface PostgresDataPlane {
   /**
    * Create or alter the role a control-plane user logs in as.
    * A null or empty password is NOLOGIN. No-op when the instance has no server.
+   * `createOnly` refuses to change a role that already exists.
    */
-  upsertUser(project: string, instance: string, user: DataPlaneLogin): Promise<void>;
+  upsertUser(
+    project: string,
+    instance: string,
+    user: DataPlaneLogin,
+    options?: { createOnly?: boolean }
+  ): Promise<void>;
   /** Remove a role from every database in the instance. No-op when nothing is running. */
   dropUser(project: string, instance: string, userName: string): Promise<void>;
 }

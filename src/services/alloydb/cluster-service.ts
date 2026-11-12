@@ -6,6 +6,7 @@ import type { OperationResponse, OperationsStore } from '@/core/operations/opera
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type { PostgresDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { isReservedCloudSqlRole } from '@/shared/postgres-data-plane/postgres-server-data-plane.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
@@ -475,10 +476,24 @@ function validateInitialUser(body: Record<string, unknown>): void {
   // rule users.create enforces. Without this, cluster create mints a user whose
   // name breaks the discovery document's `users/[^/]+` shape and which no client
   // can then GET, PATCH or DELETE.
-  if (!isValidUserId(username)) {
+  if (username.includes('/')) {
     throw new AlloyDbError(
       'INVALID_ARGUMENT',
       `Cluster.initialUser.user "${username}" must not contain "/"`
+    );
+  }
+
+  if (!isValidUserId(username)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `Cluster.initialUser.user "${username}" must be at most 63 bytes, the PostgreSQL identifier limit`
+    );
+  }
+
+  if (isReservedCloudSqlRole(username)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `Cluster.initialUser.user "${username}" is reserved`
     );
   }
 }

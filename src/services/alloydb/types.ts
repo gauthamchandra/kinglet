@@ -14,6 +14,7 @@
 import type { RouteResponse } from '@/core/gateway/request-router.ts';
 import type { ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import type { BaseRecord, TableSchema } from '@/core/storage/types.ts';
+import type { DataPlaneLogin } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { ADVERTISED_HOST } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 
 // ── Table Constants ──
@@ -302,6 +303,23 @@ export function buildUserName(
   return `${buildClusterName(project, location, clusterId)}/users/${userId}`;
 }
 
+/**
+ * The user id is the segment after the last `/users/`. The first match is wrong
+ * when a project or cluster id is itself `users`.
+ */
+export function userIdFromName(name: string): string | undefined {
+  const marker = '/users/';
+  const index = name.lastIndexOf(marker);
+
+  if (index < 0) return undefined;
+
+  const userId = name.substring(index + marker.length);
+
+  if (userId.length === 0 || userId.includes('/')) return undefined;
+
+  return userId;
+}
+
 export function buildBackupName(project: string, location: string, backupId: string): string {
   return `projects/${project}/locations/${location}/backups/${backupId}`;
 }
@@ -345,13 +363,23 @@ export function isValidInstanceId(instanceId: string): boolean {
 }
 
 /**
+ * PostgreSQL stores identifiers in `NAMEDATALEN - 1` bytes and truncates the
+ * rest. A longer user id would be saved in full and created as a shorter role.
+ */
+const POSTGRES_IDENTIFIER_MAX_BYTES = 63;
+
+/**
  * The discovery document gives user ids no pattern — they become PostgreSQL role
  * names, which are permissive — so validation is limited to what would genuinely
- * break: an empty id, or one containing the separator that delimits resource
- * names.
+ * break: an empty id, one containing the separator that delimits resource names,
+ * or one longer than {@link POSTGRES_IDENTIFIER_MAX_BYTES}.
  */
 export function isValidUserId(userId: string): boolean {
-  return userId.length > 0 && !userId.includes('/');
+  return (
+    userId.length > 0 &&
+    !userId.includes('/') &&
+    new TextEncoder().encode(userId).length <= POSTGRES_IDENTIFIER_MAX_BYTES
+  );
 }
 
 const BACKUP_ID_PATTERN = /^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -736,6 +764,25 @@ export function alloydbDataPlaneUser(stored: string): {
   loginDisabled?: boolean;
 } {
   return stored === '' ? { password: '', loginDisabled: true } : { password: stored };
+}
+
+/**
+ * Project a control-plane AlloyDB user onto a {@link DataPlaneLogin} for
+ * {@link PostgresServerDataPlane}.
+ *
+ * <p>The role model mirrors Cloud SQL: `postgres` is SUPERUSER; all other
+ * built-in users get LOGIN CREATEDB CREATEROLE and membership in
+ * `cloudsqlsuperuser`. AlloyDB's documented built-in roles (`alloydbsuperuser`,
+ * `alloydbiamuser`) differ — recorded as a known gap; a second role model is
+ * out of scope for this change.
+ */
+export function alloydbDataPlaneLogin(username: string, password: string): DataPlaneLogin {
+  return {
+    name: username,
+    password: password.length > 0 ? password : null,
+    memberOf: ['cloudsqlsuperuser'],
+    superuser: username === 'postgres',
+  };
 }
 
 /**

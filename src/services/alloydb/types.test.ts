@@ -37,6 +37,7 @@ import {
   isValidBackupId,
   isValidClusterId,
   isValidInstanceId,
+  isValidUserId,
   MUTABLE_BACKUP_FIELDS,
   MUTABLE_CLUSTER_FIELDS,
   MUTABLE_INSTANCE_FIELDS,
@@ -48,6 +49,7 @@ import {
   resolveInitialUser,
   USER_TYPE_ENUM,
   UserType,
+  userIdFromName,
   userRecordToResponse,
   userRequestToRecord,
   userTableSchema,
@@ -82,6 +84,11 @@ describe('resource names', () => {
   test('buildUserName_usesThePluralClustersSegmentFromTheNameParameterPattern', () => {
     expect(buildUserName('p', 'us-central1', 'c1', 'admin')).toBe(`${CLUSTER_NAME}/users/admin`);
     expect(buildUserName('p', 'us-central1', 'c1', 'admin')).not.toContain('/cluster/');
+  });
+
+  test('userIdFromName_usesTheSegmentAfterTheLastUsersMarker', () => {
+    expect(userIdFromName(buildUserName('users', 'us-central1', 'users', 'admin'))).toBe('admin');
+    expect(userIdFromName('projects/p/locations/l/clusters/c')).toBeUndefined();
   });
 
   test('buildConnectionInfoName_isTheSingletonSubresourceOfAnInstance', () => {
@@ -138,6 +145,18 @@ describe('resource id validation', () => {
   test('isValidInstanceId_isStricterThanIsValidClusterId', () => {
     expect(isValidClusterId('0-9')).toBe(true);
     expect(isValidInstanceId('0-9')).toBe(false);
+  });
+
+  test('isValidUserId_acceptsANameAtThePostgresIdentifierLimit', () => {
+    expect(isValidUserId('a'.repeat(63))).toBe(true);
+    expect(isValidUserId(`${'a'.repeat(61)}é`)).toBe(true);
+  });
+
+  test('isValidUserId_rejectsANamePostgresWouldTruncate', () => {
+    expect(isValidUserId('a'.repeat(64))).toBe(false);
+    expect(isValidUserId(`${'a'.repeat(62)}é`)).toBe(false);
+    expect(isValidUserId('')).toBe(false);
+    expect(isValidUserId('a/b')).toBe(false);
   });
 });
 

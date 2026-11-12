@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SQL } from 'bun';
+import { RoleAlreadyExistsError } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
 import { isRealPostgresAvailable } from '../../../test-utils/postgres.ts';
@@ -421,6 +422,42 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
       false
     );
     expect(await isPortListening(port ?? 0)).toBe(false);
+  });
+
+  test('createOnly leaves an existing role and its password alone', async () => {
+    const { plane: started, root } = await plane('sqlite');
+    const port = await started.startInstance('p', 'inst', ['postgres']);
+    const admin = new PostgresProcessManager(logger).openAdminConnection(
+      join(root, 'cloudsql', 'p', 'inst'),
+      port ?? 0
+    );
+
+    try {
+      await admin.unsafe("CREATE ROLE app LOGIN PASSWORD 'original'");
+    } finally {
+      await admin.close({ timeout: 0 });
+    }
+
+    const created = started.upsertUser(
+      'p',
+      'inst',
+      { name: 'app', password: 'changed', memberOf: [] },
+      { createOnly: true }
+    );
+
+    await expect(created).rejects.toBeInstanceOf(RoleAlreadyExistsError);
+
+    const client = new SQL({
+      url: `postgres://app:original@127.0.0.1:${port}/postgres`,
+      tls: false,
+      max: 1,
+    });
+
+    try {
+      expect((await client`select current_user as name`)[0].name).toBe('app');
+    } finally {
+      await client.close({ timeout: 0 });
+    }
   });
 
   test('logs a user in with a password that contains a quote, then rejects the old one', async () => {

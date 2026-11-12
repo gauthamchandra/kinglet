@@ -12,7 +12,11 @@ import type { SQL } from 'bun';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { PortAllocator } from '@/shared/utils/port-allocator.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
-import type { DataPlaneLogin, PostgresDataPlane } from './data-plane-manager.ts';
+import {
+  type DataPlaneLogin,
+  type PostgresDataPlane,
+  RoleAlreadyExistsError,
+} from './data-plane-manager.ts';
 import type { PostgresDataPlaneProduct } from './host.ts';
 import { encodePathSegment } from './pglite-database-manager.ts';
 import type { PostgresProcessManager } from './postgres-process-manager.ts';
@@ -215,7 +219,12 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     return this.running.get(instanceKey(project, instance))?.port ?? null;
   }
 
-  async upsertUser(project: string, instance: string, user: DataPlaneLogin): Promise<void> {
+  async upsertUser(
+    project: string,
+    instance: string,
+    user: DataPlaneLogin,
+    options?: { createOnly?: boolean }
+  ): Promise<void> {
     return this.mutex.runExclusively(instanceKey(project, instance), async () => {
       if (isReservedCloudSqlRole(user.name)) {
         throw new Error(`Role ${user.name} is reserved`);
@@ -235,6 +244,11 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
       await this.admin(current, async sql => {
         const ident = quoteIdentifier(user.name);
         const existing = await sql`SELECT 1 AS one FROM pg_roles WHERE rolname = ${user.name}`;
+
+        if (existing.length > 0 && options?.createOnly === true) {
+          throw new RoleAlreadyExistsError(user.name);
+        }
+
         const login = user.password != null && user.password !== '';
         // Cloud SQL built-in users have CREATEDB and CREATEROLE on the login.
         // Membership in cloudsqlsuperuser does not grant those attributes.

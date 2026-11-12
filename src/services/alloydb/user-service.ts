@@ -8,22 +8,33 @@
  * therefore takes no {@link OperationsStore} at all — wrapping these in an LRO
  * would break any real client.
  *
- * <p>Passwords are stored for data-plane authentication (ADR-013) but never
- * returned: `User.password` is input-only in the discovery document. Emulated
- * users gate connections; they are not Postgres roles.
+ * <p>Passwords are stored for data-plane authentication but never returned:
+ * `User.password` is input-only in the discovery document. A user is a
+ * Postgres role on every instance in the cluster.
  */
 
+import {
+  type DataPlaneLogin,
+  DisabledDataPlane,
+  type PostgresDataPlane,
+  RoleAlreadyExistsError,
+} from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { isReservedCloudSqlRole } from '@/shared/postgres-data-plane/postgres-server-data-plane.ts';
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { ClusterRepository } from './cluster-repository.ts';
+import type { InstanceRepository } from './instance-repository.ts';
 import type { UserRecord, UserResponse } from './types.ts';
 import {
   AlloyDbError,
+  alloydbDataPlaneLogin,
   buildClusterName,
+  buildDataPlaneInstanceKey,
   buildUserName,
   isValidUserId,
   MUTABLE_USER_FIELDS,
   normalizeEnum,
   normalizeSpecFieldValue,
+  parseInstanceName,
   parseSpecJson,
   USER_SPEC_ENUM_FIELDS,
   USER_TYPE_ENUM,
@@ -54,11 +65,21 @@ export class UserService {
   private readonly users: UserRepository;
   private readonly clusters: ClusterRepository;
   private readonly clusterMutex: ResourceMutex;
+  private readonly dataPlane: PostgresDataPlane;
+  private readonly instances: InstanceRepository | undefined;
 
-  constructor(users: UserRepository, clusters: ClusterRepository, clusterMutex: ResourceMutex) {
+  constructor(
+    users: UserRepository,
+    clusters: ClusterRepository,
+    clusterMutex: ResourceMutex,
+    dataPlane: PostgresDataPlane = new DisabledDataPlane(),
+    instances?: InstanceRepository
+  ) {
     this.users = users;
     this.clusters = clusters;
     this.clusterMutex = clusterMutex;
+    this.dataPlane = dataPlane;
+    this.instances = instances;
   }
 
   async createUser(
@@ -102,7 +123,27 @@ export class UserService {
       return userRecordToResponse(record);
     }
 
-    return userRecordToResponse(await this.users.create(record));
+    const created = await this.users.create(record);
+
+    try {
+      await this.applyUserToAllInstances(project, location, clusterId, userId, record.password);
+    } catch (error) {
+      await this.users.delete(name);
+
+      if (error instanceof RoleAlreadyExistsError) {
+        throw new AlloyDbError('ALREADY_EXISTS', `Role ${userId} already exists`, name);
+      }
+
+      throw new AlloyDbError(
+        'INTERNAL',
+        `Failed to create user ${name} on the data plane: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        name
+      );
+    }
+
+    return userRecordToResponse(created);
   }
 
   async getUser(
@@ -184,6 +225,29 @@ export class UserService {
       throw new AlloyDbError('NOT_FOUND', `User ${name} not found`, name);
     }
 
+    if (updates.password !== undefined) {
+      try {
+        await this.applyUserToAllInstances(
+          project,
+          location,
+          clusterId,
+          userId,
+          updates.password,
+          alloydbDataPlaneLogin(userId, existing.password)
+        );
+      } catch (error) {
+        await this.users.update(name, revertUserUpdates(existing, updates));
+
+        throw new AlloyDbError(
+          'INTERNAL',
+          `Failed to update user ${name} on the data plane: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          name
+        );
+      }
+    }
+
     return userRecordToResponse(applied);
   }
 
@@ -207,12 +271,33 @@ export class UserService {
     options: ValidatableOptions
   ): Promise<void> {
     const name = buildUserName(project, location, clusterId, userId);
-
-    await this.getUserOrThrow(name);
+    const existing = await this.getUserOrThrow(name);
 
     if (options.validateOnly === true) return;
 
     await this.users.delete(name);
+
+    try {
+      await this.dropUserFromAllInstances(
+        project,
+        location,
+        clusterId,
+        userId,
+        alloydbDataPlaneLogin(userId, existing.password)
+      );
+    } catch (error) {
+      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...restored } = existing;
+
+      await this.users.create(restored);
+
+      throw new AlloyDbError(
+        'INTERNAL',
+        `Failed to drop user ${name} from the data plane: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        name
+      );
+    }
   }
 
   private async getUserOrThrow(name: string): Promise<UserRecord> {
@@ -223,6 +308,121 @@ export class UserService {
     }
 
     return record;
+  }
+
+  /**
+   * Upsert the role for `userId` on every instance currently running in the
+   * cluster. No-op when no instance repository is wired (control-plane-only
+   * tests that never set up real Postgres).
+   */
+  private async applyUserToAllInstances(
+    project: string,
+    location: string,
+    clusterId: string,
+    userId: string,
+    password: string,
+    previous: DataPlaneLogin | null = null
+  ): Promise<void> {
+    if (!this.instances) return;
+
+    const clusterInstances = await this.instances.listAllInstancesInCluster(
+      project,
+      location,
+      clusterId
+    );
+    const applied: string[] = [];
+
+    try {
+      for (const instance of clusterInstances) {
+        const parsed = parseInstanceName(instance.name);
+
+        if (!parsed) continue;
+
+        const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
+
+        await this.dataPlane.upsertUser(
+          project,
+          key,
+          alloydbDataPlaneLogin(userId, password),
+          previous == null ? { createOnly: true } : undefined
+        );
+        applied.push(key);
+      }
+    } catch (error) {
+      await this.undoUserChanges(project, userId, applied, previous, error);
+
+      throw error;
+    }
+  }
+
+  /**
+   * Drop the role for `userId` from every instance currently running in the
+   * cluster. No-op when no instance repository is wired.
+   */
+  private async dropUserFromAllInstances(
+    project: string,
+    location: string,
+    clusterId: string,
+    userId: string,
+    previous: DataPlaneLogin
+  ): Promise<void> {
+    if (!this.instances) return;
+
+    const clusterInstances = await this.instances.listAllInstancesInCluster(
+      project,
+      location,
+      clusterId
+    );
+    const dropped: string[] = [];
+
+    try {
+      for (const instance of clusterInstances) {
+        const parsed = parseInstanceName(instance.name);
+
+        if (!parsed) continue;
+
+        const key = buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId);
+
+        await this.dataPlane.dropUser(project, key, userId);
+        dropped.push(key);
+      }
+    } catch (error) {
+      await this.undoUserChanges(project, userId, dropped, previous, error);
+
+      throw error;
+    }
+  }
+
+  /**
+   * Put the instances that already changed back to `previous`. A create has no
+   * previous role, so those instances drop the role that was just created.
+   */
+  private async undoUserChanges(
+    project: string,
+    userId: string,
+    keys: string[],
+    previous: DataPlaneLogin | null,
+    cause: unknown
+  ): Promise<void> {
+    const failures: string[] = [];
+
+    for (const key of keys) {
+      try {
+        if (previous == null) {
+          await this.dataPlane.dropUser(project, key, userId);
+        } else {
+          await this.dataPlane.upsertUser(project, key, previous);
+        }
+      } catch (error) {
+        failures.push(`${key}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (failures.length > 0) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+
+      throw new Error(`${message}; undo failed: ${failures.join('; ')}`);
+    }
   }
 
   private async requireCluster(
@@ -240,12 +440,23 @@ export class UserService {
 
 /** Throwing wrapper over {@link isValidUserId}. */
 function validateUserId(userId: string): void {
-  if (isValidUserId(userId)) return;
+  if (userId.length === 0 || userId.includes('/')) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `User ID "${userId}" must be non-empty and must not contain "/"`
+    );
+  }
 
-  throw new AlloyDbError(
-    'INVALID_ARGUMENT',
-    `User ID "${userId}" must be non-empty and must not contain "/"`
-  );
+  if (!isValidUserId(userId)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `User ID "${userId}" must be at most 63 bytes, the PostgreSQL identifier limit`
+    );
+  }
+
+  if (isReservedCloudSqlRole(userId)) {
+    throw new AlloyDbError('INVALID_ARGUMENT', `User ID "${userId}" is reserved`);
+  }
 }
 
 /** Normalized before validating — see {@link normalizeEnum}. */
@@ -258,6 +469,21 @@ function validateUserType(userType: unknown): void {
     'INVALID_ARGUMENT',
     `User.userType "${String(userType)}" must be one of ${[...USER_TYPES].join(', ')}`
   );
+}
+
+function revertUserUpdates(
+  existing: UserRecord,
+  updates: Partial<Pick<UserRecord, 'userType' | 'password' | 'spec'>>
+): Partial<Pick<UserRecord, 'userType' | 'password' | 'spec'>> {
+  const reverted: Partial<Pick<UserRecord, 'userType' | 'password' | 'spec'>> = {};
+
+  if (updates.userType !== undefined) reverted.userType = existing.userType;
+
+  if (updates.password !== undefined) reverted.password = existing.password;
+
+  if (updates.spec !== undefined) reverted.spec = existing.spec;
+
+  return reverted;
 }
 
 function buildUserUpdates(

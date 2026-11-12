@@ -2,7 +2,7 @@
  * End-to-End Test: AlloyDB Data Plane
  *
  * With the data plane enabled, creating an AlloyDB instance brings up a real
- * Postgres wire endpoint backed by the shared PGlite stack (ADR-013). This
+ * Postgres wire endpoint backed by a supervised Postgres server (ADR-019). This
  * suite asserts application code can connect with Bun.SQL — the entire point
  * of emulating a data plane rather than metadata only.
  */
@@ -85,6 +85,32 @@ async function createCluster(): Promise<void> {
   );
 
   await expectOk(response, `Creating cluster ${CLUSTER}`);
+}
+
+async function createUser(userId: string, password: string): Promise<void> {
+  const response = await fetch(
+    emulatorUrl(
+      `/v1/projects/${PROJECT}/locations/${LOCATION}/clusters/${CLUSTER}/users?userId=${userId}`
+    ),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    }
+  );
+
+  await expectOk(response, `Creating user ${userId}`);
+}
+
+async function deleteUser(userId: string): Promise<void> {
+  const response = await fetch(
+    emulatorUrl(
+      `/v1/projects/${PROJECT}/locations/${LOCATION}/clusters/${CLUSTER}/users/${userId}`
+    ),
+    { method: 'DELETE' }
+  );
+
+  await expectOk(response, `Deleting user ${userId}`);
 }
 
 async function createInstance(instanceId: string): Promise<void> {
@@ -202,6 +228,31 @@ describe('AlloyDB data plane e2e', () => {
       instancePort
     );
     expect(alloydbService.getDataPlanePort(PROJECT, LOCATION, CLUSTER, 'ghost')).toBeNull();
+  });
+
+  test('a user created via the admin API can connect with its password', async () => {
+    const USER = 'appuser';
+    const PASS = 'app-secret';
+
+    await createUser(USER, PASS);
+
+    const sql = connect(instancePort, 'postgres', USER, PASS);
+
+    expect(await rows(sql, 'SELECT 1 AS ok')).toEqual([{ ok: 1 }]);
+  });
+
+  test('a deleted user can no longer connect', async () => {
+    const USER = 'tempuser';
+    const PASS = 'temp-pass';
+
+    await createUser(USER, PASS);
+    await deleteUser(USER);
+
+    const sql = connect(instancePort, 'postgres', USER, PASS);
+
+    await expect(run(sql, 'SELECT 1')).rejects.toThrow(
+      /password authentication failed for user "tempuser"/
+    );
   });
 });
 

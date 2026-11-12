@@ -1,9 +1,8 @@
 /**
  * Factory helpers for constructing a product-stamped Postgres data plane.
  *
- * <p>Cloud SQL supervises a real Postgres server (ADR-019). AlloyDB still uses
- * {@link DataPlaneManager} until it moves. The on-disk directory name keeps
- * their data from colliding.
+ * <p>Both Cloud SQL and AlloyDB use real Postgres servers (ADR-019). The
+ * on-disk directory name keeps their data from colliding.
  */
 
 import { dirname } from 'node:path';
@@ -13,7 +12,7 @@ import type {
   LookupUser,
   PostgresDataPlane,
 } from './data-plane-manager.ts';
-import { DataPlaneManager, DisabledDataPlane } from './data-plane-manager.ts';
+import { DisabledDataPlane } from './data-plane-manager.ts';
 import { PostgresContainerSupervisor } from './postgres-container-supervisor.ts';
 import { PostgresProcessManager } from './postgres-process-manager.ts';
 import { PostgresServerDataPlane } from './postgres-server-data-plane.ts';
@@ -63,38 +62,33 @@ export const ALLOYDB_DATA_PLANE_PRODUCT: PostgresDataPlaneProduct = {
 
 /**
  * Build the data plane for `product`, or a {@link DisabledDataPlane} when the
- * service is running control-plane-only. Cloud SQL gets a real server.
- * AlloyDB still gets {@link DataPlaneManager}.
+ * service is running control-plane-only. Both Cloud SQL and AlloyDB get a real
+ * Postgres server; the on-disk directory name keeps their data from colliding.
  */
 export function createPostgresDataPlane(
   logger: Logger,
   product: PostgresDataPlaneProduct,
   options: ProductDataPlaneOptions & { enabled: boolean },
-  lookupUser: LookupUser
+  _lookupUser: LookupUser
 ): PostgresDataPlane {
   if (!options.enabled) return new DisabledDataPlane();
 
   const { enabled: _enabled, postgresBinDir, postgresImage, ...managerOptions } = options;
+  const supervisor =
+    product === CLOUDSQL_DATA_PLANE_PRODUCT && postgresImage != null
+      ? new PostgresContainerSupervisor({ image: postgresImage })
+      : new PostgresProcessManager(logger, {
+          ...(postgresBinDir != null ? { binDir: postgresBinDir } : {}),
+        });
 
-  if (product === CLOUDSQL_DATA_PLANE_PRODUCT) {
-    const supervisor =
-      postgresImage != null
-        ? new PostgresContainerSupervisor({ image: postgresImage })
-        : new PostgresProcessManager(logger, {
-            ...(postgresBinDir != null ? { binDir: postgresBinDir } : {}),
-          });
-
-    return new PostgresServerDataPlane(logger, {
-      product,
-      dataDirectory:
-        managerOptions.storageType === 'memory' ? null : dirname(managerOptions.sqlitePath),
-      portRangeStart: managerOptions.portRangeStart,
-      portRangeEnd: managerOptions.portRangeEnd,
-      processManager: supervisor,
-    });
-  }
-
-  return new DataPlaneManager(logger, { ...managerOptions, ...product }, lookupUser);
+  return new PostgresServerDataPlane(logger, {
+    product,
+    dataDirectory:
+      managerOptions.storageType === 'memory' ? null : dirname(managerOptions.sqlitePath),
+    portRangeStart: managerOptions.portRangeStart,
+    portRangeEnd: managerOptions.portRangeEnd,
+    processManager: supervisor,
+  });
 }
 
 /** An instance the control plane still has rows for, keyed the way its data plane knows it. */
