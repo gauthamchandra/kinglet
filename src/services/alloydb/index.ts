@@ -56,6 +56,7 @@ import {
   alloydbDataPlaneLogin,
   buildDataPlaneInstanceKey,
   DEFAULT_DATABASE_NAME,
+  InstanceType,
   parseDataPlaneInstanceKey,
   parseInstanceName,
   userIdFromName,
@@ -91,6 +92,8 @@ export class AlloyDbService {
   private readonly dataPlaneOptions: Required<ServiceDataPlaneOptions>;
 
   private dataPlane: PostgresDataPlane = new DisabledDataPlane();
+  /** Set when a test supplies the plane. Production leaves this unset. */
+  private readonly injectedDataPlane: PostgresDataPlane | undefined;
   private operationsStore: OperationsStore | null = null;
   private clusterHandlers: ClusterHandlers | null = null;
   private instanceHandlers: InstanceHandlers | null = null;
@@ -98,11 +101,17 @@ export class AlloyDbService {
   private backupHandlers: BackupHandlers | null = null;
   private locationHandlers: LocationHandlers | null = null;
 
-  constructor(storage: StorageManager, logger: Logger, dataPlaneOptions?: ServiceDataPlaneOptions) {
+  constructor(
+    storage: StorageManager,
+    logger: Logger,
+    dataPlaneOptions?: ServiceDataPlaneOptions,
+    dataPlane?: PostgresDataPlane
+  ) {
     this.storage = storage;
     this.logger = logger;
     this.responseUtils = new ResponseUtils(new StandardResponseFormatter(logger));
     this.dataPlaneOptions = { ...DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS, ...dataPlaneOptions };
+    this.injectedDataPlane = dataPlane;
   }
 
   async initialize(): Promise<void> {
@@ -129,11 +138,9 @@ export class AlloyDbService {
 
     this.operationsStore = operations;
 
-    this.dataPlane = createPostgresDataPlane(
-      this.logger,
-      ALLOYDB_DATA_PLANE_PRODUCT,
-      this.dataPlaneOptions
-    );
+    this.dataPlane =
+      this.injectedDataPlane ??
+      createPostgresDataPlane(this.logger, ALLOYDB_DATA_PLANE_PRODUCT, this.dataPlaneOptions);
 
     // One mutex shared by every service that mutates a cluster's subtree, all
     // keyed on the cluster name: instance placement, user creation, and cluster
@@ -271,14 +278,17 @@ export class AlloyDbService {
   /**
    * Rows that outlived the last run, keyed the way the data plane knows them.
    * Rehydration itself — and why it matters — is {@link restartPersistedInstances}.
-   * After restarting each instance, all cluster users are re-applied so the roles
-   * match the stored state — same pattern Cloud SQL follows.
+   *
+   * <p>PRIMARYs must come up before READ_POOL standbys so the standbys can
+   * reconnect for streaming. Users are only re-applied to PRIMARY instances —
+   * roles on standbys arrive through WAL replication.
    */
   private async rehydrateDataPlane(
     instances: InstanceRepository,
     users: UserRepository
   ): Promise<void> {
-    const persisted: PersistedInstance[] = [];
+    const primaries: PersistedInstance[] = [];
+    const readPools: PersistedInstance[] = [];
 
     for (const instance of await instances.listAllInstances()) {
       const parsed = parseInstanceName(instance.name);
@@ -290,22 +300,79 @@ export class AlloyDbService {
         continue;
       }
 
-      persisted.push({
+      const entry: PersistedInstance = {
         name: instance.name,
         project: parsed.project,
         instance: buildDataPlaneInstanceKey(parsed.location, parsed.clusterId, parsed.instanceId),
         databases: [DEFAULT_DATABASE_NAME],
-      });
+      };
+
+      if (instance.instanceType === InstanceType.READ_POOL) {
+        readPools.push(entry);
+      } else {
+        primaries.push(entry);
+      }
     }
 
     await restartPersistedInstances(
       this.logger,
       ALLOYDB_DATA_PLANE_PRODUCT,
       this.dataPlane,
-      persisted
+      primaries
     );
 
-    for (const entry of persisted) {
+    for (const entry of readPools) {
+      const parsed = parseDataPlaneInstanceKey(entry.instance);
+
+      if (!parsed) continue;
+
+      const primaryInstances = await instances.listAllInstancesInCluster(
+        entry.project,
+        parsed.location,
+        parsed.clusterId
+      );
+
+      const primaryInstance = primaryInstances.find(
+        inst => inst.name !== entry.name && inst.instanceType === InstanceType.PRIMARY
+      );
+
+      if (!primaryInstance) {
+        this.logger.warn(
+          `Skipping data-plane restart for AlloyDB read pool ${entry.name}: no primary found in cluster`
+        );
+        continue;
+      }
+
+      const parsedPrimary = parseInstanceName(primaryInstance.name);
+
+      if (!parsedPrimary) continue;
+
+      const primaryKey = buildDataPlaneInstanceKey(
+        parsedPrimary.location,
+        parsedPrimary.clusterId,
+        parsedPrimary.instanceId
+      );
+
+      const primaryPort = this.dataPlane.getPort(entry.project, primaryKey);
+
+      if (primaryPort == null) {
+        this.logger.warn(
+          `Skipping data-plane restart for AlloyDB read pool ${entry.name}: primary is not running`
+        );
+        continue;
+      }
+
+      try {
+        await this.dataPlane.startReplicaInstance(entry.project, entry.instance, primaryPort);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to restart the data plane for AlloyDB read pool ${entry.name}, leaving it degraded`,
+          error
+        );
+      }
+    }
+
+    for (const entry of primaries) {
       const parsed = parseDataPlaneInstanceKey(entry.instance);
 
       if (!parsed) continue;

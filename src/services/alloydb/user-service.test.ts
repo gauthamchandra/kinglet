@@ -26,10 +26,10 @@ const USER_ID = 'admin';
 const USER_NAME = buildUserName(PROJECT, LOCATION, CLUSTER_ID, USER_ID);
 const INSTANCE_KEY = buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, INSTANCE_ID);
 
-async function addReadPool(): Promise<void> {
+async function addAnotherInstance(): Promise<void> {
   await instances.create(
-    instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'pool'), {
-      instanceType: 'READ_POOL',
+    instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'i2'), {
+      instanceType: 'PRIMARY',
     })
   );
 }
@@ -261,7 +261,7 @@ describe('createUser', () => {
   });
 
   test('createUser_whenALaterInstanceFails_dropsTheRoleItAlreadyCreated', async () => {
-    await addReadPool();
+    await addAnotherInstance();
     failUpsertOnCall(2);
 
     const promise = service.createUser(
@@ -286,7 +286,7 @@ describe('createUser', () => {
   });
 
   test('createUser_whenASqlRoleAlreadyExists_doesNotDropThatRole', async () => {
-    await addReadPool();
+    await addAnotherInstance();
 
     let seen = 0;
 
@@ -547,7 +547,7 @@ describe('updateUser', () => {
   });
 
   test('updateUser_whenUpsertFails_restoresPasswordAndOtherFields', async () => {
-    await addReadPool();
+    await addAnotherInstance();
     dataPlane.calls.length = 0;
     failUpsertOnCall(2);
 
@@ -626,7 +626,7 @@ describe('deleteUser', () => {
   });
 
   test('deleteUser_whenDropFails_restoresTheRowAndTheRoleAlreadyDropped', async () => {
-    await addReadPool();
+    await addAnotherInstance();
     dataPlane.calls.length = 0;
     failDropOnCall(2);
 
@@ -666,5 +666,45 @@ describe('deleteUser', () => {
     await service.deleteUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, { validateOnly: true });
 
     expect(dataPlane.calls).toHaveLength(0);
+  });
+});
+
+describe('READ_POOL instances are skipped when applying users', () => {
+  const READ_POOL_ID = 'pool-1';
+  const READ_POOL_KEY = buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, READ_POOL_ID);
+
+  beforeEach(async () => {
+    await instances.create(
+      instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, READ_POOL_ID), {
+        instanceType: 'READ_POOL',
+        readPoolConfig: { nodeCount: 1 },
+      })
+    );
+
+    await service.createUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, { password: 'pw' }, {});
+
+    dataPlane.calls.length = 0;
+  });
+
+  test('createUser_doesNotCallUpsertUserOnReadPoolInstances', async () => {
+    await service.createUser(PROJECT, LOCATION, CLUSTER_ID, 'newuser', { password: 'pw' }, {});
+
+    expect(dataPlane.calls.some(c => c.startsWith(`upsertUser:${PROJECT}/${READ_POOL_KEY}`))).toBe(
+      false
+    );
+    expect(dataPlane.calls.some(c => c.startsWith(`upsertUser:${PROJECT}/${INSTANCE_KEY}`))).toBe(
+      true
+    );
+  });
+
+  test('deleteUser_doesNotCallDropUserOnReadPoolInstances', async () => {
+    await service.deleteUser(PROJECT, LOCATION, CLUSTER_ID, USER_ID, {});
+
+    expect(dataPlane.calls.some(c => c.startsWith(`dropUser:${PROJECT}/${READ_POOL_KEY}`))).toBe(
+      false
+    );
+    expect(dataPlane.calls.some(c => c.startsWith(`dropUser:${PROJECT}/${INSTANCE_KEY}`))).toBe(
+      true
+    );
   });
 });

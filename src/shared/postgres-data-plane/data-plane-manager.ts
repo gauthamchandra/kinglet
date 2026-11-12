@@ -24,6 +24,23 @@ export interface PostgresDataPlane {
    * the port it listens on, or null when no data plane is running.
    */
   startInstance(project: string, instance: string, databases: string[]): Promise<number | null>;
+  /**
+   * Bring up a streaming standby of the server running at `primaryPort`.
+   *
+   * <p>On first call the standby data directory is created via
+   * {@code pg_basebackup}. On a subsequent call (rehydration after restart)
+   * the existing standby directory is started as-is; Postgres reconnects to
+   * the primary using the {@code primary_conninfo} already written to
+   * {@code postgresql.auto.conf}, updated to the new primary port.
+   *
+   * <p>Returns the port the standby listens on, or null when no data plane is
+   * running (binaries absent or data plane disabled).
+   */
+  startReplicaInstance(
+    project: string,
+    instance: string,
+    primaryPort: number | null
+  ): Promise<number | null>;
   /** Tear down the endpoint but leave any persisted data alone. */
   stopInstance(project: string, instance: string): Promise<void>;
   /** Tear down the endpoint and delete the instance's data. */
@@ -72,6 +89,10 @@ export interface DataPlaneLogin {
  */
 export class DisabledDataPlane implements PostgresDataPlane {
   async startInstance(): Promise<number | null> {
+    return null;
+  }
+
+  async startReplicaInstance(): Promise<number | null> {
     return null;
   }
 

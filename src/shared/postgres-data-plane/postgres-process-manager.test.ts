@@ -11,7 +11,54 @@ import {
   classifyPsCommand,
   PostgresProcessManager,
   preferredServerBinDir,
+  replicationSlotInvalidationExpr,
+  replicationSlotName,
+  withReplicaSettings,
+  withReplicationHba,
 } from './postgres-process-manager.ts';
+
+describe('replication config for existing clusters', () => {
+  test('replaces a trust replication rule with scram and keeps the other lines', () => {
+    const hba = withReplicationHba(
+      'local all kinglet_admin trust\n' +
+        'host all all 0.0.0.0/0 scram-sha-256\n' +
+        'host replication kinglet_admin 127.0.0.1/32 trust\n'
+    );
+
+    expect(hba).toContain('local all kinglet_admin trust');
+    expect(hba).toContain('host replication kinglet_admin 127.0.0.1/32 scram-sha-256');
+    expect(hba).toContain('host replication kinglet_admin ::1/128 scram-sha-256');
+    expect(hba).not.toContain('127.0.0.1/32 trust');
+  });
+
+  test('adds missing wal sender settings without replacing one already set', () => {
+    const updated = withReplicaSettings("wal_level='logical'\n");
+
+    expect(updated).toContain("wal_level='logical'");
+    expect(updated).toContain('max_wal_senders=10');
+    expect(updated).toContain('max_replication_slots=10');
+    expect(updated.match(/wal_level/g)).toHaveLength(1);
+  });
+});
+
+describe('replication slot health', () => {
+  test('does not select invalidation_reason when the server lacks that column', () => {
+    expect(replicationSlotInvalidationExpr(false)).toBe('NULL::text');
+    expect(replicationSlotInvalidationExpr(true)).toBe('invalidation_reason');
+  });
+});
+
+describe('replication slot names', () => {
+  test('names a slot from the standby directory', () => {
+    const first = replicationSlotName('/tmp/kinglet/pool-a');
+    const second = replicationSlotName('/tmp/kinglet/pool-b');
+
+    expect(first).toMatch(/^kinglet_[0-9a-f]{16}$/);
+    expect(second).toMatch(/^kinglet_[0-9a-f]{16}$/);
+    expect(first).not.toBe(second);
+    expect(replicationSlotName('/tmp/kinglet/pool-a')).toBe(first);
+  });
+});
 
 describe('preferredServerBinDir', () => {
   test('prefers the newest server over an older pg_config bindir', () => {
@@ -100,6 +147,116 @@ describe('Postgres process cleanup', () => {
     expect(classifyPsCommand('postgres -c note=-D /tmp/my data -D /other', '/tmp/my data')).toBe(
       'unknown'
     );
+  });
+
+  test('gives a root-created replication password to bun', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-secret-'));
+    const dataDir = join(root, 'data');
+
+    await mkdir(dataDir);
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
+    const uid = spyOn(process, 'getuid').mockReturnValue(0);
+    const commands: string[][] = [];
+    const runnable = manager as unknown as {
+      runCommand(command: string[]): Promise<void>;
+      ensureReplicationPassword(directory: string, port: number): Promise<void>;
+    };
+    const run = spyOn(runnable, 'runCommand').mockImplementation(async (command: string[]) => {
+      commands.push(command);
+    });
+    const sql = Object.assign(async () => [{ recovering: false }], {
+      unsafe: async () => {},
+      close: async () => {},
+    });
+    const admin = spyOn(manager, 'openAdminConnection').mockReturnValue(sql as unknown as SQL);
+
+    try {
+      await runnable.ensureReplicationPassword(dataDir, 1);
+      const path = join(dataDir, 'kinglet-replication.password');
+
+      expect(commands).toContainEqual(['chown', 'bun:bun', path]);
+      expect((await lstat(path)).mode & 0o777).toBe(0o600);
+    } finally {
+      admin.mockRestore();
+      run.mockRestore();
+      uid.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('waits until a WAL sender exits before dropping its slot', async () => {
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
+    let queries = 0;
+    let terminated = false;
+    let dropped = false;
+    const sql = Object.assign(
+      async (strings: TemplateStringsArray) => {
+        const text = strings.join(' ');
+
+        if (text.includes('pg_terminate_backend')) {
+          terminated = true;
+
+          return [];
+        }
+
+        if (text.includes('pg_drop_replication_slot')) {
+          if (queries < 3) {
+            const active = new Error(
+              'replication slot "kinglet_0123456789abcdef" is active for PID 42'
+            );
+
+            Object.assign(active, { errno: '55006' });
+            throw active;
+          }
+
+          dropped = true;
+
+          return [];
+        }
+
+        if (text.includes('active_pid')) {
+          queries += 1;
+
+          return queries < 3 ? [{ pid: 42 }] : [{ pid: null }];
+        }
+
+        return [];
+      },
+      { close: async () => {} }
+    );
+    const admin = spyOn(manager, 'openAdminConnection').mockReturnValue(sql as unknown as SQL);
+    const internals = manager as unknown as {
+      dropReplicationSlotIfPresent(directory: string, port: number, slot: string): Promise<void>;
+    };
+
+    try {
+      await internals.dropReplicationSlotIfPresent('/tmp/primary', 1, 'kinglet_0123456789abcdef');
+      expect(terminated).toBe(true);
+      expect(dropped).toBe(true);
+    } finally {
+      admin.mockRestore();
+    }
+  });
+
+  test('removes a replication slot directory when the primary is stopped', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-slot-'));
+    const primary = join(root, 'primary');
+    const slot = 'kinglet_0123456789abcdef';
+    const slotDir = join(primary, 'pg_replslot', slot);
+
+    await mkdir(slotDir, { recursive: true });
+    await Bun.write(join(slotDir, 'state'), 'kept');
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'));
+
+    try {
+      await manager.releaseReplicationSlot(primary, slot, null);
+      expect(await Bun.file(join(slotDir, 'state')).exists()).toBe(false);
+      await expect(manager.releaseReplicationSlot(primary, '../outside', null)).rejects.toThrow(
+        /replication slot/
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test('does not follow a socket symlink when changing permissions', async () => {
@@ -511,6 +668,137 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresProcessManager', () => {
     await Bun.write(join(dataDir, 'postmaster.pid'), '2147483647\n');
     await manager.stopStaleServer(dataDir);
     expect(await Bun.file(join(dataDir, 'postmaster.pid')).exists()).toBe(false);
+  });
+
+  test('a base backup keeps a replication slot and a bun-readable password file', async () => {
+    const port = await freePort();
+    const standby = join(root, 'standby');
+
+    directories.push(standby);
+    await manager.ensureInitialized(dataDir);
+    await manager.start(dataDir, port);
+    await manager.basebackup(standby, dataDir, port);
+
+    const slot = replicationSlotName(standby);
+    const admin = manager.openAdminConnection(dataDir, port);
+
+    try {
+      const slots = await admin<{ slot_type: string }[]>`
+        SELECT slot_type FROM pg_replication_slots WHERE slot_name = ${slot}
+      `;
+
+      expect(slots[0]?.slot_type).toBe('physical');
+    } finally {
+      await admin.close({ timeout: 0 });
+    }
+
+    const replicaConf = await Bun.file(join(standby, 'postgresql.auto.conf')).text();
+    const passwordFile = join(dataDir, 'kinglet-replication.password');
+    const passwordInfo = await lstat(passwordFile);
+
+    expect(replicaConf).toContain(`primary_slot_name = '${slot}'`);
+    expect(await Bun.file(join(standby, 'kinglet-replication.password')).exists()).toBe(false);
+    expect(passwordInfo.mode & 0o777).toBe(0o600);
+
+    const standbyPort = await freePort();
+
+    await manager.start(standby, standbyPort);
+    const replica = manager.openAdminConnection(standby, standbyPort);
+
+    try {
+      const deadline = Date.now() + 5_000;
+      let status: string | null = null;
+
+      while (Date.now() < deadline) {
+        const rows = await replica<{ status: string | null }[]>`
+          SELECT status FROM pg_stat_wal_receiver
+        `;
+
+        status = rows[0]?.status ?? null;
+
+        if (status === 'streaming') break;
+
+        await Bun.sleep(50);
+      }
+
+      expect(status).toBe('streaming');
+    } finally {
+      await replica.close({ timeout: 0 });
+    }
+
+    await manager.stop(standby);
+    await manager.releaseReplicationSlot(dataDir, slot, port);
+    const after = manager.openAdminConnection(dataDir, port);
+
+    try {
+      const remaining = await after<{ slot_type: string }[]>`
+        SELECT slot_type FROM pg_replication_slots WHERE slot_name = ${slot}
+      `;
+
+      expect(remaining).toHaveLength(0);
+    } finally {
+      await after.close({ timeout: 0 });
+    }
+  });
+
+  test('a failed base backup drops the replication slot it created', async () => {
+    const port = await freePort();
+    const standby = join(root, 'failed-standby');
+    const internals = manager as unknown as {
+      requireBinary(name: string): string;
+    };
+    const psql = internals.requireBinary('psql');
+    const script = join(root, 'fail-basebackup.sh');
+
+    await Bun.write(
+      script,
+      `#!/bin/sh
+set -eu
+port=
+slot=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p) port=$2; shift 2 ;;
+    --slot) slot=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+${psql} "host=127.0.0.1 port=\${port} user=kinglet_admin dbname=postgres" -v ON_ERROR_STOP=1 -c "SELECT pg_create_physical_replication_slot('\${slot}', true, false)"
+exit 1
+`
+    );
+    await chmod(script, 0o755);
+
+    const realRequire = internals.requireBinary.bind(internals);
+    const binary = spyOn(internals, 'requireBinary').mockImplementation((name: string) =>
+      name === 'pg_basebackup' ? script : realRequire(name)
+    );
+
+    directories.push(standby);
+    await manager.ensureInitialized(dataDir);
+    await manager.start(dataDir, port);
+
+    const slot = replicationSlotName(standby);
+
+    try {
+      await expect(manager.basebackup(standby, dataDir, port)).rejects.toThrow(
+        /pg_basebackup failed/
+      );
+    } finally {
+      binary.mockRestore();
+    }
+
+    const admin = manager.openAdminConnection(dataDir, port);
+
+    try {
+      const remaining = await admin<{ slot_name: string }[]>`
+        SELECT slot_name FROM pg_replication_slots WHERE slot_name = ${slot}
+      `;
+
+      expect(remaining).toHaveLength(0);
+    } finally {
+      await admin.close({ timeout: 0 });
+    }
   });
 
   test('accepts TCP logins with SCRAM passwords but rejects incorrect passwords', async () => {

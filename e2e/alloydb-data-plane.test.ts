@@ -14,6 +14,7 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
+import { isRealPostgresAvailable } from '../test-utils/postgres.ts';
 import { buildRouter, createFakeAuth } from './e2e-helpers.ts';
 
 // Away from AlloyDB's default 5540 range and from Cloud SQL's e2e range.
@@ -413,3 +414,240 @@ describe('AlloyDB data plane e2e: official client library', () => {
     );
   });
 });
+
+describe.skipIf(!isRealPostgresAvailable)(
+  'AlloyDB data plane e2e: READ_POOL streaming replica',
+  () => {
+    const RP_CLUSTER = 'rp-cluster';
+    const RP_PRIMARY = 'rp-primary';
+    const RP_POOL = 'rp-pool';
+    const RP_PASSWORD = 'rp-secret';
+    const PORT_RANGE_START = 15850;
+    const PORT_RANGE_END = 15870;
+
+    let rpServer: Server;
+    let rpEmulatorPort: number;
+    let rpService: AlloyDbService;
+    let rpClients: Bun.SQL[] = [];
+
+    async function waitForReplication(ready: () => Promise<boolean>): Promise<void> {
+      const deadline = Date.now() + 5_000;
+      let lastError: unknown;
+
+      while (Date.now() < deadline) {
+        try {
+          if (await ready()) return;
+        } catch (error) {
+          lastError = error;
+        }
+
+        await Bun.sleep(50);
+      }
+
+      throw lastError instanceof Error ? lastError : new Error('replication did not catch up');
+    }
+
+    function rpConnect(
+      port: number,
+      database: string,
+      user = 'postgres',
+      password = RP_PASSWORD
+    ): Bun.SQL {
+      const client = new Bun.SQL({
+        url: `postgres://${user}:${password}@127.0.0.1:${port}/${database}`,
+        tls: false,
+        max: 1,
+      });
+
+      rpClients.push(client);
+
+      return client;
+    }
+
+    async function rpExpectOk(response: Response, what: string): Promise<void> {
+      if (response.status === 200) return;
+
+      const body = await response.text();
+
+      throw new Error(`${what} failed with ${response.status}: ${body}`);
+    }
+
+    function rpEmulatorUrl(path: string): string {
+      return `http://localhost:${rpEmulatorPort}${path}`;
+    }
+
+    function rpPortOf(instanceId: string): number {
+      const port = rpService.getDataPlanePort(PROJECT, LOCATION, RP_CLUSTER, instanceId);
+
+      expect(port).not.toBeNull();
+
+      return port ?? 0;
+    }
+
+    beforeAll(async () => {
+      rpEmulatorPort = await getAvailablePort();
+
+      const storage = new StorageManager();
+
+      await storage.initialize({ type: 'memory' });
+
+      rpService = new AlloyDbService(storage, new Logger('rp-e2e', 'error'), {
+        enabled: true,
+        portRangeStart: PORT_RANGE_START,
+        portRangeEnd: PORT_RANGE_END,
+        storageType: 'memory',
+        sqlitePath: './data/emulator.db',
+        postgis: false,
+      });
+
+      await rpService.initialize();
+
+      rpServer = Bun.serve({
+        port: rpEmulatorPort,
+        fetch: buildRouter(rpService.getRoutes()),
+      });
+
+      await rpExpectOk(
+        await fetch(
+          rpEmulatorUrl(
+            `/v1/projects/${PROJECT}/locations/${LOCATION}/clusters?clusterId=${RP_CLUSTER}`
+          ),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              initialUser: { user: 'postgres', password: RP_PASSWORD },
+              networkConfig: { network: `projects/${PROJECT}/global/networks/default` },
+            }),
+          }
+        ),
+        `Creating cluster ${RP_CLUSTER}`
+      );
+
+      await rpExpectOk(
+        await fetch(
+          rpEmulatorUrl(
+            `/v1/projects/${PROJECT}/locations/${LOCATION}/clusters/${RP_CLUSTER}/instances?instanceId=${RP_PRIMARY}`
+          ),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instanceType: 'PRIMARY' }),
+          }
+        ),
+        `Creating primary ${RP_PRIMARY}`
+      );
+
+      await rpExpectOk(
+        await fetch(
+          rpEmulatorUrl(
+            `/v1/projects/${PROJECT}/locations/${LOCATION}/clusters/${RP_CLUSTER}/instances?instanceId=${RP_POOL}`
+          ),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instanceType: 'READ_POOL',
+              readPoolConfig: { nodeCount: 1 },
+            }),
+          }
+        ),
+        `Creating read pool ${RP_POOL}`
+      );
+    }, INSTANCE_BOOT_TIMEOUT_MS * 3);
+
+    afterEach(async () => {
+      for (const client of rpClients) await client.end();
+
+      rpClients = [];
+    });
+
+    afterAll(async () => {
+      rpServer.stop();
+      await rpService.stop();
+    });
+
+    test('a read pool can select data written on the primary', async () => {
+      const primaryPort = rpPortOf(RP_PRIMARY);
+      const poolPort = rpPortOf(RP_POOL);
+      const primary = rpConnect(primaryPort, 'postgres');
+
+      await primary.unsafe('CREATE TABLE rp_test (id serial primary key, val text)');
+      await primary.unsafe("INSERT INTO rp_test (val) VALUES ('hello')");
+
+      const pool = rpConnect(poolPort, 'postgres');
+
+      await waitForReplication(async () => {
+        const result: Record<string, unknown>[] = await pool.unsafe(
+          'SELECT id, val FROM rp_test ORDER BY id'
+        );
+
+        return result.length === 1 && result[0]?.val === 'hello';
+      });
+
+      const visible: Record<string, unknown>[] = await pool.unsafe(
+        'SELECT val FROM rp_test ORDER BY id'
+      );
+
+      expect(visible[0]?.val).toBe('hello');
+    });
+
+    test('a write on the read pool is rejected as read-only', async () => {
+      const poolPort = rpPortOf(RP_POOL);
+      const pool = rpConnect(poolPort, 'postgres');
+      // Bun's query object is a lazy thenable; wrapping in an async function forces evaluation.
+      const attempt = async (): Promise<void> => {
+        await pool.unsafe('CREATE TABLE should_fail (id int)');
+      };
+
+      await expect(attempt()).rejects.toThrow(/read-only|cannot execute|standby/i);
+    });
+
+    test('nodeCount is preserved and returned in the instance response', async () => {
+      const response = await fetch(
+        rpEmulatorUrl(
+          `/v1/projects/${PROJECT}/locations/${LOCATION}/clusters/${RP_CLUSTER}/instances/${RP_POOL}`
+        )
+      );
+
+      await rpExpectOk(response, 'Getting read pool');
+
+      const instance = (await response.json()) as Record<string, unknown>;
+      const readPoolConfig = instance.readPoolConfig as Record<string, unknown> | undefined;
+
+      expect(readPoolConfig?.nodeCount).toBe(1);
+    });
+
+    test('a user created on the cluster can log into the read pool without a separate upsertUser', async () => {
+      const replicaUser = 'repl-user';
+      const replicaPass = 'repl-pass';
+
+      await rpExpectOk(
+        await fetch(
+          rpEmulatorUrl(
+            `/v1/projects/${PROJECT}/locations/${LOCATION}/clusters/${RP_CLUSTER}/users?userId=${replicaUser}`
+          ),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: replicaPass }),
+          }
+        ),
+        `Creating user ${replicaUser}`
+      );
+
+      const poolPort = rpPortOf(RP_POOL);
+      const pool = rpConnect(poolPort, 'postgres', replicaUser, replicaPass);
+
+      await waitForReplication(async () => {
+        const result: Record<string, unknown>[] = await pool.unsafe('SELECT 1 AS ok');
+
+        return result[0]?.ok === 1;
+      });
+
+      const visible: Record<string, unknown>[] = await pool.unsafe('SELECT 1 AS ok');
+
+      expect(visible[0]?.ok).toBe(1);
+    });
+  }
+);

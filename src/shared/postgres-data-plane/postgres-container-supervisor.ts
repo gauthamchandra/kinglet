@@ -6,8 +6,9 @@
  * config field) names an image. With no image configured the default
  * {@link PostgresProcessManager} path is used. See ADR-019.
  *
- * <p>Known gap: this supervisor is wired for Cloud SQL only. AlloyDB
- * continues to use PGlite until it moves to {@code PostgresServerDataPlane}.
+ * <p>Known gap: this supervisor is wired for Cloud SQL only. AlloyDB read
+ * pools use {@link PostgresProcessManager}. The replica methods throw, because
+ * a container data directory is not a streaming standby.
  *
  * <p>Known gap: running kinglet as root (uid 0) is not supported. The
  * postgres binary inside the container refuses to start as root, and the
@@ -139,6 +140,38 @@ export class PostgresContainerSupervisor implements PostgresSupervisor {
 
   isPostgresAvailable(): boolean {
     return Bun.which('docker') != null;
+  }
+
+  async basebackup(
+    _standbyDir: string,
+    _primaryDataDir: string,
+    _primaryPort: number
+  ): Promise<void> {
+    this.unsupportedReplica();
+  }
+
+  async refreshReplicaConninfo(
+    _standbyDir: string,
+    _primaryDataDir: string,
+    _primaryPort: number
+  ): Promise<void> {
+    this.unsupportedReplica();
+  }
+
+  async releaseReplicationSlot(
+    _primaryDataDir: string,
+    _slotName: string,
+    _primaryPort: number | null
+  ): Promise<void> {
+    this.unsupportedReplica();
+  }
+
+  async stopStaleServer(dataDir: string): Promise<void> {
+    await this.stop(dataDir);
+  }
+
+  private unsupportedReplica(): never {
+    throw new Error('Streaming replicas are not supported for container-mode Postgres');
   }
 
   async ensureInitialized(dataDir: string): Promise<void> {

@@ -28,6 +28,7 @@ import {
   MUTABLE_INSTANCE_FIELDS,
   normalizeEnum,
   normalizeSpecFieldValue,
+  parseInstanceName,
   parseSpecJson,
   userIdFromName,
 } from './types.ts';
@@ -146,13 +147,18 @@ export class InstanceService {
 
     const created = await this.instances.create(record);
     const dataPlaneKey = buildDataPlaneInstanceKey(location, clusterId, instanceId);
+    const isReadPool = record.instanceType === InstanceType.READ_POOL;
 
     // Started eagerly, before the DONE operation is returned, so a caller that
     // has seen the create succeed can connect immediately — the same contract
     // Cloud SQL's data plane gives (see ADR-013).
     try {
-      await this.dataPlane.startInstance(project, dataPlaneKey, [DEFAULT_DATABASE_NAME]);
-      await this.applyClusterUsersToInstance(project, location, clusterId, dataPlaneKey);
+      if (isReadPool) {
+        await this.startReadPool(project, location, clusterId, name, dataPlaneKey);
+      } else {
+        await this.dataPlane.startInstance(project, dataPlaneKey, [DEFAULT_DATABASE_NAME]);
+        await this.applyClusterUsersToInstance(project, location, clusterId, dataPlaneKey);
+      }
     } catch (error) {
       // An instance whose rows exist but whose endpoint never came up would
       // advertise an address nothing answers on. Undoing the rows keeps create
@@ -228,6 +234,59 @@ export class InstanceService {
       instances: result.instances.map(instanceRecordToResponse),
       nextPageToken: result.nextPageToken,
     };
+  }
+
+  /**
+   * Start a READ_POOL instance as a streaming standby of the cluster's primary.
+   *
+   * <p>The primary must be running (its data plane port non-null). If it is not,
+   * an error is thrown so the caller can roll back the instance row and surface a
+   * failed operation — matching the contract for any data-plane start failure.
+   *
+   * <p>User roles are not applied directly: they arrive through WAL replication
+   * from the primary, so calling {@code upsertUser} on a read-only standby would
+   * fail and is unnecessary.
+   */
+  private async startReadPool(
+    project: string,
+    location: string,
+    clusterId: string,
+    instanceName: string,
+    dataPlaneKey: string
+  ): Promise<void> {
+    const clusterInstances = await this.instances.listAllInstancesInCluster(
+      project,
+      location,
+      clusterId
+    );
+
+    const primaryInstance = clusterInstances.find(
+      inst => inst.name !== instanceName && inst.instanceType === InstanceType.PRIMARY
+    );
+
+    if (!primaryInstance) {
+      throw new Error(
+        `No primary instance found for cluster ${buildClusterName(project, location, clusterId)}`
+      );
+    }
+
+    const parsedPrimary = parseInstanceName(primaryInstance.name);
+
+    if (!parsedPrimary) {
+      throw new Error(`Cannot parse primary instance name ${primaryInstance.name}`);
+    }
+
+    const primaryKey = buildDataPlaneInstanceKey(
+      parsedPrimary.location,
+      parsedPrimary.clusterId,
+      parsedPrimary.instanceId
+    );
+
+    await this.dataPlane.startReplicaInstance(
+      project,
+      dataPlaneKey,
+      this.dataPlane.getPort(project, primaryKey)
+    );
   }
 
   /**
