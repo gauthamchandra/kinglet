@@ -37,6 +37,7 @@ import {
   isValidBackupId,
   isValidClusterId,
   isValidInstanceId,
+  isValidUserId,
   MUTABLE_BACKUP_FIELDS,
   MUTABLE_CLUSTER_FIELDS,
   MUTABLE_INSTANCE_FIELDS,
@@ -144,6 +145,18 @@ describe('resource id validation', () => {
   test('isValidInstanceId_isStricterThanIsValidClusterId', () => {
     expect(isValidClusterId('0-9')).toBe(true);
     expect(isValidInstanceId('0-9')).toBe(false);
+  });
+
+  test('isValidUserId_acceptsANameAtThePostgresIdentifierLimit', () => {
+    expect(isValidUserId('a'.repeat(63))).toBe(true);
+    expect(isValidUserId(`${'a'.repeat(61)}é`)).toBe(true);
+  });
+
+  test('isValidUserId_rejectsANamePostgresWouldTruncate', () => {
+    expect(isValidUserId('a'.repeat(64))).toBe(false);
+    expect(isValidUserId(`${'a'.repeat(62)}é`)).toBe(false);
+    expect(isValidUserId('')).toBe(false);
+    expect(isValidUserId('a/b')).toBe(false);
   });
 });
 

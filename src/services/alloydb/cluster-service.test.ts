@@ -174,6 +174,20 @@ describe('createCluster', () => {
     expect(await clusters.getByName(CLUSTER_NAME)).toBeNull();
   });
 
+  test('createCluster_withAnInitialUsernameOver63Bytes_reportsInvalidArgument', async () => {
+    const promise = service.createCluster(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      { ...VALID_BODY, initialUser: { user: 'a'.repeat(64), password: 'hunter2' } },
+      {}
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(AlloyDbError);
+    await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+    expect(await clusters.getByName(CLUSTER_NAME)).toBeNull();
+  });
+
   test('createCluster_withAReservedInitialUsername_reportsInvalidArgument', async () => {
     const promise = service.createCluster(
       PROJECT,

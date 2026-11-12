@@ -363,13 +363,23 @@ export function isValidInstanceId(instanceId: string): boolean {
 }
 
 /**
+ * PostgreSQL stores identifiers in `NAMEDATALEN - 1` bytes and truncates the
+ * rest. A longer user id would be saved in full and created as a shorter role.
+ */
+const POSTGRES_IDENTIFIER_MAX_BYTES = 63;
+
+/**
  * The discovery document gives user ids no pattern — they become PostgreSQL role
  * names, which are permissive — so validation is limited to what would genuinely
- * break: an empty id, or one containing the separator that delimits resource
- * names.
+ * break: an empty id, one containing the separator that delimits resource names,
+ * or one longer than {@link POSTGRES_IDENTIFIER_MAX_BYTES}.
  */
 export function isValidUserId(userId: string): boolean {
-  return userId.length > 0 && !userId.includes('/');
+  return (
+    userId.length > 0 &&
+    !userId.includes('/') &&
+    new TextEncoder().encode(userId).length <= POSTGRES_IDENTIFIER_MAX_BYTES
+  );
 }
 
 const BACKUP_ID_PATTERN = /^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/;

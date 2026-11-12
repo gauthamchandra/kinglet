@@ -476,10 +476,17 @@ function validateInitialUser(body: Record<string, unknown>): void {
   // rule users.create enforces. Without this, cluster create mints a user whose
   // name breaks the discovery document's `users/[^/]+` shape and which no client
   // can then GET, PATCH or DELETE.
-  if (!isValidUserId(username)) {
+  if (username.includes('/')) {
     throw new AlloyDbError(
       'INVALID_ARGUMENT',
       `Cluster.initialUser.user "${username}" must not contain "/"`
+    );
+  }
+
+  if (!isValidUserId(username)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `Cluster.initialUser.user "${username}" must be at most 63 bytes, the PostgreSQL identifier limit`
     );
   }
 

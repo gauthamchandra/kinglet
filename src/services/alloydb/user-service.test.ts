@@ -179,6 +179,8 @@ describe('createUser', () => {
   test.each([
     '',
     'has/slash',
+    'a'.repeat(64),
+    `${'a'.repeat(62)}é`,
     'kinglet_admin',
     'cloudsqlsuperuser',
     'pg_monitor',

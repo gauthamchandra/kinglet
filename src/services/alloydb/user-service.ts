@@ -440,10 +440,17 @@ export class UserService {
 
 /** Throwing wrapper over {@link isValidUserId}. */
 function validateUserId(userId: string): void {
-  if (!isValidUserId(userId)) {
+  if (userId.length === 0 || userId.includes('/')) {
     throw new AlloyDbError(
       'INVALID_ARGUMENT',
       `User ID "${userId}" must be non-empty and must not contain "/"`
+    );
+  }
+
+  if (!isValidUserId(userId)) {
+    throw new AlloyDbError(
+      'INVALID_ARGUMENT',
+      `User ID "${userId}" must be at most 63 bytes, the PostgreSQL identifier limit`
     );
   }
 
