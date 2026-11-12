@@ -44,6 +44,7 @@ See [Storage modes](storage.md) for details on each storage type.
 | `MEMORYSTORE_PORT_RANGE_END` | `6479` | Last port available for data-plane instances |
 | `CLOUDSQL_DATA_PLANE` | `true` | Serve a real Postgres server per instance; `false` for a control plane only |
 | `CLOUDSQL_POSTGRES_BIN_DIR` | — | Directory of `postgres` and `initdb`. Unset searches `pg_config`, then `PATH` |
+| `CLOUDSQL_POSTGRES_IMAGE` | — | Run each Cloud SQL instance in this Docker image. Unset keeps the supervised `postgres` process |
 | `CLOUDSQL_PORT_RANGE_START` | `5432` | First port available for Cloud SQL instance endpoints |
 | `CLOUDSQL_PORT_RANGE_END` | `5531` | Last port available for Cloud SQL instance endpoints |
 | `CLOUDSQL_POSTGIS` | `false` | Accepted, and ignored for Cloud SQL. PostGIS comes from the installed server packages. AlloyDB still uses this flag |

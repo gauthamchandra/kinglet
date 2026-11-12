@@ -424,6 +424,12 @@ describe('Configuration Schema', () => {
       );
     });
 
+    test('mapEnvToConfig maps CLOUDSQL_POSTGRES_IMAGE into the dataPlane block', () => {
+      const config = mapEnvToConfig({ CLOUDSQL_POSTGRES_IMAGE: 'postgres:18' });
+
+      expect(config.services?.cloudsql?.dataPlane?.postgresImage).toBe('postgres:18');
+    });
+
     test('mapEnvToConfig maps ENABLE_CLOUDSQL as an individual service flag', () => {
       const config = mapEnvToConfig({ ENABLE_CLOUDSQL: true });
 
