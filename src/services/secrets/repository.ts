@@ -5,7 +5,7 @@
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { TableSchema } from '@/core/storage/types.ts';
 import type { SecretSpec } from './types.ts';
-import { SECRETS_TABLE } from './types.ts';
+import { SECRETS_TABLE, VERSIONS_TABLE } from './types.ts';
 
 export interface StoredSecret {
   readonly name: string;
@@ -42,6 +42,30 @@ const secretsTableSchema: TableSchema = {
   timestamps: true,
 };
 
+const versionsTableSchema: TableSchema = {
+  name: VERSIONS_TABLE,
+  columns: [
+    { name: 'secretName', type: 'string' },
+    { name: 'number', type: 'number' },
+    { name: 'state', type: 'string' },
+    { name: 'createTime', type: 'string' },
+    { name: 'destroyTime', type: 'string', nullable: true },
+    { name: 'generation', type: 'number' },
+    { name: 'payloadData', type: 'string', nullable: true },
+    { name: 'payloadCrc32c', type: 'string', nullable: true },
+    { name: 'clientSpecifiedPayloadChecksum', type: 'number' },
+  ],
+  indexes: [
+    {
+      name: 'idx_secretmanager_versions_secret_number',
+      columns: ['secretName', 'number'],
+      unique: true,
+    },
+    { name: 'idx_secretmanager_versions_secret', columns: ['secretName'] },
+  ],
+  timestamps: true,
+};
+
 export class SecretRepository {
   private readonly storage: StorageManager;
 
@@ -51,6 +75,7 @@ export class SecretRepository {
 
   async initialize(): Promise<void> {
     await this.storage.createTable(SECRETS_TABLE, secretsTableSchema);
+    await this.storage.createTable(VERSIONS_TABLE, versionsTableSchema);
   }
 
   async getByName(name: string): Promise<StoredSecret | null> {
@@ -78,6 +103,46 @@ export class SecretRepository {
 
     return toStored(created);
   }
+
+  async insertVersion(version: StoredVersion): Promise<StoredVersion> {
+    const created = await this.storage.create<VersionRow>(VERSIONS_TABLE, {
+      secretName: version.secretName,
+      number: version.number,
+      state: version.state,
+      createTime: version.createTime,
+      destroyTime: version.destroyTime,
+      generation: version.generation,
+      payloadData: version.payloadData,
+      payloadCrc32c: version.payloadCrc32c,
+      clientSpecifiedPayloadChecksum: version.clientSpecifiedPayloadChecksum ? 1 : 0,
+    });
+
+    return toVersion(created);
+  }
+
+  async findVersion(secretName: string, number: number): Promise<StoredVersion | null> {
+    const row = await this.storage.findFirst<VersionRow>(VERSIONS_TABLE, {
+      filter: {
+        conditions: [
+          { field: 'secretName', operator: 'eq', value: secretName },
+          { field: 'number', operator: 'eq', value: number },
+        ],
+      },
+    });
+
+    return row == null ? null : toVersion(row);
+  }
+
+  async findNewestVersion(secretName: string): Promise<StoredVersion | null> {
+    const result = await this.storage.find<VersionRow>(VERSIONS_TABLE, {
+      filter: { conditions: [{ field: 'secretName', operator: 'eq', value: secretName }] },
+      sort: [{ field: 'number', direction: 'desc' }],
+      pagination: { limit: 1, offset: 0 },
+    });
+    const row = result.data[0];
+
+    return row == null ? null : toVersion(row);
+  }
 }
 
 function toStored(row: SecretRow): StoredSecret {
@@ -96,4 +161,46 @@ function readSpec(spec: SecretSpec | string): SecretSpec {
   }
 
   return spec;
+}
+
+export interface StoredVersion {
+  readonly secretName: string;
+  readonly number: number;
+  readonly state: 'ENABLED' | 'DISABLED' | 'DESTROYED';
+  readonly createTime: string;
+  readonly destroyTime: string | null;
+  readonly generation: number;
+  readonly payloadData: string | null;
+  readonly payloadCrc32c: string | null;
+  readonly clientSpecifiedPayloadChecksum: boolean;
+}
+
+interface VersionRow {
+  readonly id: string;
+  readonly secretName: string;
+  readonly number: number;
+  readonly state: StoredVersion['state'];
+  readonly createTime: string;
+  readonly destroyTime: string | null;
+  readonly generation: number;
+  readonly payloadData: string | null;
+  readonly payloadCrc32c: string | null;
+  readonly clientSpecifiedPayloadChecksum: number | boolean;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+function toVersion(row: VersionRow): StoredVersion {
+  return {
+    secretName: row.secretName,
+    number: Number(row.number),
+    state: row.state,
+    createTime: row.createTime,
+    destroyTime: row.destroyTime,
+    generation: Number(row.generation),
+    payloadData: row.payloadData,
+    payloadCrc32c: row.payloadCrc32c,
+    clientSpecifiedPayloadChecksum:
+      row.clientSpecifiedPayloadChecksum === true || row.clientSpecifiedPayloadChecksum === 1,
+  };
 }

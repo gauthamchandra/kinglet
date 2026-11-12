@@ -5,14 +5,17 @@
  */
 
 import type {
+  AccessedSecret,
   Cmek,
   Duration,
   Expiration,
+  PayloadInput,
   Replica,
   Replication,
   Rotation,
   SecretSpecInput,
   SecretType,
+  SecretVersionView,
   SecretView,
 } from './types.ts';
 import { SECRET_TYPE_BY_NUMBER, SecretManagerError } from './types.ts';
@@ -131,6 +134,45 @@ export function encodeSecret(secret: SecretView, dialect: WireDialect): WireMess
   }
 
   return body;
+}
+
+export function decodeAdd(
+  message: WireMessage,
+  dialect: WireDialect
+): { parentRaw: string; payload: PayloadInput } {
+  const parentRaw = readRequiredString(message.parent, 'parent');
+  const payload = asRecord(message.payload, 'payload');
+  const data = dialect.readBytes(payload.data);
+
+  if (data == null) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'payload.data is required');
+  }
+
+  return { parentRaw, payload: { data, crc32c: readChecksum(payload, dialect) } };
+}
+
+export function decodeVersion(message: WireMessage): string {
+  return readRequiredString(message.name, 'name');
+}
+
+export function encodeVersion(version: SecretVersionView, _dialect: WireDialect): WireMessage {
+  return {
+    name: version.name,
+    state: version.state,
+    createTime: _dialect.writeTimestamp(version.createTime),
+    etag: version.etag,
+    clientSpecifiedPayloadChecksum: version.clientSpecifiedPayloadChecksum,
+  };
+}
+
+export function encodeAccessed(accessed: AccessedSecret, dialect: WireDialect): WireMessage {
+  return {
+    name: accessed.name,
+    payload: {
+      data: dialect.writeBytes(accessed.data),
+      dataCrc32c: accessed.crc32c,
+    },
+  };
 }
 
 function readReplication(value: unknown): Replication | null {
@@ -506,7 +548,7 @@ function formatDuration(duration: Duration): string {
 }
 
 function readRestBytes(value: unknown): Uint8Array | null {
-  if (isUnset(value)) {
+  if (value == null) {
     return null;
   }
 
@@ -514,7 +556,25 @@ function readRestBytes(value: unknown): Uint8Array | null {
     throw new SecretManagerError('INVALID_ARGUMENT', 'Expected base64 data');
   }
 
-  return new Uint8Array(Buffer.from(value, 'base64'));
+  return decodeRestBase64(value);
+}
+
+function decodeRestBase64(value: string): Uint8Array {
+  const standard = value.replace(/-/g, '+').replace(/_/g, '/');
+
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(standard) || standard.length % 4 === 1) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'payload.data is not valid base64');
+  }
+
+  const remainder = standard.length % 4;
+  const padded = remainder === 0 ? standard : standard + '='.repeat(4 - remainder);
+  const bytes = Buffer.from(padded, 'base64');
+
+  if (bytes.toString('base64').replace(/=+$/, '') !== padded.replace(/=+$/, '')) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'payload.data is not valid base64');
+  }
+
+  return new Uint8Array(bytes);
 }
 
 function readProtoBytes(value: unknown): Uint8Array | null {
@@ -527,6 +587,18 @@ function readProtoBytes(value: unknown): Uint8Array | null {
   }
 
   throw new SecretManagerError('INVALID_ARGUMENT', 'Expected bytes');
+}
+
+function readChecksum(payload: WireMessage, dialect: WireDialect): string | null {
+  if (dialect.kind === 'grpc' && payload._dataCrc32c !== 'dataCrc32c') {
+    return null;
+  }
+
+  if (payload.dataCrc32c == null || payload.dataCrc32c === '') {
+    return null;
+  }
+
+  return String(payload.dataCrc32c);
 }
 
 function readRequiredString(value: unknown, field: string): string {
