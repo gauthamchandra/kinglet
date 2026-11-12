@@ -119,8 +119,13 @@ opt-in, not the default.
 Not built here:
 
 - `databaseFlags` applied to `postgresql.conf` / `ALTER SYSTEM`.
-- AlloyDB read pools as streaming replicas. Each READ_POOL instance is
-  presently its own independent Postgres server, not a streaming replica.
+- A READ_POOL instance is a streaming standby of the cluster's PRIMARY via
+  `pg_basebackup`. Replication authenticates with scram-sha-256. Each pool has
+  a physical replication slot so the primary keeps the WAL that pool still
+  needs; deleting the pool drops the slot. A stopped pool therefore retains
+  WAL until it catches up or is deleted. A standby that is not streaming is
+  backed up again. `nodeCount > 1` is stored and returned but maps to one
+  postmaster (multiple physical nodes are a known gap).
 
 The PGlite data plane (`DataPlaneManager`, the hand-written wire server, and
 the `@electric-sql/pglite` dependency) has been removed. Both Cloud SQL and

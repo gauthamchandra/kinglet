@@ -40,6 +40,25 @@ describe('containerNameForTest', () => {
   });
 });
 
+describe('PostgresContainerSupervisor replica methods', () => {
+  test('rejects streaming replica operations', async () => {
+    const supervisor = new PostgresContainerSupervisor({
+      image: 'postgres:18',
+      runner: okRunner(),
+    });
+
+    await expect(supervisor.basebackup('/standby', '/primary', 5432)).rejects.toThrow(
+      /not supported for container-mode/
+    );
+    await expect(supervisor.refreshReplicaConninfo('/standby', '/primary', 5432)).rejects.toThrow(
+      /not supported for container-mode/
+    );
+    await expect(
+      supervisor.releaseReplicationSlot('/primary', 'kinglet_slot', null)
+    ).rejects.toThrow(/not supported for container-mode/);
+  });
+});
+
 describe('PostgresContainerSupervisor.isPostgresAvailable', () => {
   test('returns false when docker is not on PATH', () => {
     const which = spyOn(Bun, 'which').mockReturnValue(null);

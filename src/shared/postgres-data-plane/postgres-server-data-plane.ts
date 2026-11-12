@@ -5,7 +5,7 @@
  * process and issues the DDL the admin API asked for. See ADR-019.
  */
 
-import { chmod, mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import type { SQL } from 'bun';
@@ -18,7 +18,7 @@ import {
   RoleAlreadyExistsError,
 } from './data-plane-manager.ts';
 import type { PostgresDataPlaneProduct } from './host.ts';
-import type { PostgresProcessManager } from './postgres-process-manager.ts';
+import { type PostgresProcessManager, replicationSlotName } from './postgres-process-manager.ts';
 
 /**
  * Make one project/instance/database name safe to use as a directory name.
@@ -35,7 +35,15 @@ export function encodePathSegment(segment: string): string {
 /** The methods {@link PostgresServerDataPlane} calls. A container runtime can match this later. */
 export type PostgresSupervisor = Pick<
   PostgresProcessManager,
-  'isPostgresAvailable' | 'ensureInitialized' | 'start' | 'stop' | 'openAdminConnection'
+  | 'isPostgresAvailable'
+  | 'ensureInitialized'
+  | 'start'
+  | 'stop'
+  | 'openAdminConnection'
+  | 'basebackup'
+  | 'refreshReplicaConninfo'
+  | 'releaseReplicationSlot'
+  | 'stopStaleServer'
 >;
 
 export interface PostgresServerDataPlaneOptions {
@@ -116,6 +124,8 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
   private tempRoot: string | undefined;
   private tempRootPromise: Promise<string> | undefined;
   private warnedUnavailable = false;
+  /** How long a new standby may take to report `streaming` before it is rebuilt. */
+  private replicaStreamTimeoutMs = 5_000;
 
   constructor(
     private readonly logger: Logger,
@@ -147,6 +157,223 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     this.pendingStarts.add(tracked);
 
     return tracked;
+  }
+
+  async startReplicaInstance(
+    project: string,
+    instance: string,
+    primaryPort: number | null
+  ): Promise<number | null> {
+    if (this.stopping > 0) {
+      throw new Error(`${this.options.product.productLabel} data plane is shutting down`);
+    }
+
+    const work = this.mutex.runExclusively(instanceKey(project, instance), () =>
+      this.startReplicaInstanceLocked(project, instance, primaryPort)
+    );
+
+    const tracked = work.finally(() => {
+      this.pendingStarts.delete(tracked);
+    });
+
+    this.pendingStarts.add(tracked);
+
+    return tracked;
+  }
+
+  private async startReplicaInstanceLocked(
+    project: string,
+    instance: string,
+    primaryPort: number | null
+  ): Promise<number | null> {
+    if (this.stopping > 0) {
+      throw new Error(`${this.options.product.productLabel} data plane is shutting down`);
+    }
+
+    if (!this.options.processManager.isPostgresAvailable()) {
+      this.warnUnavailable();
+
+      return null;
+    }
+
+    if (primaryPort == null) {
+      throw new Error('Primary instance is not running; cannot create a read pool');
+    }
+
+    const key = instanceKey(project, instance);
+    const previous = this.running.get(key);
+    const dataDir = this.instanceDirectory(await this.rootDirectory(), project, instance);
+
+    if (previous != null) {
+      await this.options.processManager.stop(previous.dataDir);
+      this.running.delete(key);
+      this.ports.release(previous.port);
+    }
+
+    const refused: number[] = [];
+    let port: number | undefined;
+
+    try {
+      await mkdir(dirname(dataDir), { recursive: true });
+      await this.setupStandbyDirectory(dataDir, primaryPort);
+
+      let preferred = previous?.port;
+
+      while (port == null) {
+        const allocated = await this.ports.allocate(
+          preferred == null ? {} : { preferredPort: preferred }
+        );
+
+        preferred = undefined;
+
+        if (allocated == null) {
+          throw new Error(
+            `No free port in the ${this.options.product.productLabel} data plane range ` +
+              `${this.options.portRangeStart}-${this.options.portRangeEnd}`
+          );
+        }
+
+        port = allocated;
+
+        try {
+          await this.options.processManager.start(dataDir, port);
+          await this.ensureReplicaStreaming(dataDir, port, primaryPort);
+          break;
+        } catch (error) {
+          if (!isAddressInUse(error)) throw error;
+
+          refused.push(port);
+          port = undefined;
+          this.logger.debug(
+            `Port ${allocated} looked free but could not be bound for ${key}, trying the next`,
+            error
+          );
+        }
+      }
+
+      const current = { port, dataDir };
+
+      this.running.set(key, current);
+      this.logger.info(
+        `${this.options.product.productLabel} replica instance ${key} listening on 127.0.0.1:${port}`
+      );
+
+      return port;
+    } catch (error) {
+      await this.options.processManager.stop(dataDir);
+
+      if (port != null) this.ports.release(port);
+
+      throw error;
+    } finally {
+      for (const refusedPort of refused) this.ports.release(refusedPort);
+    }
+  }
+
+  /**
+   * Prepare the standby's data directory.
+   *
+   * <p>A directory that already has {@code standby.signal} is reused and only
+   * its connection line is refreshed. Any other existing directory is moved
+   * aside, still intact, before {@code pg_basebackup} creates the standby.
+   * A failed backup removes the partial destination so the next attempt is
+   * not stuck on a non-empty directory.
+   */
+  private async setupStandbyDirectory(dataDir: string, primaryPort: number): Promise<void> {
+    const primaryDataDir = this.primaryDataDirectory(primaryPort);
+
+    if (await Bun.file(join(dataDir, 'standby.signal')).exists()) {
+      await this.options.processManager.refreshReplicaConninfo(
+        dataDir,
+        primaryDataDir,
+        primaryPort
+      );
+
+      return;
+    }
+
+    if (await this.directoryOccupied(dataDir)) {
+      await this.preservePreReplicaDirectory(dataDir);
+    }
+
+    try {
+      await this.options.processManager.basebackup(dataDir, primaryDataDir, primaryPort);
+    } catch (error) {
+      await rm(dataDir, { recursive: true, force: true });
+      await this.releaseBackupSlot(primaryDataDir, dataDir, primaryPort);
+
+      throw error;
+    }
+  }
+
+  /** Drop a slot created for a backup whose destination was removed. */
+  private async releaseBackupSlot(
+    primaryDataDir: string,
+    standbyDir: string,
+    primaryPort: number
+  ): Promise<void> {
+    try {
+      await this.options.processManager.releaseReplicationSlot(
+        primaryDataDir,
+        replicationSlotName(standbyDir),
+        primaryPort
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Replication slot for ${standbyDir} was left on ${primaryDataDir} after a failed backup`,
+        error
+      );
+    }
+  }
+
+  private primaryDataDirectory(primaryPort: number): string {
+    for (const running of this.running.values()) {
+      if (running.port === primaryPort) return running.dataDir;
+    }
+
+    throw new Error(`Primary listening on port ${primaryPort} is not running`);
+  }
+
+  private async directoryOccupied(dataDir: string): Promise<boolean> {
+    try {
+      const entries = await readdir(dataDir);
+
+      return entries.length > 0;
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') return false;
+
+      throw error;
+    }
+  }
+
+  private async preservePreReplicaDirectory(dataDir: string): Promise<void> {
+    const aside = `${dataDir}.kinglet-prereplica`;
+    let asideExists = true;
+
+    try {
+      await stat(aside);
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'ENOENT') throw error;
+
+      asideExists = false;
+    }
+
+    if (asideExists) {
+      throw new Error(
+        `Refusing to replace ${dataDir} with a standby. ${aside} already holds the previous directory.`
+      );
+    }
+
+    // A Kinglet restart leaves `running` empty while the old postmaster can
+    // still be alive. Moving the directory first would hide its pid file from
+    // the next start, which only looks at the fresh standby directory.
+    await this.options.processManager.stop(dataDir);
+    await this.options.processManager.stopStaleServer(dataDir);
+
+    await rename(dataDir, aside);
+    this.logger.warn(
+      `Moved ${dataDir} to ${aside} before creating a streaming standby. The previous files were not a standby.`
+    );
   }
 
   async stopInstance(project: string, instance: string): Promise<void> {
@@ -474,13 +701,133 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
   }
 
   private async dropInstanceLocked(project: string, instance: string): Promise<void> {
+    const root = this.options.dataDirectory ?? this.tempRoot;
+    const dataDir = root == null ? null : this.instanceDirectory(root, project, instance);
+
     await this.stopInstanceLocked(project, instance);
 
-    const root = this.options.dataDirectory ?? this.tempRoot;
+    if (dataDir != null) await this.releaseStandbySlot(dataDir);
 
-    if (root == null) return;
+    if (root == null || dataDir == null) return;
 
-    await rm(this.instanceDirectory(root, project, instance), { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+  }
+
+  /**
+   * A standby that never reaches `streaming` is copied again. Its slot keeps
+   * later WAL, but it cannot fetch segments the primary has already removed.
+   */
+  private async ensureReplicaStreaming(
+    dataDir: string,
+    port: number,
+    primaryPort: number
+  ): Promise<void> {
+    if (await this.replicaIsStreaming(dataDir, port)) return;
+
+    await this.options.processManager.stop(dataDir);
+    await rm(dataDir, { recursive: true, force: true });
+
+    try {
+      await this.options.processManager.basebackup(
+        dataDir,
+        this.primaryDataDirectory(primaryPort),
+        primaryPort
+      );
+    } catch (error) {
+      await rm(dataDir, { recursive: true, force: true });
+      await this.releaseBackupSlot(this.primaryDataDirectory(primaryPort), dataDir, primaryPort);
+
+      throw error;
+    }
+
+    await this.options.processManager.start(dataDir, port);
+
+    if (await this.replicaIsStreaming(dataDir, port)) return;
+
+    throw new Error('Read pool did not start streaming from the primary');
+  }
+
+  private async replicaIsStreaming(dataDir: string, port: number): Promise<boolean> {
+    const sql = this.options.processManager.openAdminConnection(dataDir, port);
+    const deadline = Date.now() + this.replicaStreamTimeoutMs;
+
+    try {
+      while (Date.now() < deadline) {
+        const rows = await sql<{ status: string | null }[]>`
+          SELECT status FROM pg_stat_wal_receiver
+        `;
+
+        if (rows[0]?.status === 'streaming') return true;
+
+        await Bun.sleep(50);
+      }
+
+      return false;
+    } catch (error) {
+      this.logger.warn(`Read pool at ${dataDir} did not report a streaming receiver`, error);
+
+      return false;
+    } finally {
+      await sql.close({ timeout: 0 });
+    }
+  }
+
+  private async releaseStandbySlot(standbyDir: string): Promise<void> {
+    if (!(await Bun.file(join(standbyDir, 'standby.signal')).exists())) return;
+
+    const slot = replicationSlotName(standbyDir);
+    const primary = await this.findReplicationSlotDirectory(standbyDir, slot);
+
+    if (primary == null) return;
+
+    const running = [...this.running.values()].find(entry => entry.dataDir === primary);
+
+    await this.options.processManager.releaseReplicationSlot(primary, slot, running?.port ?? null);
+  }
+
+  private async findReplicationSlotDirectory(
+    standbyDir: string,
+    slot: string
+  ): Promise<string | null> {
+    const standby = resolve(standbyDir);
+
+    for (const running of this.running.values()) {
+      if (running.dataDir === standby) continue;
+
+      if (await this.slotDirectoryExists(running.dataDir, slot)) return running.dataDir;
+    }
+
+    let names: string[];
+
+    try {
+      names = await readdir(dirname(standby));
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') return null;
+
+      throw error;
+    }
+
+    for (const name of names) {
+      const candidate = resolve(dirname(standby), name);
+
+      if (candidate === standby) continue;
+
+      if (await this.slotDirectoryExists(candidate, slot)) return candidate;
+    }
+
+    return null;
+  }
+
+  private async slotDirectoryExists(dataDir: string, slot: string): Promise<boolean> {
+    try {
+      const info = await stat(join(dataDir, 'pg_replslot', slot));
+
+      return info.isDirectory();
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') return false;
+
+      throw error;
+    }
   }
 
   private warnUnavailable(): void {

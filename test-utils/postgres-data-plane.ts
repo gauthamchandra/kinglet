@@ -54,6 +54,22 @@ export class RecordingDataPlane implements PostgresDataPlane {
     return this.port;
   }
 
+  async startReplicaInstance(
+    project: string,
+    instance: string,
+    primaryPort: number | null
+  ): Promise<number> {
+    if (primaryPort == null) {
+      throw new Error('Primary instance is not running; cannot create a read pool');
+    }
+
+    this.calls.push(`startReplica:${project}/${instance}:${primaryPort}`);
+
+    if (this.startFailure) throw this.startFailure;
+
+    return this.port;
+  }
+
   async stopInstance(project: string, instance: string): Promise<void> {
     this.calls.push(`stop:${project}/${instance}`);
   }

@@ -9,7 +9,7 @@ import { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
 import { isRealPostgresAvailable } from '../../../test-utils/postgres.ts';
 import { CLOUDSQL_DATA_PLANE_PRODUCT } from './host.ts';
-import { PostgresProcessManager } from './postgres-process-manager.ts';
+import { PostgresProcessManager, replicationSlotName } from './postgres-process-manager.ts';
 import type { PostgresSupervisor } from './postgres-server-data-plane.ts';
 import {
   encodePathSegment,
@@ -31,6 +31,14 @@ function unavailableSupervisor(): PostgresSupervisor {
     openAdminConnection: () => {
       throw new Error('connected');
     },
+    basebackup: async () => {
+      throw new Error('basebackup called on unavailable supervisor');
+    },
+    stopStaleServer: async () => {},
+    refreshReplicaConninfo: async () => {
+      throw new Error('refresh called on unavailable supervisor');
+    },
+    releaseReplicationSlot: async () => {},
   };
 }
 
@@ -148,6 +156,327 @@ describe('PostgresServerDataPlane without binaries', () => {
     expect(second).toBe(first);
     expect(ports).toEqual([47990, 47990]);
     await plane.stopAll();
+  });
+
+  test('startReplicaInstance returns null when postgres is unavailable', async () => {
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: null,
+      portRangeStart: 47950,
+      portRangeEnd: 47950,
+      processManager: unavailableSupervisor(),
+    });
+
+    expect(await plane.startReplicaInstance('p', 'pool', null)).toBeNull();
+    expect(await plane.startReplicaInstance('p', 'pool', 5432)).toBeNull();
+  });
+
+  test('startReplicaInstance throws when the primary has no port', async () => {
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: null,
+      portRangeStart: 47951,
+      portRangeEnd: 47951,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        start: async () => {},
+      },
+    });
+
+    await expect(plane.startReplicaInstance('p', 'pool', null)).rejects.toThrow(/not running/);
+  });
+
+  test('a pre-replica directory is kept and a failed start releases its port', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-replica-'));
+    const backups: string[] = [];
+    const sql = Object.assign(async () => [{ one: 1 }], {
+      unsafe: async () => {},
+      close: async () => {},
+    });
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47960,
+      portRangeEnd: 47961,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+        },
+        start: async dataDir => {
+          if (dataDir.endsWith('/pool')) throw new Error('standby failed to start');
+        },
+        basebackup: async standbyDir => {
+          backups.push(standbyDir);
+          await mkdir(standbyDir, { recursive: true });
+        },
+        refreshReplicaConninfo: async () => {},
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    await plane.startInstance('p', 'primary', ['postgres']);
+
+    const oldPool = join(root, 'cloudsql', 'p', 'pool');
+
+    await mkdir(oldPool, { recursive: true });
+    await Bun.write(join(oldPool, 'PG_VERSION'), '16\n');
+
+    await expect(
+      plane.startReplicaInstance('p', 'pool', await plane.getPort('p', 'primary'))
+    ).rejects.toThrow('standby failed to start');
+    expect(await Bun.file(join(`${oldPool}.kinglet-prereplica`, 'PG_VERSION')).text()).toBe('16\n');
+    expect(backups).toHaveLength(1);
+
+    await plane.startInstance('p', 'other', ['postgres']);
+    await plane.stopAll();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test('a live pre-replica server is stopped before its directory is moved', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-replica-live-'));
+    const events: string[] = [];
+    const sql = Object.assign(async () => [{ status: 'streaming' }], {
+      unsafe: async () => {},
+      close: async () => {},
+    });
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47970,
+      portRangeEnd: 47971,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+        },
+        start: async () => {},
+        stop: async dataDir => {
+          const version = Bun.file(join(dataDir, 'PG_VERSION'));
+
+          if (await version.exists()) events.push(`stop:${await version.text()}`);
+        },
+        stopStaleServer: async dataDir => {
+          const version = Bun.file(join(dataDir, 'PG_VERSION'));
+
+          if (await version.exists()) events.push(`stale:${await version.text()}`);
+        },
+        basebackup: async standbyDir => {
+          events.push(`backup:${await Bun.file(join(standbyDir, 'PG_VERSION')).exists()}`);
+          await mkdir(standbyDir, { recursive: true });
+        },
+        refreshReplicaConninfo: async () => {},
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    try {
+      await plane.startInstance('p', 'primary', ['postgres']);
+
+      const oldPool = join(root, 'cloudsql', 'p', 'pool');
+
+      await mkdir(oldPool, { recursive: true });
+      await Bun.write(join(oldPool, 'PG_VERSION'), '16\n');
+      await plane.startReplicaInstance('p', 'pool', await plane.getPort('p', 'primary'));
+
+      expect(events).toEqual(['stop:16\n', 'stale:16\n', 'backup:false']);
+      expect(await Bun.file(join(`${oldPool}.kinglet-prereplica`, 'PG_VERSION')).text()).toBe(
+        '16\n'
+      );
+    } finally {
+      await plane.stopAll();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a pre-replica directory stays put when its server cannot be stopped', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-replica-stuck-'));
+    const sql = Object.assign(async () => [{ one: 1 }], {
+      unsafe: async () => {},
+      close: async () => {},
+    });
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47972,
+      portRangeEnd: 47973,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+        },
+        start: async () => {},
+        stopStaleServer: async () => {
+          throw new Error('still running');
+        },
+        basebackup: async () => {
+          throw new Error('backup should not run');
+        },
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    try {
+      await plane.startInstance('p', 'primary', ['postgres']);
+
+      const oldPool = join(root, 'cloudsql', 'p', 'pool');
+
+      await mkdir(oldPool, { recursive: true });
+      await Bun.write(join(oldPool, 'PG_VERSION'), '16\n');
+
+      await expect(
+        plane.startReplicaInstance('p', 'pool', await plane.getPort('p', 'primary'))
+      ).rejects.toThrow('still running');
+      expect(await Bun.file(join(oldPool, 'PG_VERSION')).text()).toBe('16\n');
+      expect(await Bun.file(join(`${oldPool}.kinglet-prereplica`, 'PG_VERSION')).exists()).toBe(
+        false
+      );
+    } finally {
+      await plane.stopAll();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a standby that is not streaming is backed up again', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-replica-stream-'));
+    const backups: string[] = [];
+    const sql = Object.assign(
+      async (strings: TemplateStringsArray) => {
+        const text = strings.join(' ');
+
+        if (text.includes('pg_stat_wal_receiver')) return [];
+
+        return [{ one: 1 }];
+      },
+      { unsafe: async () => {}, close: async () => {} }
+    );
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47962,
+      portRangeEnd: 47963,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+        },
+        start: async () => {},
+        basebackup: async standbyDir => {
+          backups.push(standbyDir);
+          await mkdir(standbyDir, { recursive: true });
+        },
+        refreshReplicaConninfo: async () => {},
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+    const streaming = plane as unknown as { replicaStreamTimeoutMs: number };
+
+    streaming.replicaStreamTimeoutMs = 40;
+
+    try {
+      await plane.startInstance('p', 'primary', ['postgres']);
+      await expect(
+        plane.startReplicaInstance('p', 'pool', await plane.getPort('p', 'primary'))
+      ).rejects.toThrow(/did not start streaming/);
+      expect(backups).toHaveLength(2);
+    } finally {
+      await plane.stopAll();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a failed backup releases its replication slot without standby.signal', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-replica-fail-'));
+    const sql = Object.assign(async () => [{ one: 1 }], {
+      unsafe: async () => {},
+      close: async () => {},
+    });
+    const released: { directory: string; slot: string; port: number | null }[] = [];
+    let standbyDir = '';
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47965,
+      portRangeEnd: 47966,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+        },
+        start: async () => {},
+        basebackup: async directory => {
+          standbyDir = directory;
+          throw new Error('pg_basebackup failed');
+        },
+        releaseReplicationSlot: async (directory, slot, port) => {
+          released.push({ directory, slot, port });
+        },
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    try {
+      await plane.startInstance('p', 'primary', ['postgres']);
+      const primaryPort = await plane.getPort('p', 'primary');
+
+      await expect(plane.startReplicaInstance('p', 'pool', primaryPort)).rejects.toThrow(
+        /pg_basebackup failed/
+      );
+      expect(await Bun.file(join(standbyDir, 'standby.signal')).exists()).toBe(false);
+      expect(released).toEqual([
+        {
+          directory: join(root, 'cloudsql', 'p', 'primary'),
+          slot: replicationSlotName(standbyDir),
+          port: primaryPort,
+        },
+      ]);
+    } finally {
+      await plane.stopAll();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('dropping a standby releases its replication slot', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-replica-slot-'));
+    const pool = join(root, 'cloudsql', 'p', 'pool');
+    const primary = join(root, 'cloudsql', 'p', 'primary');
+    const slot = replicationSlotName(pool);
+    const released: string[] = [];
+
+    await mkdir(join(primary, 'pg_replslot', slot), { recursive: true });
+    await mkdir(pool, { recursive: true });
+    await Bun.write(join(pool, 'standby.signal'), '');
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47964,
+      portRangeEnd: 47964,
+      processManager: {
+        ...unavailableSupervisor(),
+        releaseReplicationSlot: async (directory, name) => {
+          released.push(`${directory}:${name}`);
+        },
+      },
+    });
+
+    try {
+      await plane.dropInstance('p', 'pool');
+      expect(released).toEqual([`${join(root, 'cloudsql', 'p', 'primary')}:${slot}`]);
+    } finally {
+      await plane.stopAll();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -560,64 +889,69 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
     }
   });
 
-  test('drops the default database and a role that still has a session', async () => {
-    const { plane: started, root } = await plane('sqlite');
-    const port = await started.startInstance('p', 'inst', ['postgres']);
-    const dataDir = join(root, 'cloudsql', 'p', 'inst');
+  test(
+    'drops the default database and a role that still has a session',
+    async () => {
+      const { plane: started, root } = await plane('sqlite');
+      const port = await started.startInstance('p', 'inst', ['postgres']);
+      const dataDir = join(root, 'cloudsql', 'p', 'inst');
 
-    await started.upsertUser('p', 'inst', {
-      name: 'app',
-      password: 'secret',
-      memberOf: ['cloudsqlsuperuser'],
-    });
-    await expect(
-      started.upsertUser('p', 'inst', {
-        name: 'kinglet_admin',
-        password: 'taken',
-        memberOf: [],
-      })
-    ).rejects.toThrow(/reserved/);
+      await started.upsertUser('p', 'inst', {
+        name: 'app',
+        password: 'secret',
+        memberOf: ['cloudsqlsuperuser'],
+      });
+      await expect(
+        started.upsertUser('p', 'inst', {
+          name: 'kinglet_admin',
+          password: 'taken',
+          memberOf: [],
+        })
+      ).rejects.toThrow(/reserved/);
 
-    const held = new SQL({
-      url: `postgres://app:secret@127.0.0.1:${port}/postgres`,
-      tls: false,
-      max: 1,
-    });
+      const held = new SQL({
+        url: `postgres://app:secret@127.0.0.1:${port}/postgres`,
+        tls: false,
+        max: 1,
+      });
 
-    expect((await held<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
-    await started.dropUser('p', 'inst', 'app');
-    await expect(Promise.resolve(held`select 1`)).rejects.toThrow();
-    await held.close({ timeout: 0 });
-    await started.dropDatabase('p', 'inst', 'postgres');
+      expect((await held<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
+      await started.dropUser('p', 'inst', 'app');
+      await expect(Promise.resolve(held`select 1`)).rejects.toThrow();
+      await held.close({ timeout: 0 });
+      await started.dropDatabase('p', 'inst', 'postgres');
 
-    const manager = new PostgresProcessManager(logger);
-    const dropped = manager.openAdminConnection(dataDir, port ?? 0, 'postgres');
-    const maintenance = manager.openAdminConnection(dataDir, port ?? 0, 'template1');
+      const manager = new PostgresProcessManager(logger);
+      const dropped = manager.openAdminConnection(dataDir, port ?? 0, 'postgres');
+      const maintenance = manager.openAdminConnection(dataDir, port ?? 0, 'template1');
 
-    try {
-      await expect(Promise.resolve(dropped`select 1`)).rejects.toThrow();
-      expect((await maintenance<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
-    } finally {
-      await dropped.close({ timeout: 0 });
-      await maintenance.close({ timeout: 0 });
-    }
+      try {
+        await expect(Promise.resolve(dropped`select 1`)).rejects.toThrow();
+        expect((await maintenance<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
+      } finally {
+        await dropped.close({ timeout: 0 });
+        await maintenance.close({ timeout: 0 });
+      }
 
-    await started.upsertUser('p', 'inst', {
-      name: 'next',
-      password: 'secret',
-      memberOf: ['cloudsqlsuperuser'],
-    });
-    await started.openDatabase('p', 'inst', 'appdb');
-    expect(await started.startInstance('p', 'inst', ['postgres', 'appdb'])).toBe(port);
+      await started.upsertUser('p', 'inst', {
+        name: 'next',
+        password: 'secret',
+        memberOf: ['cloudsqlsuperuser'],
+      });
+      await started.openDatabase('p', 'inst', 'appdb');
+      expect(await started.startInstance('p', 'inst', ['postgres', 'appdb'])).toBe(port);
 
-    const ready = new PostgresProcessManager(logger).openAdminConnection(dataDir, port ?? 0);
+      const ready = new PostgresProcessManager(logger).openAdminConnection(dataDir, port ?? 0);
 
-    try {
-      expect((await ready<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
-    } finally {
-      await ready.close({ timeout: 0 });
-    }
-  });
+      try {
+        expect((await ready<{ value: number }[]>`select 1 as value`)[0]?.value).toBe(1);
+      } finally {
+        await ready.close({ timeout: 0 });
+      }
+    },
+    // initdb plus a live session's teardown exceeds the 5s default when the runner is busy.
+    { timeout: 20_000 }
+  );
 
   test('drops a user and discards memory-storage data on stop', async () => {
     const { plane: started } = await plane('memory');

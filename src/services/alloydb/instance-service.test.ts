@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { OperationsStore } from '@/core/operations/operations-store.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { createMockLogger } from '../../../test-utils/mock-logger.ts';
@@ -971,5 +972,143 @@ describe('concurrent placement enforcement', () => {
     );
 
     expect((await service.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances).toHaveLength(0);
+  });
+});
+
+describe('createInstance READ_POOL streaming replica', () => {
+  const PRIMARY_ID = 'primary-1';
+  const READ_POOL_ID = 'pool-1';
+  const POOL_KEY = buildDataPlaneInstanceKey(LOCATION, CLUSTER_ID, READ_POOL_ID);
+
+  beforeEach(async () => {
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      PRIMARY_ID,
+      { instanceType: 'PRIMARY' },
+      {}
+    );
+
+    dataPlane.calls.length = 0;
+  });
+
+  test('createInstance_readPool_callsStartReplicaInstanceWithPrimaryPort', async () => {
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      READ_POOL_ID,
+      { instanceType: 'READ_POOL', readPoolConfig: { nodeCount: 2 } },
+      {}
+    );
+
+    // 5540 is the port returned by RecordingDataPlane for the primary's startInstance.
+    expect(dataPlane.calls).toContain(`startReplica:${PROJECT}/${POOL_KEY}:5540`);
+  });
+
+  test('createInstance_readPool_doesNotCallStartInstanceOrUpsertUserOnThePool', async () => {
+    await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      READ_POOL_ID,
+      { instanceType: 'READ_POOL', readPoolConfig: { nodeCount: 1 } },
+      {}
+    );
+
+    expect(dataPlane.calls.some(c => c.startsWith(`start:${PROJECT}/${POOL_KEY}`))).toBe(false);
+    expect(dataPlane.calls.some(c => c.startsWith(`upsertUser:${PROJECT}/${POOL_KEY}`))).toBe(
+      false
+    );
+  });
+
+  test('createInstance_readPool_nodeCountIsReturnedInResponse', async () => {
+    const operation = await service.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      READ_POOL_ID,
+      { instanceType: 'READ_POOL', readPoolConfig: { nodeCount: 3 } },
+      {}
+    );
+
+    const instance = instanceFromOperation(operation);
+
+    expect((instance.readPoolConfig as Record<string, unknown>)?.nodeCount).toBe(3);
+  });
+
+  test('createInstance_readPool_failsAndLeavesNoRowWhenPrimaryDataPlaneNotRunning', async () => {
+    // Wire up a service whose data plane reports null for every port, simulating
+    // a stopped primary. The primary row already exists (from beforeEach) so
+    // validateInstancePlacement passes, but startReadPool must fail because it
+    // cannot get a port for the primary.
+    const noPortPlane = new RecordingDataPlane({ port: 5540, reportedPort: null });
+    const operations = new OperationsStore(storage, {
+      tableName: ALLOYDB_OPERATIONS_TABLE,
+      apiTypePrefix: 'google.cloud.alloydb.v1',
+    });
+
+    await operations.initialize();
+
+    const noPortService = new InstanceService(
+      instances,
+      clusters,
+      operations,
+      new ResourceMutex(),
+      logger,
+      noPortPlane,
+      users
+    );
+
+    const poolOp = await noPortService.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      'pool-no-port',
+      { instanceType: 'READ_POOL', readPoolConfig: { nodeCount: 1 } },
+      {}
+    );
+
+    expect(poolOp.done).toBe(true);
+    expect(poolOp.error).toBeDefined();
+    expect(poolOp.error?.message).toMatch(/primary/i);
+
+    const listed = await noPortService.listInstances(PROJECT, LOCATION, CLUSTER_ID);
+
+    expect(listed.instances.map(i => i.instanceType)).not.toContain('READ_POOL');
+  });
+
+  test('createInstance_readPool_keepsTheRowWhenTheDataPlaneIsDisabled', async () => {
+    const operations = new OperationsStore(storage, {
+      tableName: ALLOYDB_OPERATIONS_TABLE,
+      apiTypePrefix: 'google.cloud.alloydb.v1',
+    });
+
+    await operations.initialize();
+
+    const disabled = new InstanceService(
+      instances,
+      clusters,
+      operations,
+      new ResourceMutex(),
+      logger,
+      new DisabledDataPlane(),
+      users
+    );
+
+    const operation = await disabled.createInstance(
+      PROJECT,
+      LOCATION,
+      CLUSTER_ID,
+      'pool-off',
+      { instanceType: 'READ_POOL', readPoolConfig: { nodeCount: 1 } },
+      {}
+    );
+
+    expect(operation.error).toBeUndefined();
+    expect(
+      (await disabled.listInstances(PROJECT, LOCATION, CLUSTER_ID)).instances.map(i => i.name)
+    ).toContain(buildInstanceName(PROJECT, LOCATION, CLUSTER_ID, 'pool-off'));
   });
 });

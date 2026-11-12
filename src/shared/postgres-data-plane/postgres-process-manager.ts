@@ -1,5 +1,6 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { constants, lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { SQL, type Subprocess } from 'bun';
@@ -19,6 +20,15 @@ interface PostgresProcessManagerOptions {
  * Lifecycle calls for the same directory must be serialized by the caller.
  */
 const SOCKET_RECORD = 'kinglet.socket-dir';
+const REPLICATION_PASSWORD_FILE = 'kinglet-replication.password';
+const BASE_HBA =
+  'local all kinglet_admin trust\n' +
+  'host all all 0.0.0.0/0 scram-sha-256\n' +
+  'host all all ::/0 scram-sha-256\n';
+const REPLICATION_HBA = [
+  'host replication kinglet_admin 127.0.0.1/32 scram-sha-256',
+  'host replication kinglet_admin ::1/128 scram-sha-256',
+];
 
 export class PostgresProcessManager {
   private servers = new Map<string, Subprocess>();
@@ -71,6 +81,7 @@ export class PostgresProcessManager {
     await this.stop(dataDir);
     await this.stopStaleServer(dataDir);
     await this.prepareDirectoryForPostgres(dataDir);
+    await this.ensureReplicaSourceConfig(dataDir);
     const socketDir = await this.createSocketDirectory(dataDir);
 
     const stderr = new StderrTail();
@@ -91,6 +102,7 @@ export class PostgresProcessManager {
 
     try {
       await this.waitForAdminConnection(dataDir, port, child);
+      await this.ensureReplicationPassword(dataDir, port);
       this.servers.set(dataDir, child);
     } catch (error) {
       child.kill('SIGINT');
@@ -181,6 +193,111 @@ export class PostgresProcessManager {
       connectionTimeout: 1,
       max: 1,
     });
+  }
+
+  /**
+   * Create a streaming standby in {@code standbyDir} by running {@code pg_basebackup}
+   * against the primary at {@code primaryPort}.
+   *
+   * <p>The destination is created empty and owned by the Postgres user before
+   * the child runs, so a root-owned parent does not stop {@code pg_basebackup}
+   * from writing it. Authentication is scram with the primary's replication
+   * password, passed in the environment rather than on the command line.
+   */
+  async basebackup(standbyDir: string, primaryDataDir: string, primaryPort: number): Promise<void> {
+    standbyDir = resolve(standbyDir);
+    primaryDataDir = resolve(primaryDataDir);
+    await mkdir(standbyDir, { recursive: true });
+    await this.prepareDirectoryForPostgres(standbyDir);
+
+    const password = await this.readReplicationPassword(primaryDataDir);
+    const slot = replicationSlotName(standbyDir);
+
+    // Drop a leftover slot first. --create-slot then reserves WAL from this
+    // backup's start, which a slot created earlier would not cover.
+    await this.dropReplicationSlotIfPresent(primaryDataDir, primaryPort, slot);
+
+    try {
+      const stderr = new StderrTail();
+      const child = Bun.spawn(
+        this.buildUnprivilegedCommand(this.requireBinary('pg_basebackup'), [
+          '-h',
+          '127.0.0.1',
+          '-p',
+          String(primaryPort),
+          '-U',
+          'kinglet_admin',
+          '-D',
+          standbyDir,
+          '-X',
+          'stream',
+          '-R',
+          '--slot',
+          slot,
+          '--create-slot',
+          '--checkpoint=fast',
+        ]),
+        { env: childEnv(password), stdout: 'ignore', stderr: 'pipe' }
+      );
+
+      const drained = this.collectStderr(child.stderr, stderr);
+      const exitCode = await child.exited;
+
+      await drained;
+
+      if (exitCode !== 0) {
+        throw new Error(
+          withDetail(`pg_basebackup failed for standby at ${standbyDir}`, stderr.text())
+        );
+      }
+
+      // pg_basebackup copies every file from the primary including the
+      // kinglet.socket-dir record. That record points at the PRIMARY's socket
+      // directory. If we left it in place, start() would call stop() first and
+      // removeSocketDirectory() would follow the record and delete the primary's
+      // live socket, breaking every subsequent admin connection to the primary.
+      await rm(join(standbyDir, SOCKET_RECORD), { force: true });
+      await rm(join(standbyDir, REPLICATION_PASSWORD_FILE), { force: true });
+      await this.prepareDirectoryForPostgres(standbyDir);
+      await this.refreshReplicaConninfo(standbyDir, primaryDataDir, primaryPort);
+    } catch (error) {
+      // The destination is deleted by the caller, and standby.signal may never
+      // have been written, so a later drop cannot find this slot.
+      await this.dropReplicationSlotAfterFailure(primaryDataDir, primaryPort, slot);
+
+      throw error;
+    }
+  }
+
+  /** Point an existing standby at the primary's current port, slot, and scram password. */
+  async refreshReplicaConninfo(
+    standbyDir: string,
+    primaryDataDir: string,
+    primaryPort: number
+  ): Promise<void> {
+    const password = await this.readReplicationPassword(primaryDataDir);
+    const slot = replicationSlotName(standbyDir);
+
+    await this.ensureReplicationSlot(primaryDataDir, primaryPort, slot);
+
+    const confPath = join(resolve(standbyDir), 'postgresql.auto.conf');
+    const existing = (await Bun.file(confPath).exists()) ? await Bun.file(confPath).text() : '';
+    const stripped = existing
+      .replace(/^primary_conninfo\s*=.*$/gm, '')
+      .replace(/^primary_slot_name\s*=.*$/gm, '')
+      .trimEnd();
+    const conninfo = `host=127.0.0.1 port=${primaryPort} user=kinglet_admin password=${password}`;
+
+    await Bun.write(
+      confPath,
+      `${stripped}\nprimary_conninfo = '${conninfo}'\nprimary_slot_name = '${slot}'\n`
+    );
+
+    if (process.getuid?.() === 0) {
+      await this.runCommand(['chown', 'bun:bun', confPath]);
+    }
+
+    await chmod(confPath, 0o600);
   }
 
   private resolveBinDir(): string | null {
@@ -308,10 +425,7 @@ export class PostgresProcessManager {
       );
     }
 
-    await Bun.write(
-      join(templateDir, 'pg_hba.conf'),
-      'local all kinglet_admin trust\nhost all all 0.0.0.0/0 scram-sha-256\nhost all all ::/0 scram-sha-256\n'
-    );
+    await Bun.write(join(templateDir, 'pg_hba.conf'), withReplicationHba(BASE_HBA));
     // PATH pg_config can be an older client, or the PGDG wrapper that exits
     // when it cannot see a server binary. The share directory has to belong
     // to the server this process will exec.
@@ -321,12 +435,244 @@ export class PostgresProcessManager {
       (await Bun.file(join(shareDir, 'extension', 'pg_stat_statements.control')).exists());
     await Bun.write(
       join(templateDir, 'postgresql.auto.conf'),
-      "password_encryption='scram-sha-256'\n" +
-        (hasStatisticsExtension ? "shared_preload_libraries='pg_stat_statements'\n" : '')
+      withReplicaSettings(
+        "password_encryption='scram-sha-256'\n" +
+          (hasStatisticsExtension ? "shared_preload_libraries='pg_stat_statements'\n" : '')
+      )
     );
     await this.prepareDirectoryForPostgres(templateDir);
 
     return templateDir;
+  }
+
+  private async ensureReplicaSourceConfig(dataDir: string): Promise<void> {
+    const hbaPath = join(dataDir, 'pg_hba.conf');
+    const existingHba = (await Bun.file(hbaPath).exists())
+      ? await Bun.file(hbaPath).text()
+      : BASE_HBA;
+
+    await Bun.write(hbaPath, withReplicationHba(existingHba));
+
+    const autoPath = join(dataDir, 'postgresql.auto.conf');
+    const existingAuto = (await Bun.file(autoPath).exists()) ? await Bun.file(autoPath).text() : '';
+
+    await Bun.write(autoPath, withReplicaSettings(existingAuto));
+  }
+
+  private async ensureReplicationPassword(dataDir: string, port: number): Promise<void> {
+    const sql = this.openAdminConnection(dataDir, port);
+
+    try {
+      const recovery = await sql<
+        { recovering: boolean }[]
+      >`SELECT pg_is_in_recovery() AS recovering`;
+
+      if (recovery[0]?.recovering === true) return;
+
+      const path = join(dataDir, REPLICATION_PASSWORD_FILE);
+      let password = (await Bun.file(path).exists()) ? (await Bun.file(path).text()).trim() : '';
+
+      if (password.length === 0) {
+        password = randomBytes(24).toString('hex');
+        await Bun.write(path, `${password}\n`);
+      }
+
+      // The postmaster runs as bun. A root-owned 0600 file in the data
+      // directory makes pg_basebackup fail when the server tries to copy it.
+      await this.ownSecretFile(path);
+      await sql.unsafe(`ALTER ROLE kinglet_admin PASSWORD ${quoteLiteral(password)}`);
+    } finally {
+      await sql.close({ timeout: 0 });
+    }
+  }
+
+  /**
+   * Drop the standby's physical slot on the primary.
+   *
+   * <p>A port means the primary is running and the slot has to be dropped in
+   * SQL. With no port and no live postmaster, the slot directory is removed
+   * so a deleted pool does not retain WAL after the primary next starts.
+   */
+  async releaseReplicationSlot(
+    primaryDataDir: string,
+    slotName: string,
+    primaryPort: number | null
+  ): Promise<void> {
+    assertReplicationSlotName(slotName);
+    primaryDataDir = resolve(primaryDataDir);
+    const port = primaryPort ?? (await this.readLivePostmasterPort(primaryDataDir));
+
+    if (port != null) {
+      await this.dropReplicationSlotIfPresent(primaryDataDir, port, slotName);
+
+      return;
+    }
+
+    await rm(join(primaryDataDir, 'pg_replslot', slotName), { recursive: true, force: true });
+  }
+
+  /**
+   * `invalidation_reason` was added in PostgreSQL 17. The server picker still
+   * accepts 16, and selecting the column there fails the whole slot check.
+   */
+  private async replicationSlotHasInvalidationReason(sql: SQL): Promise<boolean> {
+    const rows = await sql<{ one: number }[]>`
+      SELECT 1 AS one
+      FROM pg_attribute
+      WHERE attrelid = 'pg_catalog.pg_replication_slots'::regclass
+        AND attname = 'invalidation_reason'
+        AND NOT attisdropped
+    `;
+
+    return rows.length > 0;
+  }
+
+  private async ownSecretFile(path: string): Promise<void> {
+    if (process.getuid?.() === 0) {
+      await this.runCommand(['chown', 'bun:bun', path]);
+    }
+
+    await chmod(path, 0o600);
+  }
+
+  private async ensureReplicationSlot(
+    primaryDataDir: string,
+    primaryPort: number,
+    slotName: string
+  ): Promise<void> {
+    const sql = this.openAdminConnection(primaryDataDir, primaryPort);
+
+    try {
+      const hasInvalidationReason = await this.replicationSlotHasInvalidationReason(sql);
+      const invalidated = replicationSlotInvalidationExpr(hasInvalidationReason);
+      const existing = await sql.unsafe<
+        { invalidated: string | null; wal_status: string | null }[]
+      >(
+        `SELECT ${invalidated} AS invalidated, wal_status FROM pg_replication_slots WHERE slot_name = $1`,
+        [slotName]
+      );
+      const row = existing[0];
+
+      if (row != null && row.invalidated == null && row.wal_status !== 'lost') return;
+
+      if (row != null) await this.dropReplicationSlotOn(sql, slotName);
+
+      await sql`SELECT pg_create_physical_replication_slot(${slotName}, true, false)`;
+    } finally {
+      await sql.close({ timeout: 0 });
+    }
+  }
+
+  private async dropReplicationSlotAfterFailure(
+    primaryDataDir: string,
+    primaryPort: number,
+    slotName: string
+  ): Promise<void> {
+    try {
+      await this.dropReplicationSlotIfPresent(primaryDataDir, primaryPort, slotName);
+    } catch (error) {
+      this.logger.warn(
+        `Replication slot ${slotName} was left on ${primaryDataDir} after a failed backup`,
+        error
+      );
+    }
+  }
+
+  private async dropReplicationSlotIfPresent(
+    primaryDataDir: string,
+    primaryPort: number,
+    slotName: string
+  ): Promise<void> {
+    const sql = this.openAdminConnection(primaryDataDir, primaryPort);
+
+    try {
+      const existing = await sql<
+        { pid: number | null }[]
+      >`SELECT active_pid AS pid FROM pg_replication_slots WHERE slot_name = ${slotName}`;
+
+      if (existing.length === 0) return;
+
+      await this.dropReplicationSlotOn(sql, slotName, existing[0]?.pid ?? null);
+    } finally {
+      await sql.close({ timeout: 0 });
+    }
+  }
+
+  private async dropReplicationSlotOn(
+    sql: SQL,
+    slotName: string,
+    activePid: number | null = null
+  ): Promise<void> {
+    // pg_terminate_backend only signals the WAL sender. The slot stays active
+    // until that process exits, and pg_drop_replication_slot fails until then.
+    const deadline = Date.now() + 5_000;
+    let pid = activePid;
+
+    while (Date.now() < deadline) {
+      if (pid != null) {
+        await sql`SELECT pg_terminate_backend(${pid})`;
+      }
+
+      const rows = await sql<{ pid: number | null }[]>`
+        SELECT active_pid AS pid FROM pg_replication_slots WHERE slot_name = ${slotName}
+      `;
+
+      if (rows.length === 0) return;
+
+      pid = rows[0]?.pid ?? null;
+
+      if (pid == null) {
+        try {
+          await sql`SELECT pg_drop_replication_slot(${slotName})`;
+
+          return;
+        } catch (error) {
+          if (!isActiveReplicationSlot(error)) throw error;
+
+          const next = await this.replicationSlotPid(sql, slotName);
+
+          if (next === undefined) return;
+
+          pid = next;
+        }
+      }
+
+      await Bun.sleep(20);
+    }
+
+    throw new Error(
+      `Replication slot ${slotName} stayed active after its WAL sender was terminated`
+    );
+  }
+
+  /** Undefined means the slot is already gone. */
+  private async replicationSlotPid(sql: SQL, slotName: string): Promise<number | null | undefined> {
+    const rows = await sql<{ pid: number | null }[]>`
+      SELECT active_pid AS pid FROM pg_replication_slots WHERE slot_name = ${slotName}
+    `;
+
+    if (rows.length === 0) return undefined;
+
+    return rows[0]?.pid ?? null;
+  }
+
+  private async readLivePostmasterPort(dataDir: string): Promise<number | null> {
+    if (!(await this.recordedPidIsAlive(dataDir))) return null;
+
+    const port = Number((await Bun.file(join(dataDir, 'postmaster.pid')).text()).split('\n')[3]);
+
+    return Number.isInteger(port) && port > 0 ? port : null;
+  }
+
+  private async readReplicationPassword(primaryDataDir: string): Promise<string> {
+    const path = join(primaryDataDir, REPLICATION_PASSWORD_FILE);
+    const password = (await Bun.file(path).exists()) ? (await Bun.file(path).text()).trim() : '';
+
+    if (password.length === 0) {
+      throw new Error(`Primary at ${primaryDataDir} has no replication password`);
+    }
+
+    return password;
   }
 
   private async createSocketDirectory(dataDir: string): Promise<string> {
@@ -620,6 +966,89 @@ export interface PostgresBinCandidate {
   directory: string;
   version: number | null;
   hasServer: boolean;
+}
+
+/**
+ * Replication over TCP uses scram. A trust rule for `kinglet_admin` replication
+ * is removed so a local process cannot copy the cluster without the password.
+ */
+export function withReplicationHba(existing: string): string {
+  const lines = existing
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .filter(line => !/^host\s+replication\s+kinglet_admin\s+\S+\s+trust$/i.test(line));
+
+  for (const rule of REPLICATION_HBA) {
+    if (!lines.includes(rule)) lines.push(rule);
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Column expression for whether a slot has been invalidated.
+ *
+ * <p>PostgreSQL 17 added `invalidation_reason`. On 16 the same fact is
+ * `wal_status = 'lost'`, and naming the newer column makes the query fail.
+ */
+export function replicationSlotInvalidationExpr(hasInvalidationReason: boolean): string {
+  return hasInvalidationReason ? 'invalidation_reason' : 'NULL::text';
+}
+
+/** Stable physical-slot name for one standby directory. */
+export function replicationSlotName(standbyDir: string): string {
+  const digest = createHash('sha256').update(resolve(standbyDir)).digest('hex').substring(0, 16);
+
+  return `kinglet_${digest}`;
+}
+
+function isActiveReplicationSlot(error: unknown): boolean {
+  if (typeof error === 'object' && error != null && 'errno' in error && error.errno === '55006') {
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message : '';
+
+  return message.includes('is active');
+}
+
+function assertReplicationSlotName(slotName: string): void {
+  if (!/^kinglet_[0-9a-f]{16}$/.test(slotName)) {
+    throw new Error(`Refusing to remove replication slot ${slotName}`);
+  }
+}
+
+/** Add the WAL-sender settings a primary needs. Leave a value that is already set. */
+export function withReplicaSettings(existing: string): string {
+  const settings = ["wal_level='replica'", 'max_wal_senders=10', 'max_replication_slots=10'];
+  let next = existing;
+
+  for (const setting of settings) {
+    const name = setting.split('=')[0] ?? setting;
+
+    if (new RegExp(`^${name}\\s*=`, 'm').test(next)) continue;
+
+    next = `${next.trimEnd()}${next.trim().length > 0 ? '\n' : ''}${setting}\n`;
+  }
+
+  return next.endsWith('\n') ? next : `${next}\n`;
+}
+
+function quoteLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function childEnv(password: string): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value != null) env[key] = value;
+  }
+
+  env.PGPASSWORD = password;
+
+  return env;
 }
 
 /** Highest installed server. An unversioned PATH entry is only the fallback. */

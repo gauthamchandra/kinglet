@@ -30,6 +30,7 @@ import {
   buildClusterName,
   buildDataPlaneInstanceKey,
   buildUserName,
+  InstanceType,
   isValidUserId,
   MUTABLE_USER_FIELDS,
   normalizeEnum,
@@ -311,9 +312,10 @@ export class UserService {
   }
 
   /**
-   * Upsert the role for `userId` on every instance currently running in the
-   * cluster. No-op when no instance repository is wired (control-plane-only
-   * tests that never set up real Postgres).
+   * Upsert the role for `userId` on every PRIMARY instance currently running in
+   * the cluster. READ_POOL instances are streaming standbys — roles arrive through
+   * WAL replication from the primary, so issuing DDL on them directly would fail
+   * and is unnecessary. No-op when no instance repository is wired.
    */
   private async applyUserToAllInstances(
     project: string,
@@ -334,6 +336,8 @@ export class UserService {
 
     try {
       for (const instance of clusterInstances) {
+        if (instance.instanceType === InstanceType.READ_POOL) continue;
+
         const parsed = parseInstanceName(instance.name);
 
         if (!parsed) continue;
@@ -356,8 +360,10 @@ export class UserService {
   }
 
   /**
-   * Drop the role for `userId` from every instance currently running in the
-   * cluster. No-op when no instance repository is wired.
+   * Drop the role for `userId` from every PRIMARY instance currently running in
+   * the cluster. READ_POOL instances are streaming standbys — the drop propagates
+   * via WAL replication and issuing DDL directly on them would fail. No-op when
+   * no instance repository is wired.
    */
   private async dropUserFromAllInstances(
     project: string,
@@ -377,6 +383,8 @@ export class UserService {
 
     try {
       for (const instance of clusterInstances) {
+        if (instance.instanceType === InstanceType.READ_POOL) continue;
+
         const parsed = parseInstanceName(instance.name);
 
         if (!parsed) continue;

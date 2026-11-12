@@ -3,7 +3,17 @@ import { ConfigSchema } from '@/config/schema.ts';
 import type { HttpMethod, RouteDefinition, RouteRequest } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
+import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { AlloyDbService, DEFAULT_ALLOYDB_DATA_PLANE_OPTIONS } from './index.ts';
+import { InstanceRepository } from './instance-repository.ts';
+import {
+  buildInstanceName,
+  buildUserName,
+  InstanceType,
+  instanceRequestToRecord,
+  userRequestToRecord,
+} from './types.ts';
+import { UserRepository } from './user-repository.ts';
 
 /**
  * The full route table, transcribed from the discovery document's `flatPath` for
@@ -660,5 +670,103 @@ describe('data plane', () => {
     expect(dataPlaneService.getDataPlanePort(PROJECT, LOCATION, CLUSTER, 'ghost')).toBeNull();
 
     await dataPlaneService.stop();
+  });
+});
+
+describe('read pool rehydration', () => {
+  const PROJECT = 'p1';
+  const LOCATION = 'us-central1';
+  const CLUSTER = 'c1';
+
+  async function seedInstance(instanceId: string, instanceType: string): Promise<void> {
+    const instances = new InstanceRepository(storage);
+
+    await instances.initialize();
+    await instances.create(
+      instanceRequestToRecord(buildInstanceName(PROJECT, LOCATION, CLUSTER, instanceId), {
+        instanceType,
+      })
+    );
+  }
+
+  async function seedUser(): Promise<void> {
+    const users = new UserRepository(storage);
+
+    await users.initialize();
+    await users.create(
+      userRequestToRecord(buildUserName(PROJECT, LOCATION, CLUSTER, 'app'), {
+        password: 'secret',
+      })
+    );
+  }
+
+  async function boot(dataPlane: RecordingDataPlane): Promise<void> {
+    const started = new AlloyDbService(
+      storage,
+      new Logger('test', 'error'),
+      { enabled: true },
+      dataPlane
+    );
+
+    await started.initialize();
+  }
+
+  test('restarts a read pool from the primary and restores users only on the primary', async () => {
+    const dataPlane = new RecordingDataPlane({ port: 5540 });
+
+    await seedInstance('primary', InstanceType.PRIMARY);
+    await seedInstance('pool', InstanceType.READ_POOL);
+    await seedUser();
+    await boot(dataPlane);
+
+    expect(dataPlane.calls).toEqual([
+      'start:p1/us-central1/c1/primary:postgres',
+      'startReplica:p1/us-central1/c1/pool:5540',
+      'upsertUser:p1/us-central1/c1/primary:app',
+    ]);
+  });
+
+  test('skips a read pool when its cluster has no primary', async () => {
+    const dataPlane = new RecordingDataPlane({ port: 5540 });
+
+    await seedInstance('pool', InstanceType.READ_POOL);
+    await boot(dataPlane);
+
+    expect(dataPlane.calls).toEqual([]);
+  });
+
+  test('skips a read pool when the primary is not running', async () => {
+    const dataPlane = new RecordingDataPlane({ port: 5540, reportedPort: null });
+
+    await seedInstance('primary', InstanceType.PRIMARY);
+    await seedInstance('pool', InstanceType.READ_POOL);
+    await seedUser();
+    await boot(dataPlane);
+
+    expect(dataPlane.calls).toEqual([
+      'start:p1/us-central1/c1/primary:postgres',
+      'upsertUser:p1/us-central1/c1/primary:app',
+    ]);
+  });
+
+  test('leaves a read pool degraded when the standby restart throws', async () => {
+    const dataPlane = new RecordingDataPlane({ port: 5540 });
+
+    dataPlane.startReplicaInstance = async (project, instance, primaryPort) => {
+      dataPlane.calls.push(`startReplica:${project}/${instance}:${primaryPort}`);
+
+      throw new Error('backup failed');
+    };
+
+    await seedInstance('primary', InstanceType.PRIMARY);
+    await seedInstance('pool', InstanceType.READ_POOL);
+    await seedUser();
+    await boot(dataPlane);
+
+    expect(dataPlane.calls).toEqual([
+      'start:p1/us-central1/c1/primary:postgres',
+      'startReplica:p1/us-central1/c1/pool:5540',
+      'upsertUser:p1/us-central1/c1/primary:app',
+    ]);
   });
 });
