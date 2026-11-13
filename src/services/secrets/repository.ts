@@ -104,6 +104,35 @@ export class SecretRepository {
     return toStored(created);
   }
 
+  async listByParent(
+    parent: string,
+    offset: number,
+    limit: number
+  ): Promise<{ secrets: StoredSecret[]; total: number; hasMore: boolean }> {
+    const result = await this.storage.find<SecretRow>(SECRETS_TABLE, {
+      filter: { conditions: [{ field: 'parent', operator: 'eq', value: parent }] },
+      sort: [
+        { field: 'createTime', direction: 'desc' },
+        { field: 'name', direction: 'asc' },
+      ],
+      pagination: { limit, offset },
+    });
+
+    return { secrets: result.data.map(toStored), total: result.total, hasMore: result.hasMore };
+  }
+
+  async deleteByName(name: string): Promise<void> {
+    await this.storage.deleteMany(SECRETS_TABLE, {
+      conditions: [{ field: 'name', operator: 'eq', value: name }],
+    });
+  }
+
+  async deleteVersions(secretName: string): Promise<void> {
+    await this.storage.deleteMany(VERSIONS_TABLE, {
+      conditions: [{ field: 'secretName', operator: 'eq', value: secretName }],
+    });
+  }
+
   async insertVersion(version: StoredVersion): Promise<StoredVersion> {
     const created = await this.storage.create<VersionRow>(VERSIONS_TABLE, {
       secretName: version.secretName,

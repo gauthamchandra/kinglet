@@ -3,7 +3,7 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { crc32cString } from '@/shared/utils/crc32c.ts';
 import { SecretRepository } from './repository.ts';
 import { SecretManager } from './service.ts';
-import { SecretManagerError, secretNameIn } from './types.ts';
+import { formatSecretName, SecretManagerError, secretNameIn } from './types.ts';
 
 const FIXED = new Date('2026-06-01T00:00:00.000Z');
 
@@ -86,9 +86,137 @@ describe('SecretManager', () => {
     expect(meta).not.toHaveProperty('data');
     expect(meta.state).toBe('ENABLED');
   });
+
+  test('lists a global parent newest first across pages without regional secrets', async () => {
+    const manager = await managerWith(ticking());
+    const global = { project: 'demo', location: null };
+    const regional = { project: 'demo', location: 'us-central1' };
+
+    for (const id of ['a', 'b', 'c']) {
+      await manager.createSecret(secretNameIn(global, id), input());
+    }
+
+    await manager.createSecret(secretNameIn(regional, 'r'), { ...input(), replication: null });
+    await manager.createSecret(secretNameIn({ project: 'other', location: null }, 'o'), input());
+
+    const first = await manager.listSecrets(global, { pageSize: 2, pageToken: null, filter: null });
+
+    expect(first.secrets).toHaveLength(2);
+    expect(first.totalSize).toBe(3);
+    expect(first.nextPageToken).toBeTypeOf('string');
+
+    const second = await manager.listSecrets(global, {
+      pageSize: 2,
+      pageToken: first.nextPageToken,
+      filter: null,
+    });
+    const listed = [...first.secrets, ...second.secrets];
+    const times = listed.map(secret => Date.parse(secret.createTime));
+
+    expect(second.nextPageToken).toBeNull();
+    expect(listed.map(secret => secret.name).sort()).toEqual([
+      'projects/demo/secrets/a',
+      'projects/demo/secrets/b',
+      'projects/demo/secrets/c',
+    ]);
+    expect(times.every((time, index) => index === 0 || time <= (times[index - 1] ?? time))).toBe(
+      true
+    );
+
+    const regionalPage = await manager.listSecrets(regional, {
+      pageSize: null,
+      pageToken: null,
+      filter: null,
+    });
+
+    expect(regionalPage.secrets.map(secret => secret.name)).toEqual([
+      'projects/demo/locations/us-central1/secrets/r',
+    ]);
+    expect(regionalPage.totalSize).toBe(1);
+    expect(regionalPage.nextPageToken).toBeNull();
+  });
+
+  test('a non-empty list filter is UNIMPLEMENTED', async () => {
+    const manager = await managerWith();
+    const listed = manager.listSecrets(
+      { project: 'demo', location: null },
+      { pageSize: null, pageToken: null, filter: 'labels.team=core' }
+    );
+
+    await expect(listed).rejects.toBeInstanceOf(SecretManagerError);
+    await expect(listed).rejects.toHaveProperty('code', 'UNIMPLEMENTED');
+  });
+
+  test('delete checks the etag and removes the secret', async () => {
+    const manager = await managerWith();
+    const name = secretNameIn({ project: 'demo', location: 'us-central1' }, 'gone');
+
+    await manager.createSecret(name, { ...input(), replication: null });
+
+    const stale = manager.deleteSecret(name, '2');
+
+    await expect(stale).rejects.toHaveProperty('code', 'ABORTED');
+
+    await manager.deleteSecret(name, '1');
+
+    await expect(manager.getSecret(name)).rejects.toHaveProperty('code', 'NOT_FOUND');
+
+    const again = manager.deleteSecret(name, null);
+
+    await expect(again).rejects.toHaveProperty('code', 'NOT_FOUND');
+    await expect(again).rejects.toHaveProperty('resourceName', formatSecretName(name));
+  });
+
+  test('a recreated secret starts at version 1 and cannot read old payloads', async () => {
+    const manager = await managerWith();
+    const name = secretNameIn({ project: 'demo', location: null }, 'reborn');
+    const latest = { secret: name, selector: { kind: 'latest' as const } };
+
+    await manager.createSecret(name, input());
+    await manager.addVersion(name, { data: utf8('old-1'), crc32c: null });
+    await manager.addVersion(name, { data: utf8('old-2'), crc32c: null });
+    await manager.deleteSecret(name, null);
+    await manager.createSecret(name, input());
+
+    const missing = manager.accessVersion(latest, 'projects/demo/secrets/reborn/versions/latest');
+
+    await expect(missing).rejects.toHaveProperty('code', 'NOT_FOUND');
+
+    const added = await manager.addVersion(name, { data: utf8('new'), crc32c: null });
+    const accessed = await manager.accessVersion(
+      latest,
+      'projects/demo/secrets/reborn/versions/latest'
+    );
+
+    expect(added.name).toBe('projects/demo/secrets/reborn/versions/1');
+    expect(Buffer.from(accessed.data).toString()).toBe('new');
+
+    const second = manager.getVersion(
+      { secret: name, selector: { kind: 'number', number: 2 } },
+      'projects/demo/secrets/reborn/versions/2'
+    );
+
+    await expect(second).rejects.toHaveProperty('code', 'NOT_FOUND');
+  });
+
+  test('a delete racing an addVersion leaves no orphan version rows', async () => {
+    const manager = await managerWith();
+    const name = secretNameIn({ project: 'demo', location: null }, 'race-delete');
+
+    await manager.createSecret(name, input());
+    await Promise.allSettled([
+      manager.addVersion(name, { data: utf8('x'), crc32c: null }),
+      manager.deleteSecret(name, null),
+    ]);
+    await manager.createSecret(name, input());
+
+    const added = await manager.addVersion(name, { data: utf8('y'), crc32c: null });
+
+    expect(added.name).toBe('projects/demo/secrets/race-delete/versions/1');
+  });
 });
 
-async function managerWith(): Promise<SecretManager> {
+async function managerWith(clock: () => Date = () => FIXED): Promise<SecretManager> {
   const storage = new StorageManager();
 
   await storage.initialize({ type: 'memory' });
@@ -97,7 +225,13 @@ async function managerWith(): Promise<SecretManager> {
 
   await repository.initialize();
 
-  return new SecretManager(repository, () => FIXED);
+  return new SecretManager(repository, clock);
+}
+
+function ticking(): () => Date {
+  let tick = 0;
+
+  return () => new Date(FIXED.getTime() + tick++ * 1000);
 }
 
 function input() {

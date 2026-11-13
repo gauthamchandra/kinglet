@@ -23,9 +23,12 @@ import type { WireDialect, WireMessage } from './wire.ts';
 import {
   decodeAdd,
   decodeCreate,
+  decodeDelete,
   decodeGet,
+  decodeList,
   decodeVersion,
   encodeAccessed,
+  encodeList,
   encodeSecret,
   encodeVersion,
   GRPC_DIALECT,
@@ -91,7 +94,25 @@ const GLOBAL_PREFIX = '/v1/projects/:project';
 const REGIONAL_PREFIX = '/v1/projects/:project/locations/:location';
 
 const RPC_TABLE = {
-  ListSecrets: deferred(),
+  ListSecrets: bound({
+    http: {
+      method: 'GET',
+      suffix: '/secrets',
+      id: 'secrets.list',
+      toMessage: parts => ({
+        parent: parentResource(parts),
+        pageSize: parts.query('pageSize'),
+        pageToken: parts.query('pageToken'),
+        filter: parts.query('filter'),
+      }),
+    },
+    call: async (manager, message, dialect) => {
+      const decoded = decodeList(message);
+      const page = await manager.listSecrets(parseSecretParent(decoded.parentRaw), decoded);
+
+      return encodeList(page, dialect);
+    },
+  }),
   CreateSecret: bound({
     http: {
       method: 'POST',
@@ -152,7 +173,21 @@ const RPC_TABLE = {
     },
   }),
   UpdateSecret: deferred(),
-  DeleteSecret: deferred(),
+  DeleteSecret: bound({
+    http: {
+      method: 'DELETE',
+      suffix: '/secrets/:secret',
+      id: 'secrets.delete',
+      toMessage: parts => ({ name: secretResource(parts), etag: parts.query('etag') }),
+    },
+    call: async (manager, message) => {
+      const decoded = decodeDelete(message);
+
+      await manager.deleteSecret(parseSecretName(decoded.nameRaw), decoded.etag);
+
+      return {};
+    },
+  }),
   ListSecretVersions: deferred(),
   GetSecretVersion: bound({
     http: {

@@ -2,12 +2,24 @@ import { describe, expect, test } from 'bun:test';
 import {
   parseSecretName,
   parseSecretParent,
+  resolveListPageSize,
   resolveSpec,
   SecretManagerError,
   secretNameIn,
 } from './types.ts';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
+
+describe('list page size', () => {
+  test('defaults missing, zero, and negative to 100 and caps at 25000', () => {
+    expect(resolveListPageSize(null)).toBe(100);
+    expect(resolveListPageSize(0)).toBe(100);
+    expect(resolveListPageSize(-5)).toBe(100);
+    expect(resolveListPageSize(7)).toBe(7);
+    expect(resolveListPageSize(25000)).toBe(25000);
+    expect(resolveListPageSize(25001)).toBe(25000);
+  });
+});
 
 describe('secret names', () => {
   test('round-trips global and regional parents', () => {
