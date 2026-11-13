@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.0.0](https://github.com/gauthamchandra/kinglet/compare/v3.3.0...v4.0.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **postgres:** Cloud SQL and AlloyDB database files from 3.x cannot be opened. 3.x stored each database as its own PGlite cluster (Postgres 18.3, wasm32, float8 passed by reference) under `data/cloudsql/<project>/<instance>/<database>` and `data/alloydb/...`, next to `data/emulator.db` (or beside `SQLITE_PATH`). 4.0 runs 64-bit Postgres 18, which rejects those files (`USE_FLOAT8_BYVAL`). Kinglet will not delete them: move the instance directory aside and start again, and the instance comes up empty while the control-plane rows in SQLite remain. There is no import. To keep querying the old data, stay on 3.3.0 (`ghcr.io/gauthamchandra/kinglet:3` or `:3.3.0`). Tag `3` does not move with this release. `latest` does.
+
+### Features
+
+* **alloydb:** Run AlloyDB instances on real Postgres ([#123](https://github.com/gauthamchandra/kinglet/issues/123)) ([3871f1f](https://github.com/gauthamchandra/kinglet/commit/3871f1fbb7e291f693bf6558f3f808014675d810))
+* **alloydb:** run read pools as streaming replicas ([#127](https://github.com/gauthamchandra/kinglet/issues/127)) ([a7ca1a5](https://github.com/gauthamchandra/kinglet/commit/a7ca1a5796e6884fab2529ff09055d271536a266))
+* **cloudsql:** Apply databaseFlags as Postgres GUCs ([#124](https://github.com/gauthamchandra/kinglet/issues/124)) ([a385e8d](https://github.com/gauthamchandra/kinglet/commit/a385e8d3a12de58d0dc9e4ab537beabb5f992a52))
+* **cloudsql:** Back Cloud SQL instances with real Postgres ([#119](https://github.com/gauthamchandra/kinglet/issues/119)) ([30e1a2c](https://github.com/gauthamchandra/kinglet/commit/30e1a2c4c83d346405575b814f7ac3c1c507a0aa))
+* **cloudsql:** Optional per-instance Postgres container mode ([#122](https://github.com/gauthamchandra/kinglet/issues/122)) ([ed0541d](https://github.com/gauthamchandra/kinglet/commit/ed0541d28393c5227ffe243386bd2895a545c0e1))
+* **data-plane:** remove the PGlite data plane ([#125](https://github.com/gauthamchandra/kinglet/issues/125)) ([64a2af7](https://github.com/gauthamchandra/kinglet/commit/64a2af7683c2b8584677dee5eee982a2b4309017))
+* **postgres:** Install PostgreSQL 18 and extensions in the image ([#121](https://github.com/gauthamchandra/kinglet/issues/121)) ([a56ff96](https://github.com/gauthamchandra/kinglet/commit/a56ff9616de8e6b733ae17b3105c11c5a16f0fd1))
+* **postgres:** Supervise a real postgres server per data directory ([#118](https://github.com/gauthamchandra/kinglet/issues/118)) ([3aa29c8](https://github.com/gauthamchandra/kinglet/commit/3aa29c8df5dcbd7b1d45d01167abb421011ede45))
+* **secrets:** create and get secrets over REST and gRPC ([#112](https://github.com/gauthamchandra/kinglet/issues/112)) ([790fd12](https://github.com/gauthamchandra/kinglet/commit/790fd12c9d09ab919aaf891a8df2d9b968e899d8))
+
 ## [3.3.0](https://github.com/gauthamchandra/kinglet/compare/v3.2.0...v3.3.0) (2026-11-06)
 
 
