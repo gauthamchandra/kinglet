@@ -13,6 +13,8 @@ import type { Logger } from '@/shared/utils/logger.ts';
 import { PortAllocator } from '@/shared/utils/port-allocator.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import {
+  type DatabaseFlag,
+  DatabaseFlagError,
   type DataPlaneLogin,
   type PostgresDataPlane,
   RoleAlreadyExistsError,
@@ -65,6 +67,33 @@ interface RunningInstance {
 
 const SUPERUSER_ROLE = 'cloudsqlsuperuser';
 const RESERVED_ROLES = new Set(['kinglet_admin', SUPERUSER_ROLE]);
+
+/**
+ * SQLSTATEs Postgres returns when a flag name or value is invalid.
+ * All map to INVALID_ARGUMENT at the service layer.
+ *
+ * 42704 — undefined_object (unknown GUC name)
+ * 22023 — invalid_parameter_value (bad value for an existing GUC)
+ * 55P02 — cant_change_runtime_param (read-only parameter)
+ * F0000 — config_file_error (generic ALTER SYSTEM rejection)
+ */
+const INVALID_FLAG_SQLSTATES = new Set(['42704', '22023', '55P02', 'F0000']);
+
+/**
+ * GUC names are identifiers: start with a letter or underscore, followed by
+ * letters, digits, underscores, or dots (for extension-namespaced params).
+ * Validated before interpolating into SQL to prevent injection.
+ */
+function isValidFlagName(name: string): boolean {
+  return /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(name);
+}
+
+/** Command-line settings the process manager owns. A flag cannot override them. */
+const OWNED_SETTINGS: ReadonlySet<string> = new Set([
+  'port',
+  'listen_addresses',
+  'unix_socket_directories',
+]);
 
 /** Names the data plane owns, plus Postgres's `pg_` prefix. The admin API must not alter them. */
 export function isReservedCloudSqlRole(name: string): boolean {
@@ -126,6 +155,8 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
   private warnedUnavailable = false;
   /** How long a new standby may take to report `streaming` before it is rebuilt. */
   private replicaStreamTimeoutMs = 5_000;
+  /** Flags last successfully applied per instance, keyed by instanceKey. */
+  private readonly appliedFlags = new Map<string, DatabaseFlag[]>();
 
   constructor(
     private readonly logger: Logger,
@@ -579,6 +610,168 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     });
   }
 
+  async applyDatabaseFlags(
+    project: string,
+    instance: string,
+    flags: DatabaseFlag[],
+    databases: string[]
+  ): Promise<void> {
+    const key = instanceKey(project, instance);
+
+    await this.mutex.runExclusively(key, async () => {
+      const current = this.running.get(key);
+
+      if (current == null) return;
+
+      const normalized = flags.map(flag => ({ name: flag.name.toLowerCase(), value: flag.value }));
+      const previousFlags = this.appliedFlags.get(key) ?? [];
+
+      if (normalized.length === 0 && previousFlags.length === 0) return;
+
+      for (const flag of normalized) {
+        if (!isValidFlagName(flag.name)) {
+          throw new DatabaseFlagError(`Invalid database flag name: ${JSON.stringify(flag.name)}`);
+        }
+
+        if (OWNED_SETTINGS.has(flag.name)) {
+          throw new DatabaseFlagError(
+            `database flag ${JSON.stringify(flag.name)} is managed by kinglet and cannot be set`
+          );
+        }
+      }
+
+      const autoPath = join(current.dataDir, 'postgresql.auto.conf');
+      const previousAuto = (await Bun.file(autoPath).exists())
+        ? await Bun.file(autoPath).text()
+        : '';
+      const touched = [
+        ...previousFlags
+          .filter(prev => !normalized.some(flag => flag.name === prev.name))
+          .map(prev => prev.name),
+        ...normalized.map(flag => flag.name),
+      ];
+
+      try {
+        await this.admin(current, async sql => {
+          for (const name of touched.slice(0, touched.length - normalized.length)) {
+            await sql.unsafe(`ALTER SYSTEM RESET ${name}`);
+          }
+
+          for (const flag of normalized) {
+            try {
+              await sql.unsafe(`ALTER SYSTEM SET ${flag.name} = ${quoteLiteral(flag.value)}`);
+            } catch (error) {
+              const code = postgresErrorCode(error);
+
+              if (code != null && INVALID_FLAG_SQLSTATES.has(code)) {
+                throw new DatabaseFlagError(
+                  `database flag ${JSON.stringify(flag.name)}: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`
+                );
+              }
+
+              throw error;
+            }
+          }
+        });
+      } catch (error) {
+        await Bun.write(autoPath, previousAuto);
+
+        throw error;
+      }
+
+      // pending_restart is updated when the server re-reads the file.
+      let needsRestart = false;
+
+      try {
+        await this.admin(current, async sql => {
+          await this.waitForConfigReload(sql);
+
+          for (const name of touched) {
+            if (await this.flagNeedsRestart(sql, name)) needsRestart = true;
+          }
+        });
+      } catch (error) {
+        await Bun.write(autoPath, previousAuto);
+
+        try {
+          await this.admin(current, async sql => {
+            await sql`SELECT pg_reload_conf()`;
+          });
+        } catch {
+          // The file is back. A later start reads it if this reload cannot run.
+        }
+
+        throw error;
+      }
+
+      if (!needsRestart) {
+        this.appliedFlags.set(key, normalized);
+
+        return;
+      }
+
+      try {
+        await this.startInstanceLocked(project, instance, databases);
+        this.appliedFlags.set(key, normalized);
+      } catch (restartError) {
+        try {
+          await Bun.write(autoPath, previousAuto);
+          await this.startInstanceLocked(project, instance, databases);
+        } catch {
+          // Recovery failed; the server stays down and the settings row is rolled back.
+        }
+
+        throw restartError;
+      }
+    });
+  }
+
+  /**
+   * `pg_reload_conf` only requests SIGHUP. `pending_restart` stays stale until
+   * the postmaster finishes that reload. The formatted load time keeps
+   * microseconds, so a reload inside the same millisecond still counts.
+   */
+  private async waitForConfigReload(sql: SQL): Promise<void> {
+    const before = await sql<{ loaded: string }[]>`
+      SELECT to_char(pg_conf_load_time(), 'YYYY-MM-DD HH24:MI:SS.US') AS loaded
+    `;
+    const previous = before[0]?.loaded;
+
+    await sql`SELECT pg_reload_conf()`;
+
+    const deadline = Date.now() + 2_000;
+
+    while (Date.now() < deadline) {
+      const after = await sql<{ loaded: string }[]>`
+        SELECT to_char(pg_conf_load_time(), 'YYYY-MM-DD HH24:MI:SS.US') AS loaded
+      `;
+      const next = after[0]?.loaded;
+
+      if (
+        typeof previous === 'string' &&
+        previous.length > 0 &&
+        typeof next === 'string' &&
+        next > previous
+      ) {
+        return;
+      }
+
+      await Bun.sleep(20);
+    }
+
+    throw new Error('Postgres did not reload its configuration');
+  }
+
+  private async flagNeedsRestart(sql: SQL, name: string): Promise<boolean> {
+    const rows = await sql<
+      { pending_restart: boolean }[]
+    >`SELECT pending_restart FROM pg_settings WHERE name = ${name}`;
+
+    return rows[0]?.pending_restart === true;
+  }
+
   private async runningInstance(
     project: string,
     instance: string,
@@ -707,6 +900,8 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
     await this.stopInstanceLocked(project, instance);
 
     if (dataDir != null) await this.releaseStandbySlot(dataDir);
+
+    this.appliedFlags.delete(instanceKey(project, instance));
 
     if (root == null || dataDir == null) return;
 

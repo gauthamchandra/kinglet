@@ -18,6 +18,24 @@ export class RoleAlreadyExistsError extends Error {
   }
 }
 
+/** A single `{ name, value }` entry from `settings.databaseFlags`. */
+export interface DatabaseFlag {
+  name: string;
+  value: string;
+}
+
+/**
+ * Thrown by the data plane when Postgres rejects a flag name or value.
+ * Maps to INVALID_ARGUMENT at the service layer; all other data-plane errors
+ * stay INTERNAL.
+ */
+export class DatabaseFlagError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatabaseFlagError';
+  }
+}
+
 export interface PostgresDataPlane {
   /**
    * Bring up an instance's endpoint with the given databases open, returning
@@ -63,6 +81,24 @@ export interface PostgresDataPlane {
   ): Promise<void>;
   /** Remove a role from every database in the instance. No-op when nothing is running. */
   dropUser(project: string, instance: string, userName: string): Promise<void>;
+  /**
+   * Apply `settings.databaseFlags` to the running Postgres server.
+   *
+   * The `flags` array is the full replacement list. Flags omitted from a prior
+   * call are reset with `ALTER SYSTEM RESET`. An empty list clears flags that
+   * were applied earlier, and does nothing when none were. A flag Postgres
+   * reports as `pending_restart` restarts the postmaster. No-op when no server
+   * is running for this instance.
+   *
+   * Throws {@link DatabaseFlagError} (→ INVALID_ARGUMENT) when Postgres rejects
+   * the flag name or value; all other errors surface as INTERNAL.
+   */
+  applyDatabaseFlags(
+    project: string,
+    instance: string,
+    flags: DatabaseFlag[],
+    databases: string[]
+  ): Promise<void>;
 }
 
 /**
@@ -111,6 +147,8 @@ export class DisabledDataPlane implements PostgresDataPlane {
   async upsertUser(): Promise<void> {}
 
   async dropUser(): Promise<void> {}
+
+  async applyDatabaseFlags(): Promise<void> {}
 
   getPort(): number | null {
     return null;

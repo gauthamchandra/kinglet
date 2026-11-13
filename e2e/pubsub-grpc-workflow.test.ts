@@ -117,7 +117,7 @@ describe('Cloud Pub/Sub E2E: gRPC — Publisher', () => {
     });
 
     expect(topic.name).toBe(topicName);
-    expect(topic.labels?.['env']).toBe('test');
+    expect(topic.labels?.env).toBe('test');
   });
 
   test('listTopics returns at least one topic via gRPC', async () => {
@@ -339,7 +339,7 @@ describe('Cloud Pub/Sub E2E: gRPC — Subscriber', () => {
     });
 
     expect(snap.name).toBe(snapshotName);
-    expect(snap.labels?.['env']).toBe('snap-test');
+    expect(snap.labels?.env).toBe('snap-test');
   });
 
   test('listSnapshots returns snapshots via gRPC', async () => {

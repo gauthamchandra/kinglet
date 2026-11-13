@@ -433,13 +433,24 @@ export class PostgresProcessManager {
     const hasStatisticsExtension =
       shareDir != null &&
       (await Bun.file(join(shareDir, 'extension', 'pg_stat_statements.control')).exists());
+
+    // Append kinglet defaults to postgresql.conf so that ALTER SYSTEM can
+    // manage postgresql.auto.conf freely. Settings in postgresql.auto.conf
+    // override postgresql.conf, so flags applied via ALTER SYSTEM take
+    // precedence over these defaults without clobbering them.
+    const pgConfPath = join(templateDir, 'postgresql.conf');
+    const pgConfFile = Bun.file(pgConfPath);
+    const existingPgConf = (await pgConfFile.exists()) ? await pgConfFile.text() : '';
+
     await Bun.write(
-      join(templateDir, 'postgresql.auto.conf'),
-      withReplicaSettings(
-        "password_encryption='scram-sha-256'\n" +
-          (hasStatisticsExtension ? "shared_preload_libraries='pg_stat_statements'\n" : '')
-      )
+      pgConfPath,
+      `${existingPgConf}\n# kinglet defaults\npassword_encryption='scram-sha-256'\n` +
+        (hasStatisticsExtension ? "shared_preload_libraries='pg_stat_statements'\n" : '')
     );
+    // Replica WAL settings stay in auto.conf. Kinglet defaults stay in
+    // postgresql.conf so ALTER SYSTEM RESET falls back to them.
+    await Bun.write(join(templateDir, 'postgresql.auto.conf'), withReplicaSettings(''));
+
     await this.prepareDirectoryForPostgres(templateDir);
 
     return templateDir;

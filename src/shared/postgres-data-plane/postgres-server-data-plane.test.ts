@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SQL } from 'bun';
-import { RoleAlreadyExistsError } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import {
+  DatabaseFlagError,
+  RoleAlreadyExistsError,
+} from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { isPortListening } from '@/shared/utils/port-allocator.ts';
 import { isRealPostgresAvailable } from '../../../test-utils/postgres.ts';
@@ -156,6 +159,176 @@ describe('PostgresServerDataPlane without binaries', () => {
     expect(second).toBe(first);
     expect(ports).toEqual([47990, 47990]);
     await plane.stopAll();
+  });
+
+  test('applyDatabaseFlags restores auto.conf when reload fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-reload-'));
+    const autoPath = join(root, 'cloudsql', 'p', 'inst', 'postgresql.auto.conf');
+    const previous = "work_mem = '8MB'\n";
+    const sql = Object.assign(
+      async (strings: TemplateStringsArray) => {
+        if (strings.join('').includes('pg_reload_conf')) throw new Error('reload failed');
+
+        return [{ one: 1 }];
+      },
+      {
+        unsafe: async (statement: string) => {
+          if (statement.startsWith('ALTER SYSTEM')) {
+            await Bun.write(autoPath, `${previous}${statement}\n`);
+          }
+        },
+        close: async () => {},
+      }
+    );
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47971,
+      portRangeEnd: 47971,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+          await Bun.write(join(dataDir, 'postgresql.auto.conf'), previous);
+        },
+        start: async () => {},
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    await plane.startInstance('p', 'inst', ['postgres']);
+    const applied = plane.applyDatabaseFlags(
+      'p',
+      'inst',
+      [{ name: 'work_mem', value: '16MB' }],
+      ['postgres']
+    );
+
+    await expect(applied).rejects.toThrow('reload failed');
+    expect(await Bun.file(autoPath).text()).toBe(previous);
+    await plane.stopAll();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test('applyDatabaseFlags restarts after the reload is observed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-reload-seen-'));
+    const starts: number[] = [];
+    let reloads = 0;
+    let loadReads = 0;
+    const stale = '2020-01-01 00:00:00.000100';
+    const fresh = '2020-01-01 00:00:00.000900';
+    const sql = Object.assign(
+      async (strings: TemplateStringsArray) => {
+        const text = strings.join('');
+
+        if (text.includes('pg_conf_load_time')) {
+          loadReads += 1;
+
+          return [{ loaded: reloads === 0 || loadReads < 3 ? stale : fresh }];
+        }
+
+        if (text.includes('pg_reload_conf')) {
+          reloads += 1;
+
+          return [{ pg_reload_conf: true }];
+        }
+
+        if (text.includes('pending_restart')) {
+          return [{ pending_restart: reloads > 0 && loadReads >= 3 }];
+        }
+
+        return [{ one: 1 }];
+      },
+      { unsafe: async () => {}, close: async () => {} }
+    );
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47973,
+      portRangeEnd: 47973,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+        },
+        start: async () => {
+          starts.push(1);
+        },
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    await plane.startInstance('p', 'inst', ['postgres']);
+    await plane.applyDatabaseFlags(
+      'p',
+      'inst',
+      [{ name: 'max_connections', value: '200' }],
+      ['postgres']
+    );
+
+    expect(starts).toHaveLength(2);
+    await plane.stopAll();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test('applyDatabaseFlags restores auto.conf when the reload is not observed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-reload-unseen-'));
+    const autoPath = join(root, 'cloudsql', 'p', 'inst', 'postgresql.auto.conf');
+    const previous = "work_mem = '8MB'\n";
+    const stuck = '2020-01-01 00:00:00.000100';
+    const sql = Object.assign(
+      async (strings: TemplateStringsArray) => {
+        const text = strings.join('');
+
+        if (text.includes('pg_conf_load_time')) return [{ loaded: stuck }];
+
+        if (text.includes('pg_reload_conf')) return [{ pg_reload_conf: true }];
+
+        return [{ one: 1 }];
+      },
+      {
+        unsafe: async (statement: string) => {
+          if (statement.startsWith('ALTER SYSTEM')) {
+            await Bun.write(autoPath, `${previous}${statement}\n`);
+          }
+        },
+        close: async () => {},
+      }
+    );
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47974,
+      portRangeEnd: 47974,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+          await Bun.write(join(dataDir, 'postgresql.auto.conf'), previous);
+        },
+        start: async () => {},
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    await plane.startInstance('p', 'inst', ['postgres']);
+    const applied = plane.applyDatabaseFlags(
+      'p',
+      'inst',
+      [{ name: 'work_mem', value: '16MB' }],
+      ['postgres']
+    );
+
+    await expect(applied).rejects.toThrow('Postgres did not reload its configuration');
+    expect(await Bun.file(autoPath).text()).toBe(previous);
+    await plane.stopAll();
+    await rm(root, { recursive: true, force: true });
   });
 
   test('startReplicaInstance returns null when postgres is unavailable', async () => {
@@ -1007,6 +1180,237 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
       await expect(Promise.resolve(revived`select id from kept`)).rejects.toThrow(/kept/);
     } finally {
       await revived.close({ timeout: 0 });
+    }
+  });
+
+  test('applyDatabaseFlags sets a reload-level GUC without restarting', async () => {
+    const { plane: started, root } = await plane('sqlite');
+    const port = await started.startInstance('p', 'wm', ['postgres']);
+
+    await started.applyDatabaseFlags('p', 'wm', [{ name: 'work_mem', value: '8MB' }], ['postgres']);
+
+    // Open via the Unix socket so kinglet_admin trust-auth works
+    const conn = new PostgresProcessManager(logger).openAdminConnection(
+      join(root, 'cloudsql', 'p', 'wm'),
+      port ?? 0
+    );
+
+    try {
+      const rows = await conn<{ v: string }[]>`SELECT current_setting('work_mem') AS v`;
+
+      expect(rows[0]?.v).toBe('8MB');
+    } finally {
+      await conn.close({ timeout: 0 });
+    }
+  });
+
+  test('applyDatabaseFlags accepts a postmaster-context flag and keeps the server up', async () => {
+    const { plane: started, root } = await plane('sqlite');
+    await started.startInstance('p', 'mc', ['postgres']);
+
+    // max_connections is postmaster context; this triggers a restart
+    await started.applyDatabaseFlags(
+      'p',
+      'mc',
+      [{ name: 'max_connections', value: '105' }],
+      ['postgres']
+    );
+
+    const newPort = started.getPort('p', 'mc');
+
+    expect(newPort).toBeTypeOf('number');
+
+    const conn = new PostgresProcessManager(logger).openAdminConnection(
+      join(root, 'cloudsql', 'p', 'mc'),
+      newPort ?? 0
+    );
+
+    try {
+      const rows = await conn<{ v: string }[]>`SELECT current_setting('max_connections') AS v`;
+
+      expect(rows[0]?.v).toBe('105');
+    } finally {
+      await conn.close({ timeout: 0 });
+    }
+  });
+
+  test('applyDatabaseFlags with an empty list resets a flag set earlier', async () => {
+    const { plane: started, root } = await plane('sqlite');
+    const port = await started.startInstance('p', 'clear', ['postgres']);
+
+    await started.applyDatabaseFlags(
+      'p',
+      'clear',
+      [{ name: 'work_mem', value: '8MB' }],
+      ['postgres']
+    );
+    await started.applyDatabaseFlags('p', 'clear', [], ['postgres']);
+
+    const conn = new PostgresProcessManager(logger).openAdminConnection(
+      join(root, 'cloudsql', 'p', 'clear'),
+      port ?? 0
+    );
+
+    try {
+      const rows = await conn<{ v: string }[]>`SELECT current_setting('work_mem') AS v`;
+
+      expect(rows[0]?.v).toBe('4MB');
+    } finally {
+      await conn.close({ timeout: 0 });
+    }
+  });
+
+  test('applyDatabaseFlags with an empty list is a no-op', async () => {
+    const { plane: started } = await plane('sqlite');
+    await started.startInstance('p', 'noop', ['postgres']);
+
+    await expect(
+      started.applyDatabaseFlags('p', 'noop', [], ['postgres'])
+    ).resolves.toBeUndefined();
+  });
+
+  test('applyDatabaseFlags restores the previous GUC when a later flag is rejected', async () => {
+    const { plane: started, root } = await plane('sqlite');
+    const port = await started.startInstance('p', 'partial', ['postgres']);
+
+    await started.applyDatabaseFlags(
+      'p',
+      'partial',
+      [{ name: 'work_mem', value: '8MB' }],
+      ['postgres']
+    );
+
+    const promise = started.applyDatabaseFlags(
+      'p',
+      'partial',
+      [
+        { name: 'work_mem', value: '16MB' },
+        { name: 'not_a_real_guc', value: '1' },
+      ],
+      ['postgres']
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(DatabaseFlagError);
+
+    const conn = new PostgresProcessManager(logger).openAdminConnection(
+      join(root, 'cloudsql', 'p', 'partial'),
+      port ?? 0
+    );
+
+    try {
+      const rows = await conn<{ v: string }[]>`SELECT current_setting('work_mem') AS v`;
+
+      expect(rows[0]?.v).toBe('8MB');
+    } finally {
+      await conn.close({ timeout: 0 });
+    }
+
+    const auto = await Bun.file(
+      join(root, 'cloudsql', 'p', 'partial', 'postgresql.auto.conf')
+    ).text();
+
+    expect(auto).toContain('8MB');
+    expect(auto).not.toContain('16MB');
+  });
+
+  test('applyDatabaseFlags rejects a setting the process manager owns', async () => {
+    const { plane: started } = await plane('sqlite');
+
+    await started.startInstance('p', 'port', ['postgres']);
+
+    const promise = started.applyDatabaseFlags(
+      'p',
+      'port',
+      [{ name: 'port', value: '1' }],
+      ['postgres']
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(DatabaseFlagError);
+  });
+
+  test('applyDatabaseFlags folds a mixed-case postmaster flag and applies it once', async () => {
+    const { plane: started, root } = await plane('sqlite');
+
+    await started.startInstance('p', 'case', ['postgres']);
+    await started.applyDatabaseFlags(
+      'p',
+      'case',
+      [{ name: 'Max_Connections', value: '107' }],
+      ['postgres']
+    );
+
+    const conn = new PostgresProcessManager(logger).openAdminConnection(
+      join(root, 'cloudsql', 'p', 'case'),
+      started.getPort('p', 'case') ?? 0
+    );
+
+    try {
+      const first = await conn<{ started: string; connections: string }[]>`
+        SELECT pg_postmaster_start_time()::text AS started, current_setting('max_connections') AS connections
+      `;
+
+      await started.applyDatabaseFlags(
+        'p',
+        'case',
+        [{ name: 'max_connections', value: '107' }],
+        ['postgres']
+      );
+
+      const second = await conn<{ started: string; connections: string }[]>`
+        SELECT pg_postmaster_start_time()::text AS started, current_setting('max_connections') AS connections
+      `;
+
+      expect(first[0]?.connections).toBe('107');
+      expect(second[0]?.connections).toBe('107');
+      expect(second[0]?.started).toBe(first[0]?.started);
+    } finally {
+      await conn.close({ timeout: 0 });
+    }
+  }, 20_000);
+
+  test('applyDatabaseFlags rejects an unknown GUC name with DatabaseFlagError', async () => {
+    const { plane: started } = await plane('sqlite');
+    await started.startInstance('p', 'bad', ['postgres']);
+
+    const promise = started.applyDatabaseFlags(
+      'p',
+      'bad',
+      [{ name: 'kinglet_nonexistent_guc', value: 'x' }],
+      ['postgres']
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(DatabaseFlagError);
+  });
+
+  test('applyDatabaseFlags updates a flag value on a second call', async () => {
+    const { plane: started, root } = await plane('sqlite');
+    await started.startInstance('p', 'reset', ['postgres']);
+
+    await started.applyDatabaseFlags(
+      'p',
+      'reset',
+      [{ name: 'work_mem', value: '16MB' }],
+      ['postgres']
+    );
+
+    await started.applyDatabaseFlags(
+      'p',
+      'reset',
+      [{ name: 'work_mem', value: '12MB' }],
+      ['postgres']
+    );
+
+    const conn = new PostgresProcessManager(logger).openAdminConnection(
+      join(root, 'cloudsql', 'p', 'reset'),
+      started.getPort('p', 'reset') ?? 0
+    );
+
+    try {
+      const rows = await conn<{ v: string }[]>`SELECT current_setting('work_mem') AS v`;
+
+      expect(rows[0]?.v).toBe('12MB');
+    } finally {
+      await conn.close({ timeout: 0 });
     }
   });
 });

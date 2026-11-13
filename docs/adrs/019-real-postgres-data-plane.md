@@ -116,9 +116,6 @@ opt-in, not the default.
 
 ## Follow-ups
 
-Not built here:
-
-- `databaseFlags` applied to `postgresql.conf` / `ALTER SYSTEM`.
 - A READ_POOL instance is a streaming standby of the cluster's PRIMARY via
   `pg_basebackup`. Replication authenticates with scram-sha-256. Each pool has
   a physical replication slot so the primary keeps the WAL that pool still
@@ -126,6 +123,12 @@ Not built here:
   WAL until it catches up or is deleted. A standby that is not streaming is
   backed up again. `nodeCount > 1` is stored and returned but maps to one
   postmaster (multiple physical nodes are a known gap).
+- Cloud SQL `settings.databaseFlags` are applied as GUCs via `ALTER SYSTEM` on
+  the running server. A flag whose `pg_settings.pending_restart` is set
+  restarts the postmaster. Kinglet does not reproduce Cloud SQL's flag
+  allowlist; it applies any GUC that Postgres accepts and surfaces
+  `INVALID_ARGUMENT` for names or values Postgres rejects. AlloyDB
+  `databaseFlags` are still stored and not applied.
 
 The PGlite data plane (`DataPlaneManager`, the hand-written wire server, and
 the `@electric-sql/pglite` dependency) has been removed. Both Cloud SQL and

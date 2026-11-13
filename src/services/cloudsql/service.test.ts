@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
 import type { DataPlaneLogin } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import { DatabaseFlagError } from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { RecordingDataPlane } from '../../../test-utils/postgres-data-plane.ts';
 import { CloudSqlRepository } from './repository.ts';
 import { SqlAdminError, SqlAdminService } from './service.ts';
@@ -762,6 +763,272 @@ describe('SqlAdminService', () => {
         'code',
         'NOT_FOUND'
       );
+    });
+  });
+
+  describe('databaseFlags', () => {
+    test('createInstance with databaseFlags calls applyDatabaseFlags', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: {
+          databaseFlags: [{ name: 'work_mem', value: '4MB' }],
+        },
+      });
+
+      expect(dataPlane.calls.some(c => c.startsWith('applyFlags:p1/db-a:'))).toBe(true);
+    });
+
+    test('createInstance with empty databaseFlags does not call applyDatabaseFlags', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { databaseFlags: [] },
+      });
+
+      expect(dataPlane.calls.some(c => c.startsWith('applyFlags:'))).toBe(false);
+    });
+
+    test('createInstance without databaseFlags does not call applyDatabaseFlags', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+
+      expect(dataPlane.calls.some(c => c.startsWith('applyFlags:'))).toBe(false);
+    });
+
+    test('restartInstance re-applies flags from current settings', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { databaseFlags: [{ name: 'work_mem', value: '4MB' }] },
+      });
+      dataPlane.calls.length = 0;
+
+      await service.restartInstance('p1', 'db-a');
+
+      expect(dataPlane.calls.some(c => c.startsWith('applyFlags:p1/db-a:'))).toBe(true);
+    });
+
+    test('restartInstance without databaseFlags in settings does not call applyDatabaseFlags', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      dataPlane.calls.length = 0;
+
+      await service.restartInstance('p1', 'db-a');
+
+      expect(dataPlane.calls.some(c => c.startsWith('applyFlags:'))).toBe(false);
+    });
+
+    test('updateInstance with databaseFlags calls applyDatabaseFlags', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      dataPlane.calls.length = 0;
+
+      await service.updateInstance('p1', 'db-a', {
+        settings: {
+          settingsVersion: 1,
+          databaseFlags: [{ name: 'work_mem', value: '4MB' }],
+        },
+      });
+
+      expect(dataPlane.calls.some(c => c.startsWith('applyFlags:p1/db-a:'))).toBe(true);
+    });
+
+    test('patchInstance with databaseFlags calls applyDatabaseFlags', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      dataPlane.calls.length = 0;
+
+      await service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: [{ name: 'work_mem', value: '4MB' }] },
+      });
+
+      expect(dataPlane.calls.some(c => c.startsWith('applyFlags:p1/db-a:'))).toBe(true);
+    });
+
+    test('patchInstance with an empty databaseFlags list clears the applied flags', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      dataPlane.calls.length = 0;
+
+      await service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: [] },
+      });
+
+      expect(dataPlane.calls).toContain('applyFlags:p1/db-a:');
+    });
+
+    test('updateInstance without databaseFlags clears flags a patch had set', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: [{ name: 'work_mem', value: '4MB' }] },
+      });
+      dataPlane.calls.length = 0;
+
+      await service.updateInstance('p1', 'db-a', {
+        settings: { settingsVersion: 2 },
+      });
+
+      expect(dataPlane.calls).toContain('applyFlags:p1/db-a:');
+    });
+
+    test('patchInstance with a non-string flag value rejects the request', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: [{ name: 'work_mem', value: '4MB' }] },
+      });
+      dataPlane.calls.length = 0;
+
+      const promise = service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: [{ name: 'work_mem', value: 8 }] },
+      });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+      expect(dataPlane.calls.some(call => call.startsWith('applyFlags:'))).toBe(false);
+
+      const instance = await service.getInstance('p1', 'db-a');
+
+      expect(instance.settings.databaseFlags).toEqual([{ name: 'work_mem', value: '4MB' }]);
+    });
+
+    test('restartInstance applies flags a patch saved while the restart waited', async () => {
+      let releaseGate: () => void = () => {};
+      const gate = new Promise<void>(resolve => {
+        releaseGate = resolve;
+      });
+      let markEntered: () => void = () => {};
+      const entered = new Promise<void>(resolve => {
+        markEntered = resolve;
+      });
+      let arm = false;
+      const originalGet = repo.getInstance.bind(repo);
+      const applied: string[] = [];
+
+      repo.getInstance = async (project, name) => {
+        if (arm) {
+          arm = false;
+          markEntered();
+          await gate;
+        }
+
+        return originalGet(project, name);
+      };
+      dataPlane.applyDatabaseFlags = async (project, instance, flags) => {
+        const rendered = flags.map(flag => `${flag.name}=${flag.value}`).join(',');
+
+        applied.push(rendered);
+        dataPlane.calls.push(`applyFlags:${project}/${instance}:${rendered}`);
+      };
+
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: [{ name: 'work_mem', value: '4MB' }] },
+      });
+      arm = true;
+
+      const patch = service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: [{ name: 'work_mem', value: '8MB' }] },
+      });
+
+      await entered;
+
+      const restart = service.restartInstance('p1', 'db-a');
+
+      releaseGate();
+      await Promise.all([patch, restart]);
+
+      expect(applied.at(-1)).toBe('work_mem=8MB');
+    });
+
+    test('patchInstance with a non-list databaseFlags rejects the request', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      await service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: [{ name: 'work_mem', value: '4MB' }] },
+      });
+      dataPlane.calls.length = 0;
+
+      const promise = service.patchInstance('p1', 'db-a', {
+        settings: { databaseFlags: null },
+      });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+      expect(dataPlane.calls.some(call => call.startsWith('applyFlags:'))).toBe(false);
+
+      const instance = await service.getInstance('p1', 'db-a');
+
+      expect(instance.settings.databaseFlags).toEqual([{ name: 'work_mem', value: '4MB' }]);
+    });
+
+    test('createInstance reports a rejected flag as INVALID_ARGUMENT', async () => {
+      dataPlane.applyFlagsFailure = new DatabaseFlagError('unrecognized parameter "bad_flag"');
+
+      const operation = await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { databaseFlags: [{ name: 'bad_flag', value: 'x' }] },
+      });
+
+      expect(operation.error?.errors[0]?.code).toBe('INVALID_ARGUMENT');
+      expect(await repo.getInstance('p1', 'db-a')).toBeNull();
+    });
+
+    test('patchInstance without databaseFlags key does not call applyDatabaseFlags', async () => {
+      await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { databaseFlags: [{ name: 'work_mem', value: '4MB' }] },
+      });
+      dataPlane.calls.length = 0;
+
+      await service.patchInstance('p1', 'db-a', {
+        settings: { tier: 'db-custom-2-8192' },
+      });
+
+      expect(dataPlane.calls.some(c => c.startsWith('applyFlags:'))).toBe(false);
+    });
+
+    test('updateInstance rolls back settings when applyDatabaseFlags throws INTERNAL', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      dataPlane.applyFlagsFailure = new Error('restart failed');
+
+      const promise = service.updateInstance('p1', 'db-a', {
+        settings: {
+          settingsVersion: 1,
+          databaseFlags: [{ name: 'work_mem', value: '4MB' }],
+        },
+      });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INTERNAL');
+
+      const instance = await service.getInstance('p1', 'db-a');
+
+      expect(instance.settings.databaseFlags).toBeUndefined();
+    });
+
+    test('updateInstance throws INVALID_ARGUMENT when applyDatabaseFlags throws DatabaseFlagError', async () => {
+      await service.createInstance('p1', { name: 'db-a', databaseVersion: 'POSTGRES_16' });
+      dataPlane.applyFlagsFailure = new DatabaseFlagError('unrecognized parameter "bad_flag"');
+
+      const promise = service.updateInstance('p1', 'db-a', {
+        settings: {
+          settingsVersion: 1,
+          databaseFlags: [{ name: 'bad_flag', value: 'x' }],
+        },
+      });
+
+      await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+
+      const instance = await service.getInstance('p1', 'db-a');
+
+      expect(instance.settings.databaseFlags).toBeUndefined();
+    });
+
+    test('createInstance returns error operation when applyDatabaseFlags fails', async () => {
+      dataPlane.applyFlagsFailure = new Error('flags not applied');
+
+      const operation = await service.createInstance('p1', {
+        name: 'db-a',
+        databaseVersion: 'POSTGRES_16',
+        settings: { databaseFlags: [{ name: 'work_mem', value: '4MB' }] },
+      });
+
+      expect(operation.error).toBeDefined();
+      expect(await repo.getInstance('p1', 'db-a')).toBeNull();
     });
   });
 });

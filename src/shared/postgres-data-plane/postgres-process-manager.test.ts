@@ -464,7 +464,7 @@ describe('Postgres process cleanup', () => {
     try {
       await manager.ensureInitialized(join(root, 'data'));
 
-      const config = await Bun.file(join(templateDir, 'postgresql.auto.conf')).text();
+      const config = await Bun.file(join(templateDir, 'postgresql.conf')).text();
 
       expect(config).toContain("shared_preload_libraries='pg_stat_statements'");
     } finally {

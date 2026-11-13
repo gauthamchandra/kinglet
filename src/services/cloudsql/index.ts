@@ -22,7 +22,7 @@ import {
 import type { Logger } from '@/shared/utils/logger.ts';
 import { CloudSqlHandlers } from './handlers.ts';
 import { CloudSqlRepository } from './repository.ts';
-import { cloudSqlLogin, SqlAdminService } from './service.ts';
+import { cloudSqlLogin, extractDatabaseFlags, SqlAdminService } from './service.ts';
 
 // Mirrors the config schema's defaults (see src/config/schema.ts). Tests that
 // only exercise the control plane pass `{ enabled: false }` to avoid spawning
@@ -151,6 +151,30 @@ export class CloudSqlService {
             error
           );
         }
+      }
+
+      const row = await repository.getInstance(instance.project, instance.instance);
+
+      if (row == null) continue;
+
+      const settings = JSON.parse(row.settings) as Record<string, unknown>;
+
+      try {
+        const databaseFlags = extractDatabaseFlags(settings);
+
+        if (databaseFlags.length === 0) continue;
+
+        await this.dataPlane.applyDatabaseFlags(
+          instance.project,
+          instance.instance,
+          databaseFlags,
+          instance.databases
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to restore database flags on ${instance.project}/${instance.instance}, leaving them unapplied`,
+          error
+        );
       }
     }
   }
