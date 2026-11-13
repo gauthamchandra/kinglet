@@ -224,5 +224,23 @@ describe('Secret Manager E2E: gRPC', () => {
 
     expect(got.expireTime?.seconds).toBe(expiring.expireTime?.seconds);
     expect(got.ttl).toBeUndefined();
+
+    const [pinned] = await client.updateSecret({
+      secret: {
+        name: secret.name,
+        expireTime: { seconds: 1893456000 },
+        ttl: { seconds: 60 },
+      },
+      updateMask: { paths: ['expire_time'] },
+    });
+
+    expect(Number(pinned.expireTime?.seconds)).toBe(1893456000);
+
+    const [cleared] = await client.updateSecret({
+      secret: { name: secret.name, expireTime: pinned.expireTime },
+      updateMask: { paths: ['ttl'] },
+    });
+
+    expect(cleared.expireTime).toBeUndefined();
   });
 });

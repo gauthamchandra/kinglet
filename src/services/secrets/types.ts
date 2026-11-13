@@ -139,7 +139,8 @@ export interface SecretView {
 export type MutableSecretField =
   | 'labels'
   | 'topics'
-  | 'expiration'
+  | 'ttl'
+  | 'expireTime'
   | 'rotation'
   | 'versionAliases'
   | 'annotations'
@@ -155,8 +156,8 @@ export interface SecretUpdate {
 const MUTABLE_MASK_PATHS: Readonly<Record<string, MutableSecretField>> = {
   labels: 'labels',
   topics: 'topics',
-  expire_time: 'expiration',
-  ttl: 'expiration',
+  expire_time: 'expireTime',
+  ttl: 'ttl',
   rotation: 'rotation',
   version_aliases: 'versionAliases',
   annotations: 'annotations',
@@ -316,6 +317,13 @@ export function parseUpdateMask(paths: readonly string[]): ReadonlySet<MutableSe
     fields.add(field);
   }
 
+  if (fields.has('ttl') && fields.has('expireTime')) {
+    throw new SecretManagerError(
+      'INVALID_ARGUMENT',
+      'ttl and expire_time cannot both be in update_mask'
+    );
+  }
+
   return fields;
 }
 
@@ -329,9 +337,10 @@ export function applySecretUpdate(
     ...current,
     labels: fields.has('labels') ? input.labels : current.labels,
     topics: fields.has('topics') ? input.topics : current.topics,
-    expireTime: fields.has('expiration')
-      ? expireTimeFrom(input.expiration, now)
-      : current.expireTime,
+    expireTime:
+      fields.has('ttl') || fields.has('expireTime')
+        ? expireTimeFrom(input.expiration, now)
+        : current.expireTime,
     rotation: fields.has('rotation') ? input.rotation : current.rotation,
     versionAliases: fields.has('versionAliases') ? input.versionAliases : current.versionAliases,
     annotations: fields.has('annotations') ? input.annotations : current.annotations,

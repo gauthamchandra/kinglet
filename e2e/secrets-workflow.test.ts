@@ -417,6 +417,51 @@ describe('Secret Manager E2E: official client over REST', () => {
     client.close();
   });
 
+  test('a get then ttl update applies ttl and ignores the expireTime sent back', async () => {
+    const client = new SecretManagerServiceClient({
+      fallback: 'rest',
+      apiEndpoint: 'localhost',
+      port: emulatorPort,
+      protocol: 'http',
+      auth: createFakeAuth('client-project') as never,
+    });
+
+    const [created] = await client.createSecret({
+      parent: 'projects/client-project',
+      secretId: 'ttl-mask',
+      secret: { replication: { automatic: {} } },
+    });
+
+    await client.updateSecret({
+      secret: { name: created.name, expireTime: { seconds: 1893456000 } },
+      updateMask: { paths: ['expire_time'] },
+    });
+
+    const [got] = await client.getSecret({ name: created.name });
+
+    got.ttl = { seconds: 7200 };
+
+    const [updated] = await client.updateSecret({
+      secret: got,
+      updateMask: { paths: ['ttl'] },
+    });
+
+    const remaining = Number(updated.expireTime?.seconds) * 1000 - Date.now();
+
+    expect(remaining).toBeGreaterThan(7000 * 1000);
+    expect(remaining).toBeLessThan(7400 * 1000);
+
+    const [cleared] = await client.updateSecret({
+      secret: { name: created.name, expireTime: updated.expireTime },
+      updateMask: { paths: ['ttl'] },
+    });
+
+    expect(cleared.expireTime).toBeUndefined();
+    expect(cleared.etag).not.toBe(updated.etag);
+
+    client.close();
+  });
+
   test('creates and gets a secret, including an enum field', async () => {
     const client = new SecretManagerServiceClient({
       fallback: 'rest',

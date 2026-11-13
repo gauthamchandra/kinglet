@@ -72,7 +72,8 @@ export function decodeGet(message: WireMessage): string {
 const WIRE_KEYS_BY_FIELD: Readonly<Record<MutableSecretField, readonly string[]>> = {
   labels: ['labels'],
   topics: ['topics'],
-  expiration: ['expiration', 'expireTime', 'ttl'],
+  ttl: ['ttl'],
+  expireTime: ['expireTime'],
   rotation: ['rotation'],
   versionAliases: ['versionAliases'],
   annotations: ['annotations'],
@@ -94,14 +95,26 @@ export function decodeUpdate(
   const masked: Record<string, unknown> = {};
 
   for (const field of fields) {
+    if (field === 'ttl' || field === 'expireTime') {
+      continue;
+    }
+
     for (const key of WIRE_KEYS_BY_FIELD[field]) {
       masked[key] = secret[key];
     }
   }
 
   const etag = typeof secret.etag === 'string' && secret.etag !== '' ? secret.etag : null;
+  const spec = decodeSecretSpecInput(masked, dialect);
 
-  return { nameRaw, update: { spec: decodeSecretSpecInput(masked, dialect), fields, etag } };
+  return {
+    nameRaw,
+    update: {
+      spec: { ...spec, expiration: readMaskedExpiration(secret, fields, dialect) },
+      fields,
+      etag,
+    },
+  };
 }
 
 function readMaskPaths(value: unknown): string[] {
@@ -308,6 +321,41 @@ function readCmek(value: unknown): Cmek | null {
 
 function writeCmek(cmek: Cmek): WireMessage {
   return { kmsKeyName: cmek.kmsKeyName };
+}
+
+/**
+ * ttl and expire_time are one stored expiry, but the mask names one arm.
+ * A get-then-update from the official REST client sends the other arm too.
+ * Only the masked arm is read. An absent masked arm clears the expiry.
+ */
+function readMaskedExpiration(
+  secret: WireMessage,
+  fields: ReadonlySet<MutableSecretField>,
+  dialect: WireDialect
+): Expiration {
+  if (fields.has('ttl')) {
+    if (isUnset(secret.ttl)) {
+      return { kind: 'none' };
+    }
+
+    return { kind: 'ttl', ttl: requireDuration(secret.ttl, dialect, 'ttl') };
+  }
+
+  if (fields.has('expireTime')) {
+    if (isUnset(secret.expireTime)) {
+      return { kind: 'none' };
+    }
+
+    const at = dialect.readTimestamp(secret.expireTime);
+
+    if (at == null) {
+      throw new SecretManagerError('INVALID_ARGUMENT', 'expireTime is invalid');
+    }
+
+    return { kind: 'expireTime', at };
+  }
+
+  return { kind: 'none' };
 }
 
 function readExpiration(secret: WireMessage, dialect: WireDialect): Expiration {

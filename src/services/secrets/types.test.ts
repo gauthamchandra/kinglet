@@ -97,10 +97,15 @@ describe('parseUpdateMask', () => {
       'versionAliases',
       'versionDestroyTtl',
     ]);
-    expect([...parseUpdateMask(['versionAliases', 'expire_time', 'ttl'])]).toEqual([
-      'versionAliases',
-      'expiration',
-    ]);
+    expect([...parseUpdateMask(['expireTime'])]).toEqual(['expireTime']);
+    expect([...parseUpdateMask(['ttl'])]).toEqual(['ttl']);
+  });
+
+  test('rejects a mask that names both ttl and expire_time', () => {
+    const error = capture(() => parseUpdateMask(['versionAliases', 'expire_time', 'ttl']));
+
+    expect(error).toBeInstanceOf(SecretManagerError);
+    expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
   });
 
   test.each([
@@ -154,7 +159,7 @@ describe('applySecretUpdate', () => {
     const next = applySecretUpdate(
       current,
       { ...emptyInput(), expiration: { kind: 'ttl', ttl: { seconds: 60, nanos: 0 } } },
-      new Set(['expiration']),
+      new Set(['ttl']),
       NOW
     );
 

@@ -116,6 +116,58 @@ describe('secret wire dialects', () => {
     expect(decoded.update.spec.replication).toBeNull();
   });
 
+  test('an update reads only the expiration arm named by the mask', () => {
+    const both = {
+      name: 'projects/p/secrets/a',
+      expireTime: '2030-01-01T00:00:00.000Z',
+      ttl: '60s',
+    };
+
+    expect(
+      decodeUpdate({ secret: both, updateMask: 'ttl' }, REST_DIALECT).update.spec.expiration
+    ).toEqual({ kind: 'ttl', ttl: { seconds: 60, nanos: 0 } });
+
+    expect(
+      decodeUpdate({ secret: both, updateMask: 'expire_time' }, REST_DIALECT).update.spec.expiration
+    ).toEqual({ kind: 'expireTime', at: '2030-01-01T00:00:00.000Z' });
+
+    const grpcBoth = {
+      name: 'projects/p/secrets/a',
+      expiration: 'ttl',
+      expireTime: { seconds: 1893456000, nanos: 0 },
+      ttl: { seconds: 60, nanos: 0 },
+    };
+
+    expect(
+      decodeUpdate({ secret: grpcBoth, updateMask: { paths: ['expire_time'] } }, GRPC_DIALECT)
+        .update.spec.expiration
+    ).toEqual({ kind: 'expireTime', at: '2030-01-01T00:00:00.000Z' });
+
+    expect(
+      decodeUpdate(
+        {
+          secret: { name: 'projects/p/secrets/a', expireTime: '2030-01-01T00:00:00.000Z' },
+          updateMask: 'ttl',
+        },
+        REST_DIALECT
+      ).update.spec.expiration
+    ).toEqual({ kind: 'none' });
+
+    expect(
+      decodeUpdate(
+        {
+          secret: {
+            name: 'projects/p/secrets/a',
+            expiration: 'expireTime',
+            expireTime: { seconds: 1893456000 },
+          },
+          updateMask: { paths: ['ttl'] },
+        },
+        GRPC_DIALECT
+      ).update.spec.expiration
+    ).toEqual({ kind: 'none' });
+  });
+
   test('an update without a mask is INVALID_ARGUMENT', () => {
     for (const updateMask of [undefined, '', null, { paths: [] }]) {
       expect(() =>
