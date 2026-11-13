@@ -731,12 +731,13 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
 
   /**
    * `pg_reload_conf` only requests SIGHUP. `pending_restart` stays stale until
-   * the postmaster finishes that reload. The formatted load time keeps
-   * microseconds, so a reload inside the same millisecond still counts.
+   * the postmaster finishes that reload. The load time is formatted in UTC
+   * with microseconds, so a timezone change cannot rewind the comparison and
+   * a reload inside the same millisecond still counts.
    */
   private async waitForConfigReload(sql: SQL): Promise<void> {
     const before = await sql<{ loaded: string }[]>`
-      SELECT to_char(pg_conf_load_time(), 'YYYY-MM-DD HH24:MI:SS.US') AS loaded
+      SELECT to_char(pg_conf_load_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US') AS loaded
     `;
     const previous = before[0]?.loaded;
 
@@ -746,7 +747,7 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
 
     while (Date.now() < deadline) {
       const after = await sql<{ loaded: string }[]>`
-        SELECT to_char(pg_conf_load_time(), 'YYYY-MM-DD HH24:MI:SS.US') AS loaded
+        SELECT to_char(pg_conf_load_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US') AS loaded
       `;
       const next = after[0]?.loaded;
 

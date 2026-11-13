@@ -275,6 +275,68 @@ describe('PostgresServerDataPlane without binaries', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  test('applyDatabaseFlags accepts a timezone that moves the clock backward', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-tz-reload-'));
+    const starts: number[] = [];
+    let loadReads = 0;
+    const sql = Object.assign(
+      async (strings: TemplateStringsArray) => {
+        const text = strings.join('');
+
+        if (text.includes('pg_conf_load_time')) {
+          loadReads += 1;
+          const utc = text.includes("TIME ZONE 'UTC'");
+          const loaded = utc
+            ? loadReads < 3
+              ? '2020-01-01 00:00:00.000100'
+              : '2020-01-01 00:00:00.000900'
+            : loadReads < 3
+              ? '2020-01-01 05:00:00.000100'
+              : '2020-01-01 00:00:00.000900';
+
+          return [{ loaded }];
+        }
+
+        if (text.includes('pg_reload_conf')) return [{ pg_reload_conf: true }];
+
+        if (text.includes('pending_restart')) return [{ pending_restart: false }];
+
+        return [{ one: 1 }];
+      },
+      { unsafe: async () => {}, close: async () => {} }
+    );
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: root,
+      portRangeStart: 47975,
+      portRangeEnd: 47975,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async dataDir => {
+          await mkdir(dataDir, { recursive: true });
+          await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+        },
+        start: async () => {
+          starts.push(1);
+        },
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    await plane.startInstance('p', 'inst', ['postgres']);
+    await plane.applyDatabaseFlags(
+      'p',
+      'inst',
+      [{ name: 'timezone', value: 'Pacific/Pago_Pago' }],
+      ['postgres']
+    );
+
+    expect(starts).toHaveLength(1);
+    await plane.stopAll();
+    await rm(root, { recursive: true, force: true });
+  });
+
   test('applyDatabaseFlags restores auto.conf when the reload is not observed', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kinglet-reload-unseen-'));
     const autoPath = join(root, 'cloudsql', 'p', 'inst', 'postgresql.auto.conf');
@@ -1298,6 +1360,31 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
       const rows = await conn<{ v: string }[]>`SELECT current_setting('work_mem') AS v`;
 
       expect(rows[0]?.v).toBe('8MB');
+    } finally {
+      await conn.close({ timeout: 0 });
+    }
+  });
+
+  test('applyDatabaseFlags accepts a timezone that moves the clock backward', async () => {
+    const { plane: started, root } = await plane('sqlite');
+    const port = await started.startInstance('p', 'tz', ['postgres']);
+
+    await started.applyDatabaseFlags(
+      'p',
+      'tz',
+      [{ name: 'timezone', value: 'Pacific/Pago_Pago' }],
+      ['postgres']
+    );
+
+    const conn = new PostgresProcessManager(logger).openAdminConnection(
+      join(root, 'cloudsql', 'p', 'tz'),
+      port ?? 0
+    );
+
+    try {
+      const rows = await conn<{ v: string }[]>`SELECT current_setting('TimeZone') AS v`;
+
+      expect(rows[0]?.v).toBe('Pacific/Pago_Pago');
     } finally {
       await conn.close({ timeout: 0 });
     }
