@@ -24,6 +24,7 @@ import {
   decodeAdd,
   decodeCreate,
   decodeGet,
+  decodeUpdate,
   decodeVersion,
   encodeAccessed,
   encodeSecret,
@@ -151,7 +152,29 @@ const RPC_TABLE = {
       return encodeSecret(secret, dialect);
     },
   }),
-  UpdateSecret: deferred(),
+  UpdateSecret: bound({
+    http: {
+      method: 'PATCH',
+      suffix: '/secrets/:secret',
+      id: 'secrets.patch',
+      toMessage: parts => {
+        if (!isRecord(parts.body)) {
+          throw new SecretManagerError('INVALID_ARGUMENT', 'request body must be a JSON object');
+        }
+
+        return {
+          secret: { ...parts.body, name: secretResource(parts) },
+          updateMask: parts.query('updateMask'),
+        };
+      },
+    },
+    call: async (manager, message, dialect) => {
+      const decoded = decodeUpdate(message, dialect);
+      const updated = await manager.updateSecret(parseSecretName(decoded.nameRaw), decoded.update);
+
+      return encodeSecret(updated, dialect);
+    },
+  }),
   DeleteSecret: deferred(),
   ListSecretVersions: deferred(),
   GetSecretVersion: bound({

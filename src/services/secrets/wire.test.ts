@@ -3,6 +3,7 @@ import { SecretManagerError } from './types.ts';
 import {
   decodeAdd,
   decodeSecretSpecInput,
+  decodeUpdate,
   encodeSecret,
   GRPC_DIALECT,
   REST_DIALECT,
@@ -58,6 +59,133 @@ describe('secret wire dialects', () => {
     expect(() =>
       decodeAdd({ parent: 'projects/p/secrets/a', payload: { data: '%%%' } }, REST_DIALECT)
     ).toThrow(SecretManagerError);
+  });
+
+  test('decodes an update from a REST mask string and a gRPC FieldMask alike', () => {
+    const rest = decodeUpdate(
+      {
+        secret: {
+          name: 'projects/p/secrets/a',
+          etag: '3',
+          labels: { env: 'prod' },
+          versionAliases: { current: '2' },
+        },
+        updateMask: 'labels,version_aliases',
+      },
+      REST_DIALECT
+    );
+    const grpc = decodeUpdate(
+      {
+        secret: {
+          name: 'projects/p/secrets/a',
+          etag: '3',
+          labels: { env: 'prod' },
+          versionAliases: { current: '2' },
+          replication: null,
+          expiration: undefined,
+        },
+        updateMask: { paths: ['labels', 'versionAliases'] },
+      },
+      GRPC_DIALECT
+    );
+
+    expect(rest.nameRaw).toBe('projects/p/secrets/a');
+    expect(rest.update.etag).toBe('3');
+    expect([...rest.update.fields]).toEqual(['labels', 'versionAliases']);
+    expect(rest.update.spec.versionAliases).toEqual({ current: 2 });
+    expect(grpc).toEqual(rest);
+  });
+
+  test('an update ignores unmasked fields and treats an empty etag as unset', () => {
+    const decoded = decodeUpdate(
+      {
+        secret: {
+          name: 'projects/p/secrets/a',
+          etag: '',
+          labels: { env: 'prod' },
+          replication: 'not-an-object',
+          ttl: 'garbage',
+        },
+        updateMask: { paths: ['labels'] },
+      },
+      GRPC_DIALECT
+    );
+
+    expect(decoded.update.etag).toBeNull();
+    expect(decoded.update.spec.labels).toEqual({ env: 'prod' });
+    expect(decoded.update.spec.replication).toBeNull();
+  });
+
+  test('an update reads only the expiration arm named by the mask', () => {
+    const both = {
+      name: 'projects/p/secrets/a',
+      expireTime: '2030-01-01T00:00:00.000Z',
+      ttl: '60s',
+    };
+
+    expect(
+      decodeUpdate({ secret: both, updateMask: 'ttl' }, REST_DIALECT).update.spec.expiration
+    ).toEqual({ kind: 'ttl', ttl: { seconds: 60, nanos: 0 } });
+
+    expect(
+      decodeUpdate({ secret: both, updateMask: 'expire_time' }, REST_DIALECT).update.spec.expiration
+    ).toEqual({ kind: 'expireTime', at: '2030-01-01T00:00:00.000Z' });
+
+    const grpcBoth = {
+      name: 'projects/p/secrets/a',
+      expiration: 'ttl',
+      expireTime: { seconds: 1893456000, nanos: 0 },
+      ttl: { seconds: 60, nanos: 0 },
+    };
+
+    expect(
+      decodeUpdate({ secret: grpcBoth, updateMask: { paths: ['expire_time'] } }, GRPC_DIALECT)
+        .update.spec.expiration
+    ).toEqual({ kind: 'expireTime', at: '2030-01-01T00:00:00.000Z' });
+
+    expect(
+      decodeUpdate(
+        {
+          secret: { name: 'projects/p/secrets/a', expireTime: '2030-01-01T00:00:00.000Z' },
+          updateMask: 'ttl',
+        },
+        REST_DIALECT
+      ).update.spec.expiration
+    ).toEqual({ kind: 'none' });
+
+    expect(
+      decodeUpdate(
+        {
+          secret: {
+            name: 'projects/p/secrets/a',
+            expiration: 'expireTime',
+            expireTime: { seconds: 1893456000 },
+          },
+          updateMask: { paths: ['ttl'] },
+        },
+        GRPC_DIALECT
+      ).update.spec.expiration
+    ).toEqual({ kind: 'none' });
+  });
+
+  test('an update without a mask is INVALID_ARGUMENT', () => {
+    for (const updateMask of [undefined, '', null, { paths: [] }]) {
+      expect(() =>
+        decodeUpdate({ secret: { name: 'projects/p/secrets/a' }, updateMask }, REST_DIALECT)
+      ).toThrow('update_mask is required');
+    }
+  });
+
+  test('alias versions must be decimal int64 strings or integers', () => {
+    for (const value of ['1e3', ' 1', '0x10', '9007199254740993', 1.5]) {
+      expect(() =>
+        decodeSecretSpecInput({ versionAliases: { current: value } }, REST_DIALECT)
+      ).toThrow(SecretManagerError);
+    }
+
+    expect(
+      decodeSecretSpecInput({ versionAliases: { a: '12', b: 7 } }, GRPC_DIALECT).versionAliases
+    ).toEqual({ a: 12, b: 7 });
   });
 
   test('encodes timestamps as RFC3339 on REST and seconds on gRPC', () => {

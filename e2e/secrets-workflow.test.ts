@@ -184,7 +184,284 @@ describe('Secret Manager E2E: REST fetch', () => {
   });
 });
 
+async function patchSecret(
+  name: string,
+  updateMask: string | null,
+  body: unknown
+): Promise<Response> {
+  const query = updateMask == null ? '' : `?updateMask=${encodeURIComponent(updateMask)}`;
+
+  return fetch(`${url(`/v1/${name}`)}${query}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function createWithVersions(parent: string, secretId: string, values: string[]) {
+  const created = await fetch(`${url(`/v1/${parent}/secrets`)}?secretId=${secretId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(
+      parent.includes('/locations/')
+        ? { labels: { team: 'core' } }
+        : { replication: { automatic: {} }, labels: { team: 'core' } }
+    ),
+  });
+
+  expect(created.status).toBe(200);
+
+  for (const value of values) {
+    const added = await fetch(url(`/v1/${parent}/secrets/${secretId}:addVersion`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ payload: { data: Buffer.from(value).toString('base64') } }),
+    });
+
+    expect(added.status).toBe(200);
+  }
+
+  return `${parent}/secrets/${secretId}`;
+}
+
+describe('Secret Manager E2E: UpdateSecret over REST fetch', () => {
+  test.each([
+    ['projects/update-rest'],
+    ['projects/update-rest/locations/us-central1'],
+  ])('sets labels and an alias under %s, then gets and accesses by alias', async parent => {
+    const name = await createWithVersions(parent, 'aliased', ['one', 'two']);
+    const before = await fetch(url(`/v1/${name}/versions/current:access`));
+
+    expect(before.status).toBe(404);
+
+    const patched = await patchSecret(name, 'labels,version_aliases', {
+      labels: { env: 'prod' },
+      versionAliases: { current: '1' },
+    });
+    const secret = (await patched.json()) as {
+      name: string;
+      etag: string;
+      labels: Record<string, string>;
+      versionAliases: Record<string, string>;
+    };
+
+    expect(patched.status).toBe(200);
+    expect(secret.name).toBe(name);
+    expect(secret.etag).toBe('2');
+    expect(secret.labels).toEqual({ env: 'prod' });
+    expect(secret.versionAliases).toEqual({ current: '1' });
+
+    const version = await fetch(url(`/v1/${name}/versions/current`));
+
+    expect(version.status).toBe(200);
+    expect(((await version.json()) as { name: string }).name).toBe(`${name}/versions/1`);
+
+    const access = await fetch(url(`/v1/${name}/versions/current:access`));
+    const accessed = (await access.json()) as { name: string; payload: { data: string } };
+
+    expect(access.status).toBe(200);
+    expect(accessed.name).toBe(`${name}/versions/1`);
+    expect(Buffer.from(accessed.payload.data, 'base64').toString()).toBe('one');
+  });
+
+  test.each([
+    [null],
+    [''],
+    ['*'],
+    ['labels.env'],
+    ['replication'],
+    ['secretType'],
+    ['name'],
+    ['createTime'],
+    ['bogus'],
+  ])('mask %p is INVALID_ARGUMENT', async mask => {
+    const name = await createWithVersions(
+      'projects/update-rest-masks',
+      `m${crypto.randomUUID()}`,
+      []
+    );
+    const response = await patchSecret(name, mask, { labels: { env: 'prod' } });
+    const body = (await response.json()) as { error: { status: string } };
+
+    expect(response.status).toBe(400);
+    expect(body.error.status).toBe('INVALID_ARGUMENT');
+    expect(((await (await fetch(url(`/v1/${name}`))).json()) as { etag: string }).etag).toBe('1');
+  });
+
+  test('a masked field absent from the body clears it and an unmasked field is ignored', async () => {
+    const name = await createWithVersions('projects/update-rest', 'clearing', []);
+    const response = await patchSecret(name, 'labels', {
+      annotations: { owner: 'ops' },
+      replication: { userManaged: { replicas: [{ location: 'us-east1' }] } },
+    });
+    const secret = (await response.json()) as {
+      labels?: unknown;
+      annotations?: unknown;
+      replication: unknown;
+    };
+
+    expect(response.status).toBe(200);
+    expect(secret.labels).toBeUndefined();
+    expect(secret.annotations).toBeUndefined();
+    expect(secret.replication).toEqual({ automatic: {} });
+  });
+
+  test('a stale etag is ABORTED and a no-op keeps the etag', async () => {
+    const name = await createWithVersions('projects/update-rest', 'etagged', []);
+    const stale = await patchSecret(name, 'labels', { etag: '9', labels: { env: 'x' } });
+    const staleBody = (await stale.json()) as { error: { status: string } };
+
+    expect(stale.status).toBe(409);
+    expect(staleBody.error.status).toBe('ABORTED');
+
+    const noop = await patchSecret(name, 'labels', { etag: '1', labels: { team: 'core' } });
+
+    expect(noop.status).toBe(200);
+    expect(((await noop.json()) as { etag: string }).etag).toBe('1');
+
+    const changed = await patchSecret(name, 'labels', { etag: '1', labels: { team: 'edge' } });
+
+    expect(((await changed.json()) as { etag: string }).etag).toBe('2');
+  });
+
+  test('ttl becomes expireTime and is never returned', async () => {
+    const name = await createWithVersions('projects/update-rest', 'expiring', []);
+    const response = await patchSecret(name, 'ttl', { ttl: '3600s' });
+    const secret = (await response.json()) as { expireTime: string; ttl?: unknown };
+
+    expect(response.status).toBe(200);
+    expect(Date.parse(secret.expireTime) - Date.now()).toBeGreaterThan(3500 * 1000);
+    expect(secret.ttl).toBeUndefined();
+
+    const got = (await (await fetch(url(`/v1/${name}`))).json()) as {
+      expireTime: string;
+      ttl?: unknown;
+    };
+
+    expect(got.expireTime).toBe(secret.expireTime);
+    expect(got.ttl).toBeUndefined();
+  });
+
+  test('rejects reserved aliases and too many topics, and 404s a missing secret', async () => {
+    const name = await createWithVersions('projects/update-rest', 'limits', ['one']);
+
+    for (const alias of ['latest', 'NEW']) {
+      const reserved = await patchSecret(name, 'versionAliases', {
+        versionAliases: { [alias]: '1' },
+      });
+
+      expect(reserved.status).toBe(400);
+    }
+
+    const topics = Array.from({ length: 11 }, (_, i) => ({ name: `projects/p/topics/t${i}` }));
+    const tooMany = await patchSecret(name, 'topics', { topics });
+
+    expect(tooMany.status).toBe(400);
+
+    const missing = await patchSecret('projects/update-rest/secrets/nope', 'labels', {});
+
+    expect(missing.status).toBe(404);
+  });
+});
+
 describe('Secret Manager E2E: official client over REST', () => {
+  test.each([
+    ['projects/client-project'],
+    ['projects/client-project/locations/us-central1'],
+  ])('updates labels and an alias under %s, then accesses by alias', async parent => {
+    const client = new SecretManagerServiceClient({
+      fallback: 'rest',
+      apiEndpoint: 'localhost',
+      port: emulatorPort,
+      protocol: 'http',
+      auth: createFakeAuth('client-project') as never,
+    });
+
+    const [created] = await client.createSecret({
+      parent,
+      secretId: 'client-update',
+      secret: parent.includes('/locations/') ? {} : { replication: { automatic: {} } },
+    });
+
+    await client.addSecretVersion({ parent: created.name, payload: { data: Buffer.from('one') } });
+    await client.addSecretVersion({ parent: created.name, payload: { data: Buffer.from('two') } });
+
+    const [updated] = await client.updateSecret({
+      secret: {
+        name: created.name,
+        etag: created.etag,
+        labels: { env: 'prod' },
+        versionAliases: { current: 1 },
+      },
+      updateMask: { paths: ['labels', 'version_aliases'] },
+    });
+
+    expect(updated.etag).toBe('2');
+    expect(updated.labels).toEqual({ env: 'prod' });
+    expect(updated.versionAliases).toEqual({ current: '1' });
+
+    const [accessed] = await client.accessSecretVersion({
+      name: `${created.name}/versions/current`,
+    });
+
+    expect(accessed.name).toBe(`${created.name}/versions/1`);
+    expect(Buffer.from(accessed.payload?.data ?? new Uint8Array()).toString()).toBe('one');
+
+    const stale = client.updateSecret({
+      secret: { name: created.name, etag: '1', labels: {} },
+      updateMask: { paths: ['labels'] },
+    });
+
+    await expect(stale).rejects.toHaveProperty('code', 10);
+
+    client.close();
+  });
+
+  test('a get then ttl update applies ttl and ignores the expireTime sent back', async () => {
+    const client = new SecretManagerServiceClient({
+      fallback: 'rest',
+      apiEndpoint: 'localhost',
+      port: emulatorPort,
+      protocol: 'http',
+      auth: createFakeAuth('client-project') as never,
+    });
+
+    const [created] = await client.createSecret({
+      parent: 'projects/client-project',
+      secretId: 'ttl-mask',
+      secret: { replication: { automatic: {} } },
+    });
+
+    await client.updateSecret({
+      secret: { name: created.name, expireTime: { seconds: 1893456000 } },
+      updateMask: { paths: ['expire_time'] },
+    });
+
+    const [got] = await client.getSecret({ name: created.name });
+
+    got.ttl = { seconds: 7200 };
+
+    const [updated] = await client.updateSecret({
+      secret: got,
+      updateMask: { paths: ['ttl'] },
+    });
+
+    const remaining = Number(updated.expireTime?.seconds) * 1000 - Date.now();
+
+    expect(remaining).toBeGreaterThan(7000 * 1000);
+    expect(remaining).toBeLessThan(7400 * 1000);
+
+    const [cleared] = await client.updateSecret({
+      secret: { name: created.name, expireTime: updated.expireTime },
+      updateMask: { paths: ['ttl'] },
+    });
+
+    expect(cleared.expireTime).toBeUndefined();
+    expect(cleared.etag).not.toBe(updated.etag);
+
+    client.close();
+  });
+
   test('creates and gets a secret, including an enum field', async () => {
     const client = new SecretManagerServiceClient({
       fallback: 'rest',

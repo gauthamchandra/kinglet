@@ -9,12 +9,14 @@ import type {
   PayloadInput,
   SecretName,
   SecretSpecInput,
+  SecretUpdate,
   SecretVersionLocator,
   SecretVersionView,
   SecretView,
 } from './types.ts';
 import {
   admitPayload,
+  applySecretUpdate,
   etagFromGeneration,
   formatSecretName,
   formatSecretParent,
@@ -72,6 +74,39 @@ export class SecretManager {
     }
 
     return toView(stored);
+  }
+
+  async updateSecret(name: SecretName, update: SecretUpdate): Promise<SecretView> {
+    const resource = formatSecretName(name);
+
+    return this.mutex.runExclusively(resource, async () => {
+      const stored = await this.repository.getByName(resource);
+
+      if (stored == null) {
+        throw new SecretManagerError('NOT_FOUND', `Secret ${resource} not found`, resource);
+      }
+
+      if (update.etag != null && update.etag !== etagFromGeneration(stored.generation)) {
+        throw new SecretManagerError(
+          'ABORTED',
+          `The etag does not match the current etag of ${resource}`
+        );
+      }
+
+      const spec = applySecretUpdate(stored.spec, update.spec, update.fields, this.clock());
+
+      if (Bun.deepEquals(spec, stored.spec)) {
+        return toView(stored);
+      }
+
+      const updated = await this.repository.update({
+        ...stored,
+        generation: stored.generation + 1,
+        spec,
+      });
+
+      return toView(updated);
+    });
   }
 
   async addVersion(name: SecretName, payload: PayloadInput): Promise<SecretVersionView> {

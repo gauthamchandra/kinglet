@@ -136,6 +136,45 @@ export interface SecretView {
   readonly spec: SecretSpec;
 }
 
+export type MutableSecretField =
+  | 'labels'
+  | 'topics'
+  | 'ttl'
+  | 'expireTime'
+  | 'rotation'
+  | 'versionAliases'
+  | 'annotations'
+  | 'versionDestroyTtl'
+  | 'customerManagedEncryption';
+
+export interface SecretUpdate {
+  readonly spec: SecretSpecInput;
+  readonly fields: ReadonlySet<MutableSecretField>;
+  readonly etag: string | null;
+}
+
+const MUTABLE_MASK_PATHS: Readonly<Record<string, MutableSecretField>> = {
+  labels: 'labels',
+  topics: 'topics',
+  expire_time: 'expireTime',
+  ttl: 'ttl',
+  rotation: 'rotation',
+  version_aliases: 'versionAliases',
+  annotations: 'annotations',
+  version_destroy_ttl: 'versionDestroyTtl',
+  customer_managed_encryption: 'customerManagedEncryption',
+};
+
+const IMMUTABLE_MASK_PATHS = new Set([
+  'name',
+  'replication',
+  'create_time',
+  'etag',
+  'tags',
+  'secret_type',
+  'policy_member',
+]);
+
 export function formatSecretParent(parent: SecretParent): string {
   if (parent.location == null) {
     return `projects/${parent.project}`;
@@ -227,14 +266,113 @@ export function resolveSpec(name: SecretName, input: SecretSpecInput, now: Date)
     throw new SecretManagerError('INVALID_ARGUMENT', 'userManaged.replicas must not be empty');
   }
 
-  if (input.topics.length > MAX_TOPICS) {
+  assertTopicsAndAliases(input.topics, input.versionAliases);
+
+  return {
+    replication: input.replication,
+    labels: input.labels,
+    topics: input.topics,
+    expireTime: expireTimeFrom(input.expiration, now),
+    rotation: input.rotation,
+    versionAliases: input.versionAliases,
+    annotations: input.annotations,
+    versionDestroyTtl: input.versionDestroyTtl,
+    customerManagedEncryption: input.customerManagedEncryption,
+    secretType: input.secretType,
+  };
+}
+
+/**
+ * Mask paths may be snake_case (what the official clients send) or camelCase.
+ * Nested paths and `*` are rejected: replacing a whole map for `labels.env`
+ * would wipe every other key.
+ */
+export function parseUpdateMask(paths: readonly string[]): ReadonlySet<MutableSecretField> {
+  if (paths.length === 0) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'update_mask is required');
+  }
+
+  const fields = new Set<MutableSecretField>();
+
+  for (const raw of paths) {
+    const path = raw.trim().replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+
+    if (path === '' || path === '*' || path.includes('.')) {
+      throw new SecretManagerError(
+        'INVALID_ARGUMENT',
+        `update_mask path '${raw}' is not supported; name top-level Secret fields`
+      );
+    }
+
+    if (IMMUTABLE_MASK_PATHS.has(path)) {
+      throw new SecretManagerError('INVALID_ARGUMENT', `Field '${raw}' cannot be updated`);
+    }
+
+    if (!Object.hasOwn(MUTABLE_MASK_PATHS, path)) {
+      throw new SecretManagerError('INVALID_ARGUMENT', `Unknown field '${raw}' in update_mask`);
+    }
+
+    const field = MUTABLE_MASK_PATHS[path];
+
+    if (field == null) {
+      throw new SecretManagerError('INVALID_ARGUMENT', `Unknown field '${raw}' in update_mask`);
+    }
+
+    fields.add(field);
+  }
+
+  if (fields.has('ttl') && fields.has('expireTime')) {
+    throw new SecretManagerError(
+      'INVALID_ARGUMENT',
+      'ttl and expire_time cannot both be in update_mask'
+    );
+  }
+
+  return fields;
+}
+
+export function applySecretUpdate(
+  current: SecretSpec,
+  input: SecretSpecInput,
+  fields: ReadonlySet<MutableSecretField>,
+  now: Date
+): SecretSpec {
+  const next: SecretSpec = {
+    ...current,
+    labels: fields.has('labels') ? input.labels : current.labels,
+    topics: fields.has('topics') ? input.topics : current.topics,
+    expireTime:
+      fields.has('ttl') || fields.has('expireTime')
+        ? expireTimeFrom(input.expiration, now)
+        : current.expireTime,
+    rotation: fields.has('rotation') ? input.rotation : current.rotation,
+    versionAliases: fields.has('versionAliases') ? input.versionAliases : current.versionAliases,
+    annotations: fields.has('annotations') ? input.annotations : current.annotations,
+    versionDestroyTtl: fields.has('versionDestroyTtl')
+      ? input.versionDestroyTtl
+      : current.versionDestroyTtl,
+    customerManagedEncryption: fields.has('customerManagedEncryption')
+      ? input.customerManagedEncryption
+      : current.customerManagedEncryption,
+  };
+
+  assertTopicsAndAliases(next.topics, next.versionAliases);
+
+  return next;
+}
+
+function assertTopicsAndAliases(
+  topics: readonly string[],
+  versionAliases: Readonly<Record<string, number>>
+): void {
+  if (topics.length > MAX_TOPICS) {
     throw new SecretManagerError(
       'INVALID_ARGUMENT',
       `A secret can have at most ${MAX_TOPICS} topics`
     );
   }
 
-  const aliasEntries = Object.entries(input.versionAliases);
+  const aliasEntries = Object.entries(versionAliases);
 
   if (aliasEntries.length > MAX_ALIASES) {
     throw new SecretManagerError(
@@ -255,19 +393,6 @@ export function resolveSpec(name: SecretName, input: SecretSpecInput, now: Date)
       );
     }
   }
-
-  return {
-    replication: input.replication,
-    labels: input.labels,
-    topics: input.topics,
-    expireTime: expireTimeFrom(input.expiration, now),
-    rotation: input.rotation,
-    versionAliases: input.versionAliases,
-    annotations: input.annotations,
-    versionDestroyTtl: input.versionDestroyTtl,
-    customerManagedEncryption: input.customerManagedEncryption,
-    secretType: input.secretType,
-  };
 }
 
 export function etagFromGeneration(generation: number): string {

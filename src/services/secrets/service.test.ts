@@ -86,6 +86,83 @@ describe('SecretManager', () => {
     expect(meta).not.toHaveProperty('data');
     expect(meta.state).toBe('ENABLED');
   });
+
+  test('update bumps the etag on a change and keeps it on a no-op', async () => {
+    const manager = await managerWith();
+    const name = secretNameIn({ project: 'demo', location: 'us-east1' }, 'db');
+
+    await manager.createSecret(name, { ...input(), replication: null });
+
+    const changed = await manager.updateSecret(name, {
+      spec: { ...input(), labels: { team: 'edge' } },
+      fields: new Set(['labels']),
+      etag: '1',
+    });
+
+    expect(changed.etag).toBe('2');
+    expect(changed.spec.labels).toEqual({ team: 'edge' });
+    expect(changed.spec.replication).toBeNull();
+
+    const same = await manager.updateSecret(name, {
+      spec: { ...input(), labels: { team: 'edge' } },
+      fields: new Set(['labels']),
+      etag: null,
+    });
+
+    expect(same.etag).toBe('2');
+    expect((await manager.getSecret(name)).etag).toBe('2');
+  });
+
+  test('a stale etag is ABORTED and a missing secret is NOT_FOUND', async () => {
+    const manager = await managerWith();
+    const name = secretNameIn({ project: 'demo', location: null }, 'db');
+
+    await manager.createSecret(name, input());
+
+    const stale = manager.updateSecret(name, {
+      spec: input(),
+      fields: new Set(['labels']),
+      etag: '7',
+    });
+
+    await expect(stale).rejects.toHaveProperty('code', 'ABORTED');
+
+    const missing = manager.updateSecret(secretNameIn(name.parent, 'nope'), {
+      spec: input(),
+      fields: new Set(['labels']),
+      etag: null,
+    });
+
+    await expect(missing).rejects.toHaveProperty('code', 'NOT_FOUND');
+  });
+
+  test('an alias set by update resolves on get and access', async () => {
+    const manager = await managerWith();
+    const name = secretNameIn({ project: 'demo', location: null }, 'db');
+    const requested = 'projects/demo/secrets/db/versions/current';
+    const byAlias = { secret: name, selector: { kind: 'alias' as const, alias: 'current' } };
+
+    await manager.createSecret(name, input());
+    await manager.addVersion(name, { data: utf8('one'), crc32c: null });
+    await manager.addVersion(name, { data: utf8('two'), crc32c: null });
+
+    await expect(manager.accessVersion(byAlias, requested)).rejects.toHaveProperty(
+      'code',
+      'NOT_FOUND'
+    );
+
+    await manager.updateSecret(name, {
+      spec: { ...input(), versionAliases: { current: 1 } },
+      fields: new Set(['versionAliases']),
+      etag: null,
+    });
+
+    const accessed = await manager.accessVersion(byAlias, requested);
+    const meta = await manager.getVersion(byAlias, requested);
+
+    expect(Buffer.from(accessed.data).toString()).toBe('one');
+    expect(meta.name).toBe('projects/demo/secrets/db/versions/1');
+  });
 });
 
 async function managerWith(): Promise<SecretManager> {

@@ -9,16 +9,18 @@ import type {
   Cmek,
   Duration,
   Expiration,
+  MutableSecretField,
   PayloadInput,
   Replica,
   Replication,
   Rotation,
   SecretSpecInput,
   SecretType,
+  SecretUpdate,
   SecretVersionView,
   SecretView,
 } from './types.ts';
-import { SECRET_TYPE_BY_NUMBER, SecretManagerError } from './types.ts';
+import { parseUpdateMask, SECRET_TYPE_BY_NUMBER, SecretManagerError } from './types.ts';
 
 export type WireMessage = Readonly<Record<string, unknown>>;
 
@@ -65,6 +67,70 @@ export function decodeCreate(
 
 export function decodeGet(message: WireMessage): string {
   return readRequiredString(message.name, 'name');
+}
+
+const WIRE_KEYS_BY_FIELD: Readonly<Record<MutableSecretField, readonly string[]>> = {
+  labels: ['labels'],
+  topics: ['topics'],
+  ttl: ['ttl'],
+  expireTime: ['expireTime'],
+  rotation: ['rotation'],
+  versionAliases: ['versionAliases'],
+  annotations: ['annotations'],
+  versionDestroyTtl: ['versionDestroyTtl'],
+  customerManagedEncryption: ['customerManagedEncryption'],
+};
+
+/**
+ * REST carries the mask as a comma-joined query string, gRPC as a FieldMask.
+ * Only masked fields are decoded, so an unmasked field cannot fail the call.
+ */
+export function decodeUpdate(
+  message: WireMessage,
+  dialect: WireDialect
+): { nameRaw: string; update: SecretUpdate } {
+  const secret = asRecord(message.secret, 'secret');
+  const nameRaw = readRequiredString(secret.name, 'secret.name');
+  const fields = parseUpdateMask(readMaskPaths(message.updateMask));
+  const masked: Record<string, unknown> = {};
+
+  for (const field of fields) {
+    if (field === 'ttl' || field === 'expireTime') {
+      continue;
+    }
+
+    for (const key of WIRE_KEYS_BY_FIELD[field]) {
+      masked[key] = secret[key];
+    }
+  }
+
+  const etag = typeof secret.etag === 'string' && secret.etag !== '' ? secret.etag : null;
+  const spec = decodeSecretSpecInput(masked, dialect);
+
+  return {
+    nameRaw,
+    update: {
+      spec: { ...spec, expiration: readMaskedExpiration(secret, fields, dialect) },
+      fields,
+      etag,
+    },
+  };
+}
+
+function readMaskPaths(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value === '' ? [] : value.split(',');
+  }
+
+  if (value != null && typeof value === 'object' && 'paths' in value) {
+    const paths = value.paths;
+
+    if (Array.isArray(paths) && paths.every(path => typeof path === 'string')) {
+      return paths;
+    }
+  }
+
+  return [];
 }
 
 export function decodeSecretSpecInput(secret: WireMessage, dialect: WireDialect): SecretSpecInput {
@@ -257,6 +323,41 @@ function writeCmek(cmek: Cmek): WireMessage {
   return { kmsKeyName: cmek.kmsKeyName };
 }
 
+/**
+ * ttl and expire_time are one stored expiry, but the mask names one arm.
+ * A get-then-update from the official REST client sends the other arm too.
+ * Only the masked arm is read. An absent masked arm clears the expiry.
+ */
+function readMaskedExpiration(
+  secret: WireMessage,
+  fields: ReadonlySet<MutableSecretField>,
+  dialect: WireDialect
+): Expiration {
+  if (fields.has('ttl')) {
+    if (isUnset(secret.ttl)) {
+      return { kind: 'none' };
+    }
+
+    return { kind: 'ttl', ttl: requireDuration(secret.ttl, dialect, 'ttl') };
+  }
+
+  if (fields.has('expireTime')) {
+    if (isUnset(secret.expireTime)) {
+      return { kind: 'none' };
+    }
+
+    const at = dialect.readTimestamp(secret.expireTime);
+
+    if (at == null) {
+      throw new SecretManagerError('INVALID_ARGUMENT', 'expireTime is invalid');
+    }
+
+    return { kind: 'expireTime', at };
+  }
+
+  return { kind: 'none' };
+}
+
 function readExpiration(secret: WireMessage, dialect: WireDialect): Expiration {
   if (dialect.kind === 'grpc') {
     if (secret.expiration === 'ttl') {
@@ -376,9 +477,13 @@ function readAliasMap(value: unknown): Record<string, number> {
 
   for (const [alias, entry] of Object.entries(record)) {
     const parsed =
-      typeof entry === 'number' ? entry : typeof entry === 'string' ? Number(entry) : Number.NaN;
+      typeof entry === 'number'
+        ? entry
+        : typeof entry === 'string' && /^-?\d+$/.test(entry)
+          ? Number(entry)
+          : Number.NaN;
 
-    if (!Number.isInteger(parsed)) {
+    if (!Number.isSafeInteger(parsed)) {
       throw new SecretManagerError(
         'INVALID_ARGUMENT',
         `versionAliases.${alias} must be an integer`
