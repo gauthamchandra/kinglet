@@ -181,13 +181,7 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
       this.startInstanceLocked(project, instance, databases)
     );
 
-    const tracked = work.finally(() => {
-      this.pendingStarts.delete(tracked);
-    });
-
-    this.pendingStarts.add(tracked);
-
-    return tracked;
+    return this.trackStart(work);
   }
 
   async startReplicaInstance(
@@ -203,13 +197,7 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
       this.startReplicaInstanceLocked(project, instance, primaryPort)
     );
 
-    const tracked = work.finally(() => {
-      this.pendingStarts.delete(tracked);
-    });
-
-    this.pendingStarts.add(tracked);
-
-    return tracked;
+    return this.trackStart(work);
   }
 
   private async startReplicaInstanceLocked(
@@ -453,6 +441,17 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
         await sql.unsafe(`DROP DATABASE IF EXISTS ${quoteIdentifier(database)} WITH (FORCE)`);
       });
     });
+  }
+
+  /** Shutdown waits on this set. A start that has left `running` still has to be in it. */
+  private trackStart<T>(work: Promise<T>): Promise<T> {
+    const tracked = work.finally(() => {
+      this.pendingStarts.delete(tracked);
+    });
+
+    this.pendingStarts.add(tracked);
+
+    return tracked;
   }
 
   async stopAll(): Promise<void> {
@@ -713,12 +712,14 @@ export class PostgresServerDataPlane implements PostgresDataPlane {
       }
 
       try {
-        await this.startInstanceLocked(project, instance, databases);
+        // The restart has already left `running`. Shutdown only waits for
+        // starts recorded in pendingStarts.
+        await this.trackStart(this.startInstanceLocked(project, instance, databases));
         this.appliedFlags.set(key, normalized);
       } catch (restartError) {
         try {
           await Bun.write(autoPath, previousAuto);
-          await this.startInstanceLocked(project, instance, databases);
+          await this.trackStart(this.startInstanceLocked(project, instance, databases));
         } catch {
           // Recovery failed; the server stays down and the settings row is rolled back.
         }

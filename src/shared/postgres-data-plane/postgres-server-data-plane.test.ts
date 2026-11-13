@@ -796,6 +796,105 @@ describe('PostgresServerDataPlane directory safety', () => {
     }
   });
 
+  test('stopAll waits for a flag restart that has left running', async () => {
+    let releaseRestart: () => void = () => {};
+    const release = new Promise<void>(resolve => {
+      releaseRestart = resolve;
+    });
+    let markEntered: () => void = () => {};
+    const entered = new Promise<void>(resolve => {
+      markEntered = resolve;
+    });
+    let starts = 0;
+    let loadReads = 0;
+    let dataDir = '';
+    const stale = '2020-01-01 00:00:00.000100';
+    const fresh = '2020-01-01 00:00:00.000900';
+    const sql = Object.assign(
+      async (strings: TemplateStringsArray) => {
+        const text = strings.join('');
+
+        if (text.includes('pg_conf_load_time')) {
+          loadReads += 1;
+
+          return [{ loaded: loadReads < 3 ? stale : fresh }];
+        }
+
+        if (text.includes('pg_reload_conf')) return [{ pg_reload_conf: true }];
+
+        if (text.includes('pending_restart')) return [{ pending_restart: true }];
+
+        return [{ one: 1 }];
+      },
+      { unsafe: async () => {}, close: async () => {} }
+    );
+    const plane = new PostgresServerDataPlane(logger, {
+      product: CLOUDSQL_DATA_PLANE_PRODUCT,
+      dataDirectory: null,
+      portRangeStart: 47932,
+      portRangeEnd: 47932,
+      processManager: {
+        ...unavailableSupervisor(),
+        isPostgresAvailable: () => true,
+        ensureInitialized: async (dir: string) => {
+          await mkdir(dir, { recursive: true });
+          await Bun.write(join(dir, 'PG_VERSION'), '18\n');
+        },
+        start: async (dir: string) => {
+          starts += 1;
+          dataDir = dir;
+
+          if (starts === 1) return;
+
+          markEntered();
+          await release;
+        },
+        stop: async () => {},
+        openAdminConnection: () => sql as unknown as SQL,
+      },
+    });
+
+    await plane.startInstance('p', 'inst', ['postgres']);
+
+    const applying = plane.applyDatabaseFlags(
+      'p',
+      'inst',
+      [{ name: 'max_connections', value: '200' }],
+      ['postgres']
+    );
+
+    try {
+      await entered;
+
+      const stopping = plane.stopAll();
+      let finished = false;
+
+      void stopping.then(() => {
+        finished = true;
+      });
+      await Bun.sleep(30);
+      expect(finished).toBe(false);
+      expect(
+        await fsPromises.stat(dataDir).then(
+          () => true,
+          () => false
+        )
+      ).toBe(true);
+
+      releaseRestart();
+      await Promise.all([applying, stopping]);
+      expect(plane.getPort('p', 'inst')).toBeNull();
+      expect(
+        await fsPromises.stat(dataDir).then(
+          () => true,
+          () => false
+        )
+      ).toBe(false);
+    } finally {
+      releaseRestart();
+    }
+  });
+
   test('concurrent memory creates share one temp root', async () => {
     const dirs: string[] = [];
     const realMkdir = fsPromises.mkdtemp;

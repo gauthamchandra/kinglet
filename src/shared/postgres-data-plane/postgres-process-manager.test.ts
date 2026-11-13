@@ -472,6 +472,44 @@ describe('Postgres process cleanup', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test('writes kinglet defaults into an existing cluster once', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kinglet-pg-existing-'));
+    const binDir = join(root, 'bin');
+    const share = join(root, 'share');
+    const dataDir = join(root, 'data');
+
+    await mkdir(binDir);
+    await mkdir(join(share, 'extension'), { recursive: true });
+    await mkdir(dataDir);
+    await Bun.write(join(share, 'extension', 'pg_stat_statements.control'), '');
+    await Bun.write(
+      join(binDir, 'pg_config'),
+      `#!/bin/sh\nif [ "$1" = "--sharedir" ]; then printf '%s\\n' '${share}'; exit 0; fi\nexit 1\n`
+    );
+    await chmod(join(binDir, 'pg_config'), 0o755);
+    await Bun.write(join(dataDir, 'PG_VERSION'), '18\n');
+    await Bun.write(join(dataDir, 'postgresql.conf'), "listen_addresses = '*'\n");
+    await Bun.write(
+      join(dataDir, 'postgresql.auto.conf'),
+      "shared_preload_libraries='pg_stat_statements'\n"
+    );
+
+    const manager = new PostgresProcessManager(new Logger('postgres-test', 'error'), { binDir });
+
+    try {
+      await manager.ensureInitialized(dataDir);
+      await manager.ensureInitialized(dataDir);
+
+      const config = await Bun.file(join(dataDir, 'postgresql.conf')).text();
+
+      expect(config).toContain("password_encryption='scram-sha-256'");
+      expect(config).toContain("shared_preload_libraries='pg_stat_statements'");
+      expect(config.match(/# kinglet defaults/g)?.length).toBe(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe.skipIf(!isRealPostgresAvailable)('PostgresProcessManager', () => {
