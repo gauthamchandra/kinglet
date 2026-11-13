@@ -4,10 +4,14 @@
 
 import type { BaseRecord } from '@/core/storage/types.ts';
 import type {
+  DatabaseFlag,
   DataPlaneLogin,
   PostgresDataPlane,
 } from '@/shared/postgres-data-plane/data-plane-manager.ts';
-import { DisabledDataPlane } from '@/shared/postgres-data-plane/data-plane-manager.ts';
+import {
+  DatabaseFlagError,
+  DisabledDataPlane,
+} from '@/shared/postgres-data-plane/data-plane-manager.ts';
 import { isReservedCloudSqlRole } from '@/shared/postgres-data-plane/postgres-server-data-plane.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { CloudSqlRepository } from './repository.ts';
@@ -75,6 +79,40 @@ export function cloudSqlLogin(name: string, password: string): DataPlaneLogin {
   };
 }
 
+/**
+ * The `databaseFlags` array on a settings object.
+ *
+ * An absent key is an empty list. A present value that is not a list, or an
+ * entry whose name or value is not a string, is rejected, so a bad value is
+ * not treated as "clear every flag". Names are folded to lower case, which
+ * is how Postgres stores them.
+ */
+export function extractDatabaseFlags(settings: Record<string, unknown>): DatabaseFlag[] {
+  if (!Object.hasOwn(settings, 'databaseFlags')) return [];
+
+  const raw = settings.databaseFlags;
+
+  if (!Array.isArray(raw)) {
+    throw new SqlAdminError('INVALID_ARGUMENT', 'databaseFlags must be a list');
+  }
+
+  return raw.map(entry => {
+    const record =
+      typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : null;
+    const name = record?.name;
+    const value = record?.value;
+
+    if (typeof name !== 'string' || typeof value !== 'string') {
+      throw new SqlAdminError(
+        'INVALID_ARGUMENT',
+        'databaseFlags entries require string name and value'
+      );
+    }
+
+    return { name: name.toLowerCase(), value };
+  });
+}
+
 export class SqlAdminService {
   private repo: CloudSqlRepository;
   private dataPlane: PostgresDataPlane;
@@ -126,6 +164,8 @@ export class SqlAdminService {
 
     void kind;
 
+    const createFlags = extractDatabaseFlags(userSettings);
+
     const record = await this.repo.createInstance({
       project,
       name: request.name,
@@ -164,6 +204,10 @@ export class SqlAdminService {
         request.name,
         cloudSqlLogin('postgres', request.rootPassword ?? '')
       );
+
+      if (createFlags.length > 0) {
+        await this.dataPlane.applyDatabaseFlags(project, request.name, createFlags, ['postgres']);
+      }
     } catch (error) {
       // An instance whose rows exist but whose endpoint never came up would
       // advertise an address nothing answers on, and no later call would ever
@@ -184,13 +228,16 @@ export class SqlAdminService {
       // insert with 200 and an Operation, and a provisioning failure surfaces
       // as that operation's `error` (an OperationErrors list, DONE status).
       // Throwing here would hand @googleapis/sqladmin a 500 it never expects
-      // from instances.insert.
+      // from instances.insert. A rejected flag stays INVALID_ARGUMENT.
+      const mapped = this.dataPlaneError(
+        error,
+        `Failed to start the data plane for ${project}/${request.name}`
+      );
+
       return this.recordOperation(project, OperationType.CREATE, record.name, {
         kind: 'sql#operationError',
-        code: 'INTERNAL_ERROR',
-        message: `Failed to start the data plane for ${project}/${request.name}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        code: mapped.code === 'INVALID_ARGUMENT' ? 'INVALID_ARGUMENT' : 'INTERNAL_ERROR',
+        message: mapped.message,
       });
     }
 
@@ -236,20 +283,28 @@ export class SqlAdminService {
   async restartInstance(project: string, name: string): Promise<OperationResponse> {
     await this.requireInstance(project, name);
 
-    const databases = await this.repo.listDatabases(project, name);
-
     return this.withUserChanges(project, name, async () => {
+      // Read inside the lock. A patch queued ahead of this restart can commit
+      // new flags before the lock is free, and a snapshot taken before the
+      // wait would write those old flags back over the saved row.
+      const record = await this.requireInstance(project, name);
+      const databases = await this.repo.listDatabases(project, name);
+      const databaseNames = databases.map(database => database.name);
+
       try {
-        await this.dataPlane.restartInstance(
-          project,
-          name,
-          databases.map(database => database.name)
-        );
+        await this.dataPlane.restartInstance(project, name, databaseNames);
 
         // Startup rehydration already does this. An explicit restart has to as
         // well, so a cluster created again comes back with the roles sqlite has.
         for (const user of await this.repo.listUsers(project, name)) {
           await this.dataPlane.upsertUser(project, name, cloudSqlLogin(user.name, user.password));
+        }
+
+        const restartSettings = JSON.parse(record.settings) as Record<string, unknown>;
+        const restartFlags = extractDatabaseFlags(restartSettings);
+
+        if (restartFlags.length > 0) {
+          await this.dataPlane.applyDatabaseFlags(project, name, restartFlags, databaseNames);
         }
       } catch (error) {
         throw this.dataPlaneError(error, `Failed to restart ${project}/${name}`);
@@ -669,6 +724,10 @@ export class SqlAdminService {
   private dataPlaneError(error: unknown, action: string): SqlAdminError {
     if (error instanceof SqlAdminError) return error;
 
+    if (error instanceof DatabaseFlagError) {
+      return new SqlAdminError('INVALID_ARGUMENT', error.message);
+    }
+
     const detail = error instanceof Error ? error.message : String(error);
 
     return new SqlAdminError('INTERNAL', `${action}: ${detail}`);
@@ -706,35 +765,63 @@ export class SqlAdminService {
       throw new SqlAdminError('INVALID_ARGUMENT', 'settings is required for instances.update');
     }
 
-    const existing = await this.requireInstance(project, name);
-    const incoming = parsed.data.settings ?? {};
-    const { settingsVersion, kind, ...userSettings } = incoming as Record<string, unknown>;
+    return this.withUserChanges(project, name, async () => {
+      const existing = await this.requireInstance(project, name);
+      const incoming = parsed.data.settings ?? {};
+      const { settingsVersion, kind, ...userSettings } = incoming as Record<string, unknown>;
 
-    void kind;
+      void kind;
 
-    if (requireVersion || settingsVersion != null) {
-      const provided = typeof settingsVersion === 'number' ? settingsVersion : Number.NaN;
+      if (requireVersion || settingsVersion != null) {
+        const provided = typeof settingsVersion === 'number' ? settingsVersion : Number.NaN;
 
-      if (provided !== existing.settingsVersion) {
-        throw new SqlAdminError(
-          'FAILED_PRECONDITION',
-          `settings.settingsVersion mismatch: expected ${existing.settingsVersion}, got ${String(settingsVersion)}`
-        );
+        if (provided !== existing.settingsVersion) {
+          throw new SqlAdminError(
+            'FAILED_PRECONDITION',
+            `settings.settingsVersion mismatch: expected ${existing.settingsVersion}, got ${String(settingsVersion)}`
+          );
+        }
       }
-    }
 
-    // PUT (instances.update) replaces the settings object entirely; PATCH
-    // (instances.patch) merges the provided keys into the existing settings.
-    const nextSettings = requireVersion
-      ? userSettings
-      : { ...(JSON.parse(existing.settings) as Record<string, unknown>), ...userSettings };
+      // PUT (instances.update) replaces the settings object entirely; PATCH
+      // (instances.patch) merges the provided keys into the existing settings.
+      const nextSettings = requireVersion
+        ? userSettings
+        : { ...(JSON.parse(existing.settings) as Record<string, unknown>), ...userSettings };
 
-    await this.repo.updateInstance(project, name, {
-      settings: JSON.stringify(nextSettings),
-      settingsVersion: existing.settingsVersion + 1,
+      // PUT applies the flags that remain after the replacement, including an
+      // empty list when the key was omitted. PATCH applies them only when the
+      // request named the key. A bad entry throws before the row is saved.
+      const flagsToApply = requireVersion
+        ? extractDatabaseFlags(nextSettings)
+        : Object.hasOwn(userSettings, 'databaseFlags')
+          ? extractDatabaseFlags(userSettings)
+          : null;
+
+      await this.repo.updateInstance(project, name, {
+        settings: JSON.stringify(nextSettings),
+        settingsVersion: existing.settingsVersion + 1,
+      });
+
+      if (flagsToApply != null) {
+        try {
+          const databases = (await this.repo.listDatabases(project, name)).map(d => d.name);
+
+          await this.dataPlane.applyDatabaseFlags(project, name, flagsToApply, databases);
+        } catch (error) {
+          // Roll back the settings row: the data plane rejected the flags, so the
+          // stored settings must not advance past what the server actually has.
+          await this.repo.updateInstance(project, name, {
+            settings: existing.settings,
+            settingsVersion: existing.settingsVersion,
+          });
+
+          throw this.dataPlaneError(error, `Failed to apply database flags on ${project}/${name}`);
+        }
+      }
+
+      return this.recordOperation(project, OperationType.UPDATE, name);
     });
-
-    return this.recordOperation(project, OperationType.UPDATE, name);
   }
 
   /** Emulated operations are born DONE; `error` marks one that finished by failing. */

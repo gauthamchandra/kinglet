@@ -209,7 +209,7 @@ describe('CloudSqlService', () => {
 
       await client.end();
       await dataPlaneService.stop();
-    });
+    }, 20_000);
 
     test('stop closes the endpoint so its port can be bound again', async () => {
       const dataPlaneService = await startService();

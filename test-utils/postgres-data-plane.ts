@@ -9,6 +9,7 @@
  */
 
 import type {
+  DatabaseFlag,
   DataPlaneLogin,
   PostgresDataPlane,
 } from '@/shared/postgres-data-plane/data-plane-manager.ts';
@@ -37,6 +38,9 @@ export class RecordingDataPlane implements PostgresDataPlane {
 
   /** When set, `dropDatabase` records the call and then throws this. */
   dropDatabaseFailure: Error | null = null;
+
+  /** When set, `applyDatabaseFlags` records the call and then throws this. */
+  applyFlagsFailure: Error | null = null;
 
   private readonly port: number;
   private readonly reportedPort: number | null;
@@ -108,6 +112,16 @@ export class RecordingDataPlane implements PostgresDataPlane {
     this.calls.push(`dropUser:${project}/${instance}:${userName}`);
 
     if (this.dropUserFailure) throw this.dropUserFailure;
+  }
+
+  async applyDatabaseFlags(
+    project: string,
+    instance: string,
+    flags: DatabaseFlag[]
+  ): Promise<void> {
+    this.calls.push(`applyFlags:${project}/${instance}:${flags.map(f => f.name).join(',')}`);
+
+    if (this.applyFlagsFailure) throw this.applyFlagsFailure;
   }
 
   getPort(): number | null {

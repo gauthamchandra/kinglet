@@ -51,7 +51,11 @@ export class PostgresProcessManager {
   async ensureInitialized(dataDir: string): Promise<void> {
     dataDir = resolve(dataDir);
 
-    if (await Bun.file(join(dataDir, 'PG_VERSION')).exists()) return;
+    if (await Bun.file(join(dataDir, 'PG_VERSION')).exists()) {
+      await this.ensureKingletDefaults(dataDir);
+
+      return;
+    }
 
     this.templateInitialization ??= this.initializeTemplate().catch(error => {
       this.templateInitialization = undefined;
@@ -426,6 +430,27 @@ export class PostgresProcessManager {
     }
 
     await Bun.write(join(templateDir, 'pg_hba.conf'), withReplicationHba(BASE_HBA));
+    await this.ensureKingletDefaults(templateDir);
+    // Replica WAL settings stay in auto.conf. Kinglet defaults stay in
+    // postgresql.conf so ALTER SYSTEM RESET falls back to them.
+    await Bun.write(join(templateDir, 'postgresql.auto.conf'), withReplicaSettings(''));
+
+    await this.prepareDirectoryForPostgres(templateDir);
+
+    return templateDir;
+  }
+
+  /**
+   * Defaults live in postgresql.conf so ALTER SYSTEM RESET falls back to them.
+   * auto.conf overrides this file, and a second call leaves an existing block
+   * in place.
+   */
+  private async ensureKingletDefaults(dataDir: string): Promise<void> {
+    const pgConfPath = join(dataDir, 'postgresql.conf');
+    const existing = (await Bun.file(pgConfPath).exists()) ? await Bun.file(pgConfPath).text() : '';
+
+    if (existing.includes('# kinglet defaults\n')) return;
+
     // PATH pg_config can be an older client, or the PGDG wrapper that exits
     // when it cannot see a server binary. The share directory has to belong
     // to the server this process will exec.
@@ -433,16 +458,12 @@ export class PostgresProcessManager {
     const hasStatisticsExtension =
       shareDir != null &&
       (await Bun.file(join(shareDir, 'extension', 'pg_stat_statements.control')).exists());
-    await Bun.write(
-      join(templateDir, 'postgresql.auto.conf'),
-      withReplicaSettings(
-        "password_encryption='scram-sha-256'\n" +
-          (hasStatisticsExtension ? "shared_preload_libraries='pg_stat_statements'\n" : '')
-      )
-    );
-    await this.prepareDirectoryForPostgres(templateDir);
 
-    return templateDir;
+    await Bun.write(
+      pgConfPath,
+      `${existing}\n# kinglet defaults\npassword_encryption='scram-sha-256'\n` +
+        (hasStatisticsExtension ? "shared_preload_libraries='pg_stat_statements'\n" : '')
+    );
   }
 
   private async ensureReplicaSourceConfig(dataDir: string): Promise<void> {
