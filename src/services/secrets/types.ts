@@ -3,6 +3,7 @@
  */
 
 import { crc32cString } from '@/shared/utils/crc32c.ts';
+import { DEFAULT_LIST_PAGE_SIZE } from '@/shared/utils/pagination.ts';
 
 export const SECRETS_TABLE = 'secretmanager_secrets';
 
@@ -17,6 +18,8 @@ const MAX_TOPICS = 10;
 const MAX_ALIASES = 50;
 
 const RESERVED_ALIASES = new Set(['latest', 'NEW']);
+
+const MAX_PAGE_SIZE = 25_000;
 
 export type SecretManagerErrorCode =
   | 'NOT_FOUND'
@@ -297,12 +300,28 @@ export interface SecretVersionLocator {
   readonly selector: VersionSelector;
 }
 
+export type SecretVersionState = 'ENABLED' | 'DISABLED' | 'DESTROYED';
+
+export type VersionTransition = 'enable' | 'disable' | 'destroy';
+
 export interface SecretVersionView {
   readonly name: string;
-  readonly state: 'ENABLED' | 'DISABLED' | 'DESTROYED';
+  readonly state: SecretVersionState;
   readonly createTime: string;
+  readonly destroyTime: string | null;
   readonly etag: string;
   readonly clientSpecifiedPayloadChecksum: boolean;
+}
+
+export interface PageRequest {
+  readonly pageSize: number | null;
+  readonly pageToken: string | null;
+}
+
+export interface SecretVersionPage {
+  readonly versions: readonly SecretVersionView[];
+  readonly totalSize: number;
+  readonly nextPageToken: string | null;
 }
 
 export interface AccessedSecret {
@@ -394,6 +413,52 @@ export function resolveVersionNumber(
   }
 
   return selector.number;
+}
+
+/**
+ * Returns the state a transition lands on, or null when the version is
+ * already there and nothing should change (including the etag).
+ */
+export function nextVersionState(
+  current: SecretVersionState,
+  transition: VersionTransition,
+  versionName: string
+): SecretVersionState | null {
+  if (current === 'DESTROYED') {
+    throw new SecretManagerError(
+      'FAILED_PRECONDITION',
+      `SecretVersion ${versionName} is in DESTROYED state`
+    );
+  }
+
+  const target: SecretVersionState =
+    transition === 'enable' ? 'ENABLED' : transition === 'disable' ? 'DISABLED' : 'DESTROYED';
+
+  return target === current ? null : target;
+}
+
+export function resolvePageSize(requested: number | null): number {
+  if (requested != null && requested < 0) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'page_size must not be negative');
+  }
+
+  if (requested == null || requested === 0) {
+    return DEFAULT_LIST_PAGE_SIZE;
+  }
+
+  return Math.min(requested, MAX_PAGE_SIZE);
+}
+
+export function parsePageToken(raw: string | null): number {
+  if (raw == null) {
+    return 0;
+  }
+
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'page_token is invalid');
+  }
+
+  return Number(raw);
 }
 
 function expireTimeFrom(expiration: Expiration, now: Date): string | null {

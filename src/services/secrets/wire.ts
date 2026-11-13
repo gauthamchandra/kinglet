@@ -15,6 +15,7 @@ import type {
   Rotation,
   SecretSpecInput,
   SecretType,
+  SecretVersionPage,
   SecretVersionView,
   SecretView,
 } from './types.ts';
@@ -155,14 +156,75 @@ export function decodeVersion(message: WireMessage): string {
   return readRequiredString(message.name, 'name');
 }
 
-export function encodeVersion(version: SecretVersionView, _dialect: WireDialect): WireMessage {
-  return {
+export function encodeVersion(version: SecretVersionView, dialect: WireDialect): WireMessage {
+  const body: Record<string, unknown> = {
     name: version.name,
     state: version.state,
-    createTime: _dialect.writeTimestamp(version.createTime),
+    createTime: dialect.writeTimestamp(version.createTime),
     etag: version.etag,
     clientSpecifiedPayloadChecksum: version.clientSpecifiedPayloadChecksum,
   };
+
+  if (version.destroyTime != null) {
+    body.destroyTime = dialect.writeTimestamp(version.destroyTime);
+  }
+
+  return body;
+}
+
+export function decodeListVersions(message: WireMessage): {
+  parentRaw: string;
+  pageSize: number | null;
+  pageToken: string | null;
+} {
+  if (!isUnset(message.filter)) {
+    throw new SecretManagerError('UNIMPLEMENTED', 'filter is not supported on ListSecretVersions');
+  }
+
+  return {
+    parentRaw: readRequiredString(message.parent, 'parent'),
+    pageSize: readPageSize(message.pageSize),
+    pageToken: isUnset(message.pageToken) ? null : String(message.pageToken),
+  };
+}
+
+export function encodeVersionPage(page: SecretVersionPage, dialect: WireDialect): WireMessage {
+  const body: Record<string, unknown> = {
+    versions: page.versions.map(version => encodeVersion(version, dialect)),
+    totalSize: page.totalSize,
+  };
+
+  if (page.nextPageToken != null) {
+    body.nextPageToken = page.nextPageToken;
+  }
+
+  return body;
+}
+
+export function decodeVersionChange(message: WireMessage): { name: string; etag: string | null } {
+  return {
+    name: readRequiredString(message.name, 'name'),
+    etag: isUnset(message.etag) ? null : String(message.etag),
+  };
+}
+
+function readPageSize(value: unknown): number | null {
+  if (isUnset(value)) {
+    return null;
+  }
+
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^-?\d+$/.test(value)
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isSafeInteger(parsed)) {
+    throw new SecretManagerError('INVALID_ARGUMENT', 'page_size must be an integer');
+  }
+
+  return parsed;
 }
 
 export function encodeAccessed(accessed: AccessedSecret, dialect: WireDialect): WireMessage {

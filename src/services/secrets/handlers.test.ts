@@ -32,14 +32,22 @@ describe('secret manager RPC table', () => {
       'projects.locations.secrets.create',
       'projects.locations.secrets.get',
       'projects.locations.secrets.versions.access',
+      'projects.locations.secrets.versions.destroy',
+      'projects.locations.secrets.versions.disable',
+      'projects.locations.secrets.versions.enable',
       'projects.locations.secrets.versions.get',
+      'projects.locations.secrets.versions.list',
       'projects.secrets.addVersion',
       'projects.secrets.create',
       'projects.secrets.get',
       'projects.secrets.versions.access',
+      'projects.secrets.versions.destroy',
+      'projects.secrets.versions.disable',
+      'projects.secrets.versions.enable',
       'projects.secrets.versions.get',
+      'projects.secrets.versions.list',
     ]);
-    expect(routes).toHaveLength(10);
+    expect(routes).toHaveLength(18);
   });
 
   test('deferred RPCs return gRPC UNIMPLEMENTED', async () => {
@@ -157,7 +165,107 @@ describe('secret manager RPC table', () => {
     );
     expect(body.error.details[0]?.resourceType).toBe('SecretVersion');
   });
+
+  test('state changes on a missing version are reported as SecretVersion', async () => {
+    const router = await routerWithSecret('projects/p/locations/us-east1', 'state');
+
+    for (const verb of ['enable', 'disable', 'destroy']) {
+      const response = await router.route(
+        new Request(
+          `http://localhost/v1/projects/p/locations/us-east1/secrets/state/versions/4:${verb}`,
+          { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }
+        )
+      );
+      const body = (await response.json()) as {
+        error: { status: string; details: Array<{ resourceType: string }> };
+      };
+
+      expect(response.status).toBe(404);
+      expect(body.error.status).toBe('NOT_FOUND');
+      expect(body.error.details[0]?.resourceType).toBe('SecretVersion');
+    }
+  });
+
+  test('a wrong etag is 409 ABORTED and a destroyed version is 400 FAILED_PRECONDITION', async () => {
+    const router = await routerWithSecret('projects/p', 'etag');
+    const base = 'http://localhost/v1/projects/p/secrets/etag';
+
+    await post(router, `${base}:addVersion`, {
+      payload: { data: Buffer.from('x').toString('base64') },
+    });
+
+    const aborted = await post(router, `${base}/versions/1:disable`, { etag: 'stale' });
+    const abortedBody = (await aborted.json()) as { error: { status: string } };
+
+    expect(aborted.status).toBe(409);
+    expect(abortedBody.error.status).toBe('ABORTED');
+
+    const destroyed = await post(router, `${base}/versions/1:destroy`, { etag: '1' });
+    const destroyedBody = (await destroyed.json()) as { state: string; destroyTime: string };
+
+    expect(destroyed.status).toBe(200);
+    expect(destroyedBody.state).toBe('DESTROYED');
+    expect(destroyedBody.destroyTime).toBeTypeOf('string');
+
+    const again = await post(router, `${base}/versions/1:destroy`, {});
+    const againBody = (await again.json()) as { error: { status: string } };
+
+    expect(again.status).toBe(400);
+    expect(againBody.error.status).toBe('FAILED_PRECONDITION');
+  });
+
+  test('lists versions with versions, totalSize, and no token on the last page', async () => {
+    const router = await routerWithSecret('projects/p', 'listed');
+    const base = 'http://localhost/v1/projects/p/secrets/listed';
+
+    await post(router, `${base}:addVersion`, {
+      payload: { data: Buffer.from('x').toString('base64') },
+    });
+
+    const response = await router.route(new Request(`${base}/versions?pageSize=5`));
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body.totalSize).toBe(1);
+    expect(body.versions).toHaveLength(1);
+    expect(body).not.toHaveProperty('nextPageToken');
+
+    const negative = await router.route(new Request(`${base}/versions?pageSize=-1`));
+
+    expect(negative.status).toBe(400);
+  });
 });
+
+async function routerWithSecret(parent: string, secretId: string): Promise<RequestRouter> {
+  const { routes } = await harness();
+  const router = new RequestRouter(new Logger('test', 'error'));
+
+  for (const route of routes) {
+    router.addRoute(route);
+  }
+
+  const created = await post(
+    router,
+    `http://localhost/v1/${parent}/secrets?secretId=${secretId}`,
+    parent.includes('/locations/') ? {} : { replication: { automatic: {} } }
+  );
+
+  if (created.status !== 200) {
+    throw new Error(`setup failed: ${created.status}`);
+  }
+
+  return router;
+}
+
+function post(router: RequestRouter, url: string, body: unknown): Promise<Response> {
+  return router.route(
+    new Request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  );
+}
 
 describe('SecretsService lifecycle', () => {
   test('getRoutes throws before initialize and start creates no work', async () => {

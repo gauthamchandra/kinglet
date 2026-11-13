@@ -136,4 +136,95 @@ describe('Secret Manager E2E: gRPC', () => {
 
     await expect(mismatch).rejects.toHaveProperty('code', grpc.status.INVALID_ARGUMENT);
   });
+
+  for (const parent of ['projects/grpc-project', 'projects/grpc-project/locations/us-east1']) {
+    test(`lists and changes version state under ${parent}`, async () => {
+      const [secret] = await client.createSecret({
+        parent,
+        secretId: 'stateful',
+        secret: parent.includes('/locations/') ? {} : { replication: { automatic: {} } },
+      });
+
+      for (const value of ['one', 'two', 'three']) {
+        await client.addSecretVersion({
+          parent: secret.name,
+          payload: { data: Buffer.from(value) },
+        });
+      }
+
+      const [page, nextRequest, raw] = await client.listSecretVersions(
+        { parent: secret.name, pageSize: 2 },
+        { autoPaginate: false }
+      );
+
+      expect(page.map(version => version.name)).toEqual([
+        `${secret.name}/versions/3`,
+        `${secret.name}/versions/2`,
+      ]);
+      expect(raw?.totalSize).toBe(3);
+      expect(nextRequest?.pageToken).toBeTypeOf('string');
+
+      const [rest, lastRequest, lastRaw] = await client.listSecretVersions(
+        { parent: secret.name, pageSize: 2, pageToken: nextRequest?.pageToken ?? '' },
+        { autoPaginate: false }
+      );
+
+      expect(rest.map(version => version.name)).toEqual([`${secret.name}/versions/1`]);
+      expect(lastRequest).toBeNull();
+      expect(lastRaw?.nextPageToken).toBe('');
+
+      const [disabled] = await client.disableSecretVersion({
+        name: `${secret.name}/versions/2`,
+        etag: '1',
+      });
+
+      expect(disabled.state).toBe('DISABLED');
+      expect(disabled.etag).toBe('2');
+
+      const blocked = client.accessSecretVersion({ name: `${secret.name}/versions/2` });
+
+      await expect(blocked).rejects.toHaveProperty('code', grpc.status.FAILED_PRECONDITION);
+
+      const [meta] = await client.getSecretVersion({ name: `${secret.name}/versions/2` });
+
+      expect(meta.state).toBe('DISABLED');
+
+      const stale = client.enableSecretVersion({
+        name: `${secret.name}/versions/2`,
+        etag: '1',
+      });
+
+      await expect(stale).rejects.toHaveProperty('code', grpc.status.ABORTED);
+
+      const [noop] = await client.disableSecretVersion({ name: `${secret.name}/versions/2` });
+
+      expect(noop.etag).toBe('2');
+
+      const [destroyed] = await client.destroySecretVersion({
+        name: `${secret.name}/versions/3`,
+      });
+
+      expect(destroyed.state).toBe('DESTROYED');
+      expect(Number(destroyed.destroyTime?.seconds ?? 0)).toBeGreaterThan(0);
+
+      const [latest] = await client.getSecretVersion({ name: `${secret.name}/versions/latest` });
+
+      expect(latest.name).toBe(`${secret.name}/versions/3`);
+      expect(latest.state).toBe('DESTROYED');
+
+      for (const method of ['enableSecretVersion', 'disableSecretVersion'] as const) {
+        const refused = client[method]({ name: `${secret.name}/versions/3` });
+
+        await expect(refused).rejects.toHaveProperty('code', grpc.status.FAILED_PRECONDITION);
+      }
+
+      const again = client.destroySecretVersion({ name: `${secret.name}/versions/3` });
+
+      await expect(again).rejects.toHaveProperty('code', grpc.status.FAILED_PRECONDITION);
+
+      const missing = client.destroySecretVersion({ name: `${secret.name}/versions/42` });
+
+      await expect(missing).rejects.toHaveProperty('code', grpc.status.NOT_FOUND);
+    });
+  }
 });

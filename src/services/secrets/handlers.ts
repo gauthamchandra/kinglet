@@ -12,6 +12,7 @@ import type {
 } from '@/core/gateway/request-router.ts';
 import type { ResponseFormatter, ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import type { SecretManager } from './service.ts';
+import type { VersionTransition } from './types.ts';
 import {
   parseSecretName,
   parseSecretParent,
@@ -24,10 +25,13 @@ import {
   decodeAdd,
   decodeCreate,
   decodeGet,
+  decodeListVersions,
   decodeVersion,
+  decodeVersionChange,
   encodeAccessed,
   encodeSecret,
   encodeVersion,
+  encodeVersionPage,
   GRPC_DIALECT,
   REST_DIALECT,
 } from './wire.ts';
@@ -153,7 +157,25 @@ const RPC_TABLE = {
   }),
   UpdateSecret: deferred(),
   DeleteSecret: deferred(),
-  ListSecretVersions: deferred(),
+  ListSecretVersions: bound({
+    http: {
+      method: 'GET',
+      suffix: '/secrets/:secret/versions',
+      id: 'secrets.versions.list',
+      toMessage: parts => ({
+        parent: secretResource(parts),
+        pageSize: parts.query('pageSize'),
+        pageToken: parts.query('pageToken'),
+        filter: parts.query('filter'),
+      }),
+    },
+    call: async (manager, message, dialect) => {
+      const decoded = decodeListVersions(message);
+      const page = await manager.listVersions(parseSecretName(decoded.parentRaw), decoded);
+
+      return encodeVersionPage(page, dialect);
+    },
+  }),
   GetSecretVersion: bound({
     http: {
       method: 'GET',
@@ -184,9 +206,9 @@ const RPC_TABLE = {
       return encodeAccessed(accessed, dialect);
     },
   }),
-  DisableSecretVersion: deferred(),
-  EnableSecretVersion: deferred(),
-  DestroySecretVersion: deferred(),
+  DisableSecretVersion: versionChange('disable'),
+  EnableSecretVersion: versionChange('enable'),
+  DestroySecretVersion: versionChange('destroy'),
   SetIamPolicy: deferred(),
   GetIamPolicy: deferred(),
   TestIamPermissions: deferred(),
@@ -372,6 +394,27 @@ const GRPC_STATUS: Record<SecretManagerError['code'], grpc.status> = {
 
 function bound(entry: Omit<BoundEntry, 'kind'>): BoundEntry {
   return { kind: 'bound', ...entry };
+}
+
+function versionChange(transition: VersionTransition): BoundEntry {
+  return bound({
+    http: {
+      method: 'POST',
+      suffix: `/secrets/:secret/versions/:version:${transition}`,
+      id: `secrets.versions.${transition}`,
+      toMessage: parts => ({
+        ...(isRecord(parts.body) ? parts.body : {}),
+        name: versionResource(parts),
+      }),
+    },
+    call: async (manager, message, dialect) => {
+      const { name, etag } = decodeVersionChange(message);
+      const locator = parseSecretVersionLocator(name);
+      const changed = await manager.changeVersionState(locator, name, etag, transition);
+
+      return encodeVersion(changed, dialect);
+    },
+  });
 }
 
 function deferred(): DeferredEntry {

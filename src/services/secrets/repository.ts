@@ -4,7 +4,7 @@
 
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { TableSchema } from '@/core/storage/types.ts';
-import type { SecretSpec } from './types.ts';
+import type { SecretSpec, SecretVersionState } from './types.ts';
 import { SECRETS_TABLE, VERSIONS_TABLE } from './types.ts';
 
 export interface StoredSecret {
@@ -134,16 +134,41 @@ export class SecretRepository {
   }
 
   async findNewestVersion(secretName: string): Promise<StoredVersion | null> {
+    const page = await this.listVersions(secretName, 1, 0);
+
+    return page.versions[0] ?? null;
+  }
+
+  async listVersions(
+    secretName: string,
+    limit: number,
+    offset: number
+  ): Promise<{ versions: StoredVersion[]; total: number }> {
     const result = await this.storage.find<VersionRow>(VERSIONS_TABLE, {
       filter: { conditions: [{ field: 'secretName', operator: 'eq', value: secretName }] },
       sort: [{ field: 'number', direction: 'desc' }],
-      pagination: { limit: 1, offset: 0 },
+      pagination: { limit, offset },
     });
-    const row = result.data[0];
 
-    return row == null ? null : toVersion(row);
+    return { versions: result.data.map(toVersion), total: result.total };
+  }
+
+  async updateVersion(secretName: string, number: number, patch: VersionPatch): Promise<void> {
+    await this.storage.updateMany<VersionRow>(
+      VERSIONS_TABLE,
+      {
+        conditions: [
+          { field: 'secretName', operator: 'eq', value: secretName },
+          { field: 'number', operator: 'eq', value: number },
+        ],
+      },
+      patch
+    );
   }
 }
+
+type VersionPatch = Pick<StoredVersion, 'state' | 'generation'> &
+  Partial<Pick<StoredVersion, 'destroyTime' | 'payloadData' | 'payloadCrc32c'>>;
 
 function toStored(row: SecretRow): StoredSecret {
   return {
@@ -166,7 +191,7 @@ function readSpec(spec: SecretSpec | string): SecretSpec {
 export interface StoredVersion {
   readonly secretName: string;
   readonly number: number;
-  readonly state: 'ENABLED' | 'DISABLED' | 'DESTROYED';
+  readonly state: SecretVersionState;
   readonly createTime: string;
   readonly destroyTime: string | null;
   readonly generation: number;
