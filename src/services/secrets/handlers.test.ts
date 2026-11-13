@@ -89,6 +89,92 @@ describe('secret manager RPC table', () => {
     expect(body.versionAliases).toEqual({ current: '1' });
   });
 
+  test.each([
+    ['malformed JSON (undefined body)', 'not-json', 'application/json'],
+    ['array body', JSON.stringify([{ labels: { team: 'edge' } }]), 'application/json'],
+    ['string body', JSON.stringify('labels'), 'application/json'],
+  ])('PATCH with %s and a mask is INVALID_ARGUMENT and does not clear stored labels', async (_label, rawBody, contentType) => {
+    const { routes } = await harness();
+    const router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of routes) {
+      router.addRoute(route);
+    }
+
+    const created = await router.route(
+      new Request(
+        'http://localhost/v1/projects/p/locations/us-east1/secrets?secretId=label-guard',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ labels: { team: 'original' } }),
+        }
+      )
+    );
+
+    expect(created.status).toBe(200);
+
+    const patched = await router.route(
+      new Request(
+        'http://localhost/v1/projects/p/locations/us-east1/secrets/label-guard?updateMask=labels',
+        {
+          method: 'PATCH',
+          headers: { 'content-type': contentType },
+          body: rawBody,
+        }
+      )
+    );
+    const patchBody = (await patched.json()) as { error: { status: string } };
+
+    expect(patched.status).toBe(400);
+    expect(patchBody.error.status).toBe('INVALID_ARGUMENT');
+
+    const got = await router.route(
+      new Request('http://localhost/v1/projects/p/locations/us-east1/secrets/label-guard')
+    );
+    const gotBody = (await got.json()) as { labels: Record<string, string> };
+
+    expect(got.status).toBe(200);
+    expect(gotBody.labels).toEqual({ team: 'original' });
+  });
+
+  test('PATCH with an empty object body and a mask clears the masked field', async () => {
+    const { routes } = await harness();
+    const router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of routes) {
+      router.addRoute(route);
+    }
+
+    const created = await router.route(
+      new Request(
+        'http://localhost/v1/projects/p/locations/us-east1/secrets?secretId=empty-body-clear',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ labels: { team: 'core' } }),
+        }
+      )
+    );
+
+    expect(created.status).toBe(200);
+
+    const patched = await router.route(
+      new Request(
+        'http://localhost/v1/projects/p/locations/us-east1/secrets/empty-body-clear?updateMask=labels',
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({}),
+        }
+      )
+    );
+    const patchBody = (await patched.json()) as { labels?: Record<string, string> };
+
+    expect(patched.status).toBe(200);
+    expect(patchBody.labels).toBeUndefined();
+  });
+
   test('gRPC UpdateSecret without a mask is INVALID_ARGUMENT', async () => {
     const { implementation } = await harness();
 

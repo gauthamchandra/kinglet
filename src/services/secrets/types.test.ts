@@ -122,6 +122,9 @@ describe('parseUpdateMask', () => {
     [['tags']],
     [['bogus']],
     [['labels', 'Labels']],
+    [['constructor']],
+    [['__proto__']],
+    [['toString']],
   ])('rejects %p as INVALID_ARGUMENT', paths => {
     const error = capture(() => parseUpdateMask(paths));
 

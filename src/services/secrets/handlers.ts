@@ -157,10 +157,16 @@ const RPC_TABLE = {
       method: 'PATCH',
       suffix: '/secrets/:secret',
       id: 'secrets.patch',
-      toMessage: parts => ({
-        secret: { ...(isRecord(parts.body) ? parts.body : {}), name: secretResource(parts) },
-        updateMask: parts.query('updateMask'),
-      }),
+      toMessage: parts => {
+        if (!isRecord(parts.body)) {
+          throw new SecretManagerError('INVALID_ARGUMENT', 'request body must be a JSON object');
+        }
+
+        return {
+          secret: { ...parts.body, name: secretResource(parts) },
+          updateMask: parts.query('updateMask'),
+        };
+      },
     },
     call: async (manager, message, dialect) => {
       const decoded = decodeUpdate(message, dialect);

@@ -308,6 +308,10 @@ export function parseUpdateMask(paths: readonly string[]): ReadonlySet<MutableSe
       throw new SecretManagerError('INVALID_ARGUMENT', `Field '${raw}' cannot be updated`);
     }
 
+    if (!Object.hasOwn(MUTABLE_MASK_PATHS, path)) {
+      throw new SecretManagerError('INVALID_ARGUMENT', `Unknown field '${raw}' in update_mask`);
+    }
+
     const field = MUTABLE_MASK_PATHS[path];
 
     if (field == null) {
