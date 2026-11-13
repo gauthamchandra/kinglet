@@ -9,16 +9,18 @@ import type {
   Cmek,
   Duration,
   Expiration,
+  MutableSecretField,
   PayloadInput,
   Replica,
   Replication,
   Rotation,
   SecretSpecInput,
   SecretType,
+  SecretUpdate,
   SecretVersionView,
   SecretView,
 } from './types.ts';
-import { SECRET_TYPE_BY_NUMBER, SecretManagerError } from './types.ts';
+import { parseUpdateMask, SECRET_TYPE_BY_NUMBER, SecretManagerError } from './types.ts';
 
 export type WireMessage = Readonly<Record<string, unknown>>;
 
@@ -65,6 +67,57 @@ export function decodeCreate(
 
 export function decodeGet(message: WireMessage): string {
   return readRequiredString(message.name, 'name');
+}
+
+const WIRE_KEYS_BY_FIELD: Readonly<Record<MutableSecretField, readonly string[]>> = {
+  labels: ['labels'],
+  topics: ['topics'],
+  expiration: ['expiration', 'expireTime', 'ttl'],
+  rotation: ['rotation'],
+  versionAliases: ['versionAliases'],
+  annotations: ['annotations'],
+  versionDestroyTtl: ['versionDestroyTtl'],
+  customerManagedEncryption: ['customerManagedEncryption'],
+};
+
+/**
+ * REST carries the mask as a comma-joined query string, gRPC as a FieldMask.
+ * Only masked fields are decoded, so an unmasked field cannot fail the call.
+ */
+export function decodeUpdate(
+  message: WireMessage,
+  dialect: WireDialect
+): { nameRaw: string; update: SecretUpdate } {
+  const secret = asRecord(message.secret, 'secret');
+  const nameRaw = readRequiredString(secret.name, 'secret.name');
+  const fields = parseUpdateMask(readMaskPaths(message.updateMask));
+  const masked: Record<string, unknown> = {};
+
+  for (const field of fields) {
+    for (const key of WIRE_KEYS_BY_FIELD[field]) {
+      masked[key] = secret[key];
+    }
+  }
+
+  const etag = typeof secret.etag === 'string' && secret.etag !== '' ? secret.etag : null;
+
+  return { nameRaw, update: { spec: decodeSecretSpecInput(masked, dialect), fields, etag } };
+}
+
+function readMaskPaths(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value === '' ? [] : value.split(',');
+  }
+
+  if (value != null && typeof value === 'object' && 'paths' in value) {
+    const paths = value.paths;
+
+    if (Array.isArray(paths) && paths.every(path => typeof path === 'string')) {
+      return paths;
+    }
+  }
+
+  return [];
 }
 
 export function decodeSecretSpecInput(secret: WireMessage, dialect: WireDialect): SecretSpecInput {
@@ -376,9 +429,13 @@ function readAliasMap(value: unknown): Record<string, number> {
 
   for (const [alias, entry] of Object.entries(record)) {
     const parsed =
-      typeof entry === 'number' ? entry : typeof entry === 'string' ? Number(entry) : Number.NaN;
+      typeof entry === 'number'
+        ? entry
+        : typeof entry === 'string' && /^-?\d+$/.test(entry)
+          ? Number(entry)
+          : Number.NaN;
 
-    if (!Number.isInteger(parsed)) {
+    if (!Number.isSafeInteger(parsed)) {
       throw new SecretManagerError(
         'INVALID_ARGUMENT',
         `versionAliases.${alias} must be an integer`

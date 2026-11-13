@@ -79,11 +79,34 @@ export class SecretRepository {
   }
 
   async getByName(name: string): Promise<StoredSecret | null> {
-    const row = await this.storage.findFirst<SecretRow>(SECRETS_TABLE, {
-      filter: { conditions: [{ field: 'name', operator: 'eq', value: name }] },
-    });
+    const row = await this.findRow(name);
 
     return row == null ? null : toStored(row);
+  }
+
+  async update(secret: StoredSecret): Promise<StoredSecret> {
+    const row = await this.findRow(secret.name);
+
+    if (row == null) {
+      throw new Error(`Secret ${secret.name} does not exist`);
+    }
+
+    const updated = await this.storage.updateById<SecretRow>(SECRETS_TABLE, row.id, {
+      generation: secret.generation,
+      spec: secret.spec,
+    });
+
+    if (updated == null) {
+      throw new Error(`Secret ${secret.name} does not exist`);
+    }
+
+    return toStored(updated);
+  }
+
+  private findRow(name: string): Promise<SecretRow | null> {
+    return this.storage.findFirst<SecretRow>(SECRETS_TABLE, {
+      filter: { conditions: [{ field: 'name', operator: 'eq', value: name }] },
+    });
   }
 
   async insert(secret: StoredSecret): Promise<StoredSecret> {

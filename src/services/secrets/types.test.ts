@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  applySecretUpdate,
   parseSecretName,
   parseSecretParent,
+  parseUpdateMask,
   resolveSpec,
   SecretManagerError,
   secretNameIn,
@@ -84,6 +86,117 @@ describe('resolveSpec', () => {
     );
 
     expect(error).toBeInstanceOf(SecretManagerError);
+    expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
+  });
+});
+
+describe('parseUpdateMask', () => {
+  test('canonicalizes snake_case and camelCase paths to the same fields', () => {
+    expect([...parseUpdateMask(['labels', 'version_aliases', 'versionDestroyTtl'])]).toEqual([
+      'labels',
+      'versionAliases',
+      'versionDestroyTtl',
+    ]);
+    expect([...parseUpdateMask(['versionAliases', 'expire_time', 'ttl'])]).toEqual([
+      'versionAliases',
+      'expiration',
+    ]);
+  });
+
+  test.each([
+    [[]],
+    [['']],
+    [['*']],
+    [['labels.env']],
+    [['replication']],
+    [['secretType']],
+    [['secret_type']],
+    [['name']],
+    [['createTime']],
+    [['etag']],
+    [['tags']],
+    [['bogus']],
+    [['labels', 'Labels']],
+  ])('rejects %p as INVALID_ARGUMENT', paths => {
+    const error = capture(() => parseUpdateMask(paths));
+
+    expect(error).toBeInstanceOf(SecretManagerError);
+    expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
+  });
+});
+
+describe('applySecretUpdate', () => {
+  const current = resolveSpec(
+    secretNameIn({ project: 'p', location: null }, 'db'),
+    {
+      ...emptyInput(),
+      replication: { kind: 'automatic', cmek: null },
+      labels: { team: 'core' },
+      annotations: { owner: 'ops' },
+    },
+    NOW
+  );
+
+  test('a masked field absent from the input clears it and an unmasked field is kept', () => {
+    const next = applySecretUpdate(
+      current,
+      { ...emptyInput(), annotations: { owner: 'someone-else' } },
+      new Set(['labels']),
+      NOW
+    );
+
+    expect(next.labels).toEqual({});
+    expect(next.annotations).toEqual({ owner: 'ops' });
+    expect(next.replication).toEqual({ kind: 'automatic', cmek: null });
+  });
+
+  test('ttl becomes expireTime relative to now', () => {
+    const next = applySecretUpdate(
+      current,
+      { ...emptyInput(), expiration: { kind: 'ttl', ttl: { seconds: 60, nanos: 0 } } },
+      new Set(['expiration']),
+      NOW
+    );
+
+    expect(next.expireTime).toBe('2026-01-01T00:01:00.000Z');
+  });
+
+  test.each([
+    [{ latest: 1 }],
+    [{ NEW: 1 }],
+    [{ '1abc': 1 }],
+    [{ [`a${'b'.repeat(63)}`]: 1 }],
+    [{ zero: 0 }],
+    [Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`a${i}`, 1]))],
+  ])('rejects aliases %p', versionAliases => {
+    const error = capture(() =>
+      applySecretUpdate(
+        current,
+        { ...emptyInput(), versionAliases },
+        new Set(['versionAliases']),
+        NOW
+      )
+    );
+
+    expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
+  });
+
+  test('accepts 50 aliases and rejects 11 topics', () => {
+    const aliases = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`a${i}`, 1]));
+    const next = applySecretUpdate(
+      current,
+      { ...emptyInput(), versionAliases: aliases },
+      new Set(['versionAliases']),
+      NOW
+    );
+
+    expect(Object.keys(next.versionAliases)).toHaveLength(50);
+
+    const topics = Array.from({ length: 11 }, (_, i) => `projects/p/topics/t${i}`);
+    const error = capture(() =>
+      applySecretUpdate(current, { ...emptyInput(), topics }, new Set(['topics']), NOW)
+    );
+
     expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
   });
 });

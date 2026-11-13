@@ -136,4 +136,93 @@ describe('Secret Manager E2E: gRPC', () => {
 
     await expect(mismatch).rejects.toHaveProperty('code', grpc.status.INVALID_ARGUMENT);
   });
+
+  test.each([
+    ['projects/grpc-project'],
+    ['projects/grpc-project/locations/us-central1'],
+  ])('updates labels and an alias under %s, then gets and accesses by alias', async parent => {
+    const [created] = await client.createSecret({
+      parent,
+      secretId: 'aliased',
+      secret: parent.includes('/locations/') ? {} : { replication: { automatic: {} } },
+    });
+
+    await client.addSecretVersion({ parent: created.name, payload: { data: Buffer.from('one') } });
+    await client.addSecretVersion({ parent: created.name, payload: { data: Buffer.from('two') } });
+
+    const before = client.accessSecretVersion({ name: `${created.name}/versions/current` });
+
+    await expect(before).rejects.toHaveProperty('code', grpc.status.NOT_FOUND);
+
+    const [updated] = await client.updateSecret({
+      secret: {
+        name: created.name,
+        etag: created.etag,
+        labels: { env: 'prod' },
+        versionAliases: { current: 1 },
+      },
+      updateMask: { paths: ['labels', 'version_aliases'] },
+    });
+
+    expect(updated.etag).toBe('2');
+    expect(updated.labels).toEqual({ env: 'prod' });
+    expect(updated.versionAliases).toEqual({ current: '1' });
+
+    const [version] = await client.getSecretVersion({ name: `${created.name}/versions/current` });
+
+    expect(version.name).toBe(`${created.name}/versions/1`);
+
+    const [accessed] = await client.accessSecretVersion({
+      name: `${created.name}/versions/current`,
+    });
+
+    expect(accessed.name).toBe(`${created.name}/versions/1`);
+    expect(Buffer.from(accessed.payload?.data ?? new Uint8Array()).toString()).toBe('one');
+  });
+
+  test('update rejects bad masks and stale etags, and ttl becomes expireTime', async () => {
+    const [secret] = await client.createSecret({
+      parent: 'projects/grpc-project',
+      secretId: 'update-rules',
+      secret: { replication: { automatic: {} }, labels: { team: 'core' } },
+    });
+
+    for (const paths of [[], ['*'], ['labels.team'], ['replication'], ['secret_type'], ['bogus']]) {
+      const rejected = client.updateSecret({
+        secret: { name: secret.name, labels: {} },
+        updateMask: { paths },
+      });
+
+      await expect(rejected).rejects.toHaveProperty('code', grpc.status.INVALID_ARGUMENT);
+    }
+
+    const stale = client.updateSecret({
+      secret: { name: secret.name, etag: '5', labels: {} },
+      updateMask: { paths: ['labels'] },
+    });
+
+    await expect(stale).rejects.toHaveProperty('code', grpc.status.ABORTED);
+
+    const [noop] = await client.updateSecret({
+      secret: { name: secret.name, labels: { team: 'core' } },
+      updateMask: { paths: ['labels'] },
+    });
+
+    expect(noop.etag).toBe('1');
+
+    const [expiring] = await client.updateSecret({
+      secret: { name: secret.name, ttl: { seconds: 3600 } },
+      updateMask: { paths: ['ttl'] },
+    });
+
+    expect(expiring.etag).toBe('2');
+    expect(expiring.ttl).toBeUndefined();
+    expect(Number(expiring.expireTime?.seconds) * 1000 - Date.now()).toBeGreaterThan(3500 * 1000);
+    expect(expiring.labels).toEqual({ team: 'core' });
+
+    const [got] = await client.getSecret({ name: secret.name });
+
+    expect(got.expireTime?.seconds).toBe(expiring.expireTime?.seconds);
+    expect(got.ttl).toBeUndefined();
+  });
 });

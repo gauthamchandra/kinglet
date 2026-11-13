@@ -33,6 +33,53 @@ describe('SecretRepository', () => {
       );
     }
   });
+
+  test('update replaces the generation and spec on memory and sqlite', async () => {
+    for (const storageType of ['memory', 'sqlite'] as const) {
+      const storage = new StorageManager();
+
+      await storage.initialize(
+        storageType === 'memory'
+          ? { type: 'memory' }
+          : { type: 'sqlite', database: { memory: true } }
+      );
+
+      const repository = new SecretRepository(storage);
+
+      await repository.initialize();
+
+      const original = secret('projects/demo/secrets/a', 'projects/demo');
+
+      await repository.insert(original);
+
+      const updated = await repository.update({
+        ...original,
+        generation: 2,
+        spec: { ...original.spec, labels: {}, versionAliases: { current: 1 } },
+      });
+      const reread = await repository.getByName('projects/demo/secrets/a');
+
+      expect(updated.generation).toBe(2);
+      expect(reread?.generation).toBe(2);
+      expect(reread?.spec.labels).toEqual({});
+      expect(reread?.spec.versionAliases).toEqual({ current: 1 });
+      expect(reread?.createTime).toBe(original.createTime);
+    }
+  });
+
+  test('update of a missing secret throws', async () => {
+    const storage = new StorageManager();
+
+    await storage.initialize({ type: 'memory' });
+
+    const repository = new SecretRepository(storage);
+
+    await repository.initialize();
+
+    await expect(
+      repository.update(secret('projects/demo/secrets/none', 'projects/demo'))
+    ).rejects.toThrow('does not exist');
+  });
 });
 
 function secret(name: string, parent: string) {

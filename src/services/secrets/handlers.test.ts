@@ -31,15 +31,74 @@ describe('secret manager RPC table', () => {
       'projects.locations.secrets.addVersion',
       'projects.locations.secrets.create',
       'projects.locations.secrets.get',
+      'projects.locations.secrets.patch',
       'projects.locations.secrets.versions.access',
       'projects.locations.secrets.versions.get',
       'projects.secrets.addVersion',
       'projects.secrets.create',
       'projects.secrets.get',
+      'projects.secrets.patch',
       'projects.secrets.versions.access',
       'projects.secrets.versions.get',
     ]);
-    expect(routes).toHaveLength(10);
+    expect(routes).toHaveLength(12);
+  });
+
+  test('PATCH applies a snake_case mask from the query and ignores the body name', async () => {
+    const { routes } = await harness();
+    const router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of routes) {
+      router.addRoute(route);
+    }
+
+    const created = await router.route(
+      new Request('http://localhost/v1/projects/p/locations/us-east1/secrets?secretId=a', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ labels: { team: 'core' } }),
+      })
+    );
+
+    expect(created.status).toBe(200);
+
+    const patched = await router.route(
+      new Request(
+        'http://localhost/v1/projects/p/locations/us-east1/secrets/a?updateMask=labels,version_aliases',
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: 'projects/p/secrets/other',
+            versionAliases: { current: '1' },
+          }),
+        }
+      )
+    );
+    const body = (await patched.json()) as {
+      name: string;
+      etag: string;
+      labels?: unknown;
+      versionAliases: Record<string, string>;
+    };
+
+    expect(patched.status).toBe(200);
+    expect(body.name).toBe('projects/p/locations/us-east1/secrets/a');
+    expect(body.etag).toBe('2');
+    expect(body.labels).toBeUndefined();
+    expect(body.versionAliases).toEqual({ current: '1' });
+  });
+
+  test('gRPC UpdateSecret without a mask is INVALID_ARGUMENT', async () => {
+    const { implementation } = await harness();
+
+    const error = await call(implementation, 'UpdateSecret', {
+      secret: { name: 'projects/p/secrets/a' },
+      updateMask: null,
+    });
+
+    expect(error.code).toBe(grpc.status.INVALID_ARGUMENT);
+    expect(error.message).toBe('update_mask is required');
   });
 
   test('deferred RPCs return gRPC UNIMPLEMENTED', async () => {
@@ -201,7 +260,8 @@ async function harness(): Promise<{
 
 function call(
   implementation: grpc.UntypedServiceImplementation,
-  method: string
+  method: string,
+  request: unknown = {}
 ): Promise<{ code: number; message: string }> {
   const handler = implementation[method] as
     | ((
@@ -215,7 +275,7 @@ function call(
   }
 
   return new Promise((resolve, reject) => {
-    handler({ request: {} }, err => {
+    handler({ request }, err => {
       if (err == null || err.code == null) {
         reject(new Error('expected an error'));
 
