@@ -1,7 +1,11 @@
 # Changelog
 
-## [3.4.0](https://github.com/gauthamchandra/kinglet/compare/v3.3.0...v3.4.0) (2026-11-13)
+## [4.0.0](https://github.com/gauthamchandra/kinglet/compare/v3.3.0...v4.0.0) (2026-11-13)
 
+
+### ⚠ BREAKING CHANGES
+
+* **postgres:** Cloud SQL and AlloyDB database files from 3.x cannot be opened. 3.x stored each database as its own PGlite cluster (Postgres 18.3, wasm32, float8 passed by reference) under `data/cloudsql/<project>/<instance>/<database>` and `data/alloydb/...`, next to `data/emulator.db` (or beside `SQLITE_PATH`). 4.0 runs 64-bit Postgres 18, which rejects those files (`USE_FLOAT8_BYVAL`). Kinglet will not delete them: move the instance directory aside and start again, and the instance comes up empty while the control-plane rows in SQLite remain. There is no import. To keep querying the old data, stay on 3.3.0 (`ghcr.io/gauthamchandra/kinglet:3` or `:3.3.0`). Tag `3` does not move with this release. `latest` does.
 
 ### Features
 
