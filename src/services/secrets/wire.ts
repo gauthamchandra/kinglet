@@ -13,6 +13,7 @@ import type {
   Replica,
   Replication,
   Rotation,
+  SecretListPage,
   SecretSpecInput,
   SecretType,
   SecretVersionView,
@@ -134,6 +135,45 @@ export function encodeSecret(secret: SecretView, dialect: WireDialect): WireMess
   }
 
   return body;
+}
+
+export function decodeList(message: WireMessage): {
+  parentRaw: string;
+  pageSize: number | null;
+  pageToken: string | null;
+  filter: string | null;
+} {
+  return {
+    parentRaw: readRequiredString(message.parent, 'parent'),
+    pageSize: readOptionalInteger(message.pageSize, 'pageSize'),
+    pageToken: readOptionalString(message.pageToken, 'pageToken'),
+    filter: readOptionalString(message.filter, 'filter'),
+  };
+}
+
+export function encodeList(page: SecretListPage, dialect: WireDialect): WireMessage {
+  const body: Record<string, unknown> = {};
+
+  if (page.secrets.length > 0) {
+    body.secrets = page.secrets.map(secret => encodeSecret(secret, dialect));
+  }
+
+  if (page.nextPageToken != null) {
+    body.nextPageToken = page.nextPageToken;
+  }
+
+  if (page.totalSize !== 0) {
+    body.totalSize = page.totalSize;
+  }
+
+  return body;
+}
+
+export function decodeDelete(message: WireMessage): { nameRaw: string; etag: string | null } {
+  return {
+    nameRaw: readRequiredString(message.name, 'name'),
+    etag: readOptionalString(message.etag, 'etag'),
+  };
 }
 
 export function decodeAdd(
@@ -607,6 +647,37 @@ function readRequiredString(value: unknown, field: string): string {
   }
 
   return value;
+}
+
+function readOptionalString(value: unknown, field: string): string | null {
+  if (isUnset(value)) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new SecretManagerError('INVALID_ARGUMENT', `${field} must be a string`);
+  }
+
+  return value;
+}
+
+function readOptionalInteger(value: unknown, field: string): number | null {
+  if (isUnset(value)) {
+    return null;
+  }
+
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^-?\d+$/.test(value)
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isSafeInteger(parsed)) {
+    throw new SecretManagerError('INVALID_ARGUMENT', `${field} must be an integer`);
+  }
+
+  return parsed;
 }
 
 function asRecord(value: unknown, field: string): WireMessage {

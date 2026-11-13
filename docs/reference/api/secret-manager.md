@@ -8,12 +8,16 @@
 | --- | --- | --- |
 | `GET` | `/v1/projects/:project/locations` | `locations.list` |
 | `GET` | `/v1/projects/:project/locations/:location` | `locations.get` |
+| `GET` | `/v1/projects/:project/locations/:location/secrets` | `projects.locations.secrets.list` |
 | `POST` | `/v1/projects/:project/locations/:location/secrets` | `projects.locations.secrets.create` |
+| `DELETE` | `/v1/projects/:project/locations/:location/secrets/:secret` | `projects.locations.secrets.delete` |
 | `GET` | `/v1/projects/:project/locations/:location/secrets/:secret` | `projects.locations.secrets.get` |
 | `POST` | `/v1/projects/:project/locations/:location/secrets/:secret:addVersion` | `projects.locations.secrets.addVersion` |
 | `GET` | `/v1/projects/:project/locations/:location/secrets/:secret/versions/:version` | `projects.locations.secrets.versions.get` |
 | `GET` | `/v1/projects/:project/locations/:location/secrets/:secret/versions/:version:access` | `projects.locations.secrets.versions.access` |
+| `GET` | `/v1/projects/:project/secrets` | `projects.secrets.list` |
 | `POST` | `/v1/projects/:project/secrets` | `projects.secrets.create` |
+| `DELETE` | `/v1/projects/:project/secrets/:secret` | `projects.secrets.delete` |
 | `GET` | `/v1/projects/:project/secrets/:secret` | `projects.secrets.get` |
 | `POST` | `/v1/projects/:project/secrets/:secret:addVersion` | `projects.secrets.addVersion` |
 | `GET` | `/v1/projects/:project/secrets/:secret/versions/:version` | `projects.secrets.versions.get` |

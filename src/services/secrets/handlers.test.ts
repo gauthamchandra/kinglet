@@ -30,25 +30,118 @@ describe('secret manager RPC table', () => {
     expect(ids).toEqual([
       'projects.locations.secrets.addVersion',
       'projects.locations.secrets.create',
+      'projects.locations.secrets.delete',
       'projects.locations.secrets.get',
+      'projects.locations.secrets.list',
       'projects.locations.secrets.versions.access',
       'projects.locations.secrets.versions.get',
       'projects.secrets.addVersion',
       'projects.secrets.create',
+      'projects.secrets.delete',
       'projects.secrets.get',
+      'projects.secrets.list',
       'projects.secrets.versions.access',
       'projects.secrets.versions.get',
     ]);
-    expect(routes).toHaveLength(10);
+    expect(routes).toHaveLength(14);
   });
 
   test('deferred RPCs return gRPC UNIMPLEMENTED', async () => {
     const { implementation } = await harness();
 
-    const error = await call(implementation, 'ListSecrets');
+    const error = await call(implementation, 'SetIamPolicy');
 
     expect(error.code).toBe(grpc.status.UNIMPLEMENTED);
-    expect(error.message).toContain('ListSecrets');
+    expect(error.message).toContain('SetIamPolicy');
+  });
+
+  test('a list filter is UNIMPLEMENTED on REST and gRPC', async () => {
+    const { routes, implementation } = await harness();
+    const router = routerFor(routes);
+
+    const response = await router.route(
+      new Request('http://localhost/v1/projects/p/locations/l/secrets?filter=name:a')
+    );
+    const body = (await response.json()) as { error: { status: string } };
+    const error = await call(implementation, 'ListSecrets', {
+      parent: 'projects/p',
+      pageSize: 0,
+      pageToken: '',
+      filter: 'name:a',
+    });
+
+    expect(response.status).toBe(501);
+    expect(body.error.status).toBe('UNIMPLEMENTED');
+    expect(error.code).toBe(grpc.status.UNIMPLEMENTED);
+  });
+
+  test('REST delete returns an empty body and maps etag and missing errors', async () => {
+    const { routes } = await harness();
+    const router = routerFor(routes);
+
+    const created = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets?secretId=doomed', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ replication: { automatic: {} } }),
+      })
+    );
+
+    expect(created.status).toBe(200);
+
+    const stale = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets/doomed?etag=9', { method: 'DELETE' })
+    );
+    const staleBody = (await stale.json()) as { error: { status: string } };
+
+    expect(stale.status).toBe(409);
+    expect(staleBody.error.status).toBe('ABORTED');
+
+    const deleted = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets/doomed?etag=1', { method: 'DELETE' })
+    );
+
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({});
+
+    const missing = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets/doomed', { method: 'DELETE' })
+    );
+    const missingBody = (await missing.json()) as {
+      error: { status: string; details: Array<{ resourceType: string; resourceName: string }> };
+    };
+
+    expect(missing.status).toBe(404);
+    expect(missingBody.error.status).toBe('NOT_FOUND');
+    expect(missingBody.error.details[0]?.resourceType).toBe('Secret');
+    expect(missingBody.error.details[0]?.resourceName).toBe('projects/p/secrets/doomed');
+  });
+
+  test('gRPC delete returns an empty message and a stale etag is ABORTED', async () => {
+    const { implementation } = await harness();
+
+    await respond(implementation, 'CreateSecret', {
+      parent: 'projects/p',
+      secretId: 'doomed',
+      secret: { replication: { automatic: {} } },
+    });
+
+    const stale = await call(implementation, 'DeleteSecret', {
+      name: 'projects/p/secrets/doomed',
+      etag: '9',
+    });
+    const deleted = await respond(implementation, 'DeleteSecret', {
+      name: 'projects/p/secrets/doomed',
+      etag: '',
+    });
+    const missing = await call(implementation, 'DeleteSecret', {
+      name: 'projects/p/secrets/doomed',
+      etag: '',
+    });
+
+    expect(stale.code).toBe(grpc.status.ABORTED);
+    expect(deleted).toEqual({});
+    expect(missing.code).toBe(grpc.status.NOT_FOUND);
   });
 
   test('GET with a custom verb does not read the secret', async () => {
@@ -199,23 +292,40 @@ async function harness(): Promise<{
   };
 }
 
-function call(
-  implementation: grpc.UntypedServiceImplementation,
-  method: string
-): Promise<{ code: number; message: string }> {
-  const handler = implementation[method] as
-    | ((
-        call: { request: unknown },
-        callback: (err: { code?: number; message: string } | null) => void
-      ) => void)
-    | undefined;
+function routerFor(routes: ReturnType<typeof buildRestRoutes>): RequestRouter {
+  const router = new RequestRouter(new Logger('test', 'error'));
+
+  for (const route of routes) {
+    router.addRoute(route);
+  }
+
+  return router;
+}
+
+type UnaryHandler = (
+  call: { request: unknown },
+  callback: (err: { code?: number; message: string } | null, value?: unknown) => void
+) => void;
+
+function handlerFor(implementation: grpc.UntypedServiceImplementation, method: string) {
+  const handler = implementation[method] as UnaryHandler | undefined;
 
   if (handler == null) {
     throw new Error(`missing ${method}`);
   }
 
+  return handler;
+}
+
+function call(
+  implementation: grpc.UntypedServiceImplementation,
+  method: string,
+  request: unknown = {}
+): Promise<{ code: number; message: string }> {
+  const handler = handlerFor(implementation, method);
+
   return new Promise((resolve, reject) => {
-    handler({ request: {} }, err => {
+    handler({ request }, err => {
       if (err == null || err.code == null) {
         reject(new Error('expected an error'));
 
@@ -223,6 +333,26 @@ function call(
       }
 
       resolve({ code: err.code, message: err.message });
+    });
+  });
+}
+
+function respond(
+  implementation: grpc.UntypedServiceImplementation,
+  method: string,
+  request: unknown
+): Promise<unknown> {
+  const handler = handlerFor(implementation, method);
+
+  return new Promise((resolve, reject) => {
+    handler({ request }, (err, value) => {
+      if (err != null) {
+        reject(new Error(err.message));
+
+        return;
+      }
+
+      resolve(value);
     });
   });
 }

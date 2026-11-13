@@ -98,7 +98,7 @@ describe('Secret Manager E2E: gRPC', () => {
     expect(version.clientSpecifiedPayloadChecksum).toBe(false);
   });
 
-  test('duplicate create is ALREADY_EXISTS and list is UNIMPLEMENTED', async () => {
+  test('duplicate create is ALREADY_EXISTS and a list filter is UNIMPLEMENTED', async () => {
     const duplicate = client.createSecret({
       parent: 'projects/grpc-project',
       secretId: 'db-password',
@@ -107,9 +107,87 @@ describe('Secret Manager E2E: gRPC', () => {
 
     await expect(duplicate).rejects.toHaveProperty('code', grpc.status.ALREADY_EXISTS);
 
-    const listed = client.listSecrets({ parent: 'projects/grpc-project' });
+    const listed = client.listSecrets({ parent: 'projects/grpc-project', filter: 'name:db' });
 
     await expect(listed).rejects.toHaveProperty('code', grpc.status.UNIMPLEMENTED);
+  });
+
+  test('lists global and regional parents separately, newest first, in pages', async () => {
+    for (const parent of ['projects/grpc-list', 'projects/grpc-list/locations/eu']) {
+      const secret = parent.includes('/locations/') ? {} : { replication: { automatic: {} } };
+
+      for (const secretId of ['a', 'b', 'c']) {
+        await client.createSecret({ parent, secretId, secret });
+      }
+
+      const [page, nextRequest, response] = await client.listSecrets(
+        { parent, pageSize: 2 },
+        { autoPaginate: false }
+      );
+
+      expect(page).toHaveLength(2);
+      expect(response?.totalSize).toBe(3);
+      expect(nextRequest?.pageToken).toBeTypeOf('string');
+
+      const [rest, lastRequest, lastResponse] = await client.listSecrets(
+        { parent, pageSize: 2, pageToken: nextRequest?.pageToken ?? '' },
+        { autoPaginate: false }
+      );
+      const listed = [...page, ...rest];
+      const times = listed.map(item => Number(item.createTime?.seconds ?? 0));
+
+      expect(lastRequest).toBeNull();
+      expect(lastResponse?.nextPageToken).toBe('');
+      expect(listed.map(item => item.name).sort()).toEqual([
+        `${parent}/secrets/a`,
+        `${parent}/secrets/b`,
+        `${parent}/secrets/c`,
+      ]);
+      expect(times.every((time, index) => index === 0 || time <= (times[index - 1] ?? time))).toBe(
+        true
+      );
+    }
+  });
+
+  test('deletes global and regional secrets, honours etag, and recreates from version 1', async () => {
+    for (const parent of ['projects/grpc-delete', 'projects/grpc-delete/locations/eu']) {
+      const secret = parent.includes('/locations/') ? {} : { replication: { automatic: {} } };
+      const name = `${parent}/secrets/doomed`;
+
+      await client.createSecret({ parent, secretId: 'doomed', secret });
+      await client.addSecretVersion({ parent: name, payload: { data: Buffer.from('old') } });
+
+      const stale = client.deleteSecret({ name, etag: '99' });
+
+      await expect(stale).rejects.toHaveProperty('code', grpc.status.ABORTED);
+
+      const [deleted] = await client.deleteSecret({ name, etag: '1' });
+
+      expect(deleted).toEqual({});
+
+      const missing = client.deleteSecret({ name });
+
+      await expect(missing).rejects.toHaveProperty('code', grpc.status.NOT_FOUND);
+
+      const [listed] = await client.listSecrets({ parent });
+
+      expect(listed).toEqual([]);
+
+      await client.createSecret({ parent, secretId: 'doomed', secret });
+
+      const oldPayload = client.accessSecretVersion({ name: `${name}/versions/latest` });
+
+      await expect(oldPayload).rejects.toHaveProperty('code', grpc.status.NOT_FOUND);
+
+      const [version] = await client.addSecretVersion({
+        parent: name,
+        payload: { data: Buffer.from('new') },
+      });
+      const [accessed] = await client.accessSecretVersion({ name: `${name}/versions/1` });
+
+      expect(version.name).toBe(`${name}/versions/1`);
+      expect(Buffer.from(accessed.payload?.data ?? new Uint8Array()).toString()).toBe('new');
+    }
   });
 
   test('a matching checksum is recorded and a mismatch is INVALID_ARGUMENT', async () => {

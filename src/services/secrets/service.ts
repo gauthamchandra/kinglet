@@ -2,12 +2,16 @@
  * Secret Manager rules. No HTTP and no protobuf.
  */
 
+import { parseOffsetToken } from '@/shared/utils/pagination.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { SecretRepository, StoredVersion } from './repository.ts';
 import type {
   AccessedSecret,
   PayloadInput,
+  SecretListPage,
+  SecretListRequest,
   SecretName,
+  SecretParent,
   SecretSpecInput,
   SecretVersionLocator,
   SecretVersionView,
@@ -19,6 +23,7 @@ import {
   formatSecretName,
   formatSecretParent,
   formatSecretVersionName,
+  resolveListPageSize,
   resolveSpec,
   resolveVersionNumber,
   SecretManagerError,
@@ -72,6 +77,41 @@ export class SecretManager {
     }
 
     return toView(stored);
+  }
+
+  async listSecrets(parent: SecretParent, request: SecretListRequest): Promise<SecretListPage> {
+    if (request.filter != null && request.filter.length > 0) {
+      throw new SecretManagerError('UNIMPLEMENTED', 'ListSecrets filter is not implemented');
+    }
+
+    const offset = parseOffsetToken(request.pageToken);
+    const limit = resolveListPageSize(request.pageSize);
+    const page = await this.repository.listByParent(formatSecretParent(parent), offset, limit);
+
+    return {
+      secrets: page.secrets.map(toView),
+      nextPageToken: page.hasMore ? String(offset + limit) : null,
+      totalSize: page.total,
+    };
+  }
+
+  async deleteSecret(name: SecretName, etag: string | null): Promise<void> {
+    const resource = formatSecretName(name);
+
+    await this.mutex.runExclusively(resource, async () => {
+      const secret = await this.repository.getByName(resource);
+
+      if (secret == null) {
+        throw new SecretManagerError('NOT_FOUND', `Secret ${resource} not found`, resource);
+      }
+
+      if (etag != null && etag !== etagFromGeneration(secret.generation)) {
+        throw new SecretManagerError('ABORTED', `The etag does not match Secret ${resource}`);
+      }
+
+      await this.repository.deleteVersions(resource);
+      await this.repository.deleteByName(resource);
+    });
   }
 
   async addVersion(name: SecretName, payload: PayloadInput): Promise<SecretVersionView> {

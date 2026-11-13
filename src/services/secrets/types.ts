@@ -3,6 +3,7 @@
  */
 
 import { crc32cString } from '@/shared/utils/crc32c.ts';
+import { DEFAULT_LIST_PAGE_SIZE } from '@/shared/utils/pagination.ts';
 
 export const SECRETS_TABLE = 'secretmanager_secrets';
 
@@ -272,6 +273,28 @@ export function resolveSpec(name: SecretName, input: SecretSpecInput, now: Date)
 
 export function etagFromGeneration(generation: number): string {
   return String(generation);
+}
+
+const MAX_LIST_PAGE_SIZE = 25000;
+
+export interface SecretListRequest {
+  readonly pageSize: number | null;
+  readonly pageToken: string | null;
+  readonly filter: string | null;
+}
+
+export interface SecretListPage {
+  readonly secrets: readonly SecretView[];
+  readonly nextPageToken: string | null;
+  readonly totalSize: number;
+}
+
+export function resolveListPageSize(requested: number | null): number {
+  if (requested == null || requested <= 0) {
+    return DEFAULT_LIST_PAGE_SIZE;
+  }
+
+  return Math.min(requested, MAX_LIST_PAGE_SIZE);
 }
 
 const MAX_PAYLOAD_BYTES = 64 * 1024;
