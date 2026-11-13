@@ -6,12 +6,15 @@ import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { SecretRepository, StoredVersion } from './repository.ts';
 import type {
   AccessedSecret,
+  PageRequest,
   PayloadInput,
   SecretName,
   SecretSpecInput,
   SecretVersionLocator,
+  SecretVersionPage,
   SecretVersionView,
   SecretView,
+  VersionTransition,
 } from './types.ts';
 import {
   admitPayload,
@@ -19,6 +22,9 @@ import {
   formatSecretName,
   formatSecretParent,
   formatSecretVersionName,
+  nextVersionState,
+  parsePageToken,
+  resolvePageSize,
   resolveSpec,
   resolveVersionNumber,
   SecretManagerError,
@@ -121,7 +127,7 @@ export class SecretManager {
     if (stored.state !== 'ENABLED' || stored.payloadData == null || stored.payloadCrc32c == null) {
       throw new SecretManagerError(
         'FAILED_PRECONDITION',
-        `SecretVersion ${requestedName} is not readable`,
+        `SecretVersion ${requestedName} is in ${stored.state} state`,
         requestedName
       );
     }
@@ -131,6 +137,62 @@ export class SecretManager {
       data: new Uint8Array(Buffer.from(stored.payloadData, 'base64')),
       crc32c: stored.payloadCrc32c,
     };
+  }
+
+  async listVersions(name: SecretName, page: PageRequest): Promise<SecretVersionPage> {
+    const resource = formatSecretName(name);
+    const limit = resolvePageSize(page.pageSize);
+    const offset = parsePageToken(page.pageToken);
+    const secret = await this.repository.getByName(resource);
+
+    if (secret == null) {
+      throw new SecretManagerError('NOT_FOUND', `Secret ${resource} not found`, resource);
+    }
+
+    const listed = await this.repository.listVersions(resource, limit, offset);
+    const next = offset + listed.versions.length;
+
+    return {
+      versions: listed.versions.map(toVersionView),
+      totalSize: listed.total,
+      nextPageToken: next < listed.total ? String(next) : null,
+    };
+  }
+
+  async changeVersionState(
+    locator: SecretVersionLocator,
+    requestedName: string,
+    etag: string | null,
+    transition: VersionTransition
+  ): Promise<SecretVersionView> {
+    const resource = formatSecretName(locator.secret);
+
+    return this.mutex.runExclusively(resource, async () => {
+      const stored = await this.loadVersion(locator, requestedName);
+      const versionName = formatSecretVersionName(stored.secretName, stored.number);
+
+      if (etag != null && etag !== etagFromGeneration(stored.generation)) {
+        throw new SecretManagerError('ABORTED', `etag does not match SecretVersion ${versionName}`);
+      }
+
+      const target = nextVersionState(stored.state, transition, versionName);
+
+      if (target == null) {
+        return toVersionView(stored);
+      }
+
+      const patch = {
+        state: target,
+        generation: stored.generation + 1,
+        ...(target === 'DESTROYED'
+          ? { destroyTime: this.clock().toISOString(), payloadData: null, payloadCrc32c: null }
+          : {}),
+      };
+
+      await this.repository.updateVersion(stored.secretName, stored.number, patch);
+
+      return toVersionView({ ...stored, ...patch });
+    });
   }
 
   private async loadVersion(
@@ -185,6 +247,7 @@ function toVersionView(stored: StoredVersion): SecretVersionView {
     name: formatSecretVersionName(stored.secretName, stored.number),
     state: stored.state,
     createTime: stored.createTime,
+    destroyTime: stored.destroyTime,
     etag: etagFromGeneration(stored.generation),
     clientSpecifiedPayloadChecksum: stored.clientSpecifiedPayloadChecksum,
   };

@@ -182,6 +182,108 @@ describe('Secret Manager E2E: REST fetch', () => {
 
     expect(mismatch.status).toBe(400);
   });
+
+  for (const parent of ['projects/demo', 'projects/demo/locations/us-east1']) {
+    test(`lists, disables, enables, and destroys versions under ${parent}`, async () => {
+      const secret = `${parent}/secrets/lifecycle`;
+      const created = await post(`/v1/${parent}/secrets?secretId=lifecycle`, {
+        ...(parent.includes('/locations/') ? {} : { replication: { automatic: {} } }),
+      });
+
+      expect(created.status).toBe(200);
+
+      for (const value of ['one', 'two', 'three']) {
+        const added = await post(`/v1/${secret}:addVersion`, {
+          payload: { data: Buffer.from(value).toString('base64') },
+        });
+
+        expect(added.status).toBe(200);
+      }
+
+      const firstPage = await fetch(url(`/v1/${secret}/versions?pageSize=2`));
+      const first = (await firstPage.json()) as {
+        versions: Array<{ name: string }>;
+        nextPageToken: string;
+        totalSize: number;
+      };
+
+      expect(firstPage.status).toBe(200);
+      expect(first.versions.map(version => version.name)).toEqual([
+        `${secret}/versions/3`,
+        `${secret}/versions/2`,
+      ]);
+      expect(first.totalSize).toBe(3);
+      expect(first.nextPageToken).toBeTypeOf('string');
+
+      const lastPage = await fetch(
+        url(`/v1/${secret}/versions?pageSize=2&pageToken=${first.nextPageToken}`)
+      );
+      const last = (await lastPage.json()) as Record<string, unknown>;
+
+      expect(last.versions).toEqual([expect.objectContaining({ name: `${secret}/versions/1` })]);
+      expect(last).not.toHaveProperty('nextPageToken');
+
+      const disabled = await post(`/v1/${secret}/versions/1:disable`, { etag: '1' });
+      const disabledBody = (await disabled.json()) as { state: string; etag: string };
+
+      expect(disabled.status).toBe(200);
+      expect(disabledBody.state).toBe('DISABLED');
+      expect(disabledBody.etag).toBe('2');
+
+      const blocked = await fetch(url(`/v1/${secret}/versions/1:access`));
+      const blockedBody = (await blocked.json()) as { error: { status: string } };
+
+      expect(blocked.status).toBe(400);
+      expect(blockedBody.error.status).toBe('FAILED_PRECONDITION');
+
+      const meta = await fetch(url(`/v1/${secret}/versions/1`));
+
+      expect(meta.status).toBe(200);
+      expect(((await meta.json()) as { state: string }).state).toBe('DISABLED');
+
+      const stale = await post(`/v1/${secret}/versions/1:enable`, { etag: '1' });
+      const staleBody = (await stale.json()) as { error: { status: string } };
+
+      expect(stale.status).toBe(409);
+      expect(staleBody.error.status).toBe('ABORTED');
+
+      const enabled = await post(`/v1/${secret}/versions/1:enable`, {});
+
+      expect(enabled.status).toBe(200);
+      expect(((await enabled.json()) as { state: string }).state).toBe('ENABLED');
+
+      const destroyed = await post(`/v1/${secret}/versions/3:destroy`, {});
+      const destroyedBody = (await destroyed.json()) as { state: string; destroyTime: string };
+
+      expect(destroyed.status).toBe(200);
+      expect(destroyedBody.state).toBe('DESTROYED');
+      expect(Number.isNaN(Date.parse(destroyedBody.destroyTime))).toBe(false);
+
+      const latest = await fetch(url(`/v1/${secret}/versions/latest`));
+
+      expect(((await latest.json()) as { name: string }).name).toBe(`${secret}/versions/3`);
+
+      const latestAccess = await fetch(url(`/v1/${secret}/versions/latest:access`));
+
+      expect(latestAccess.status).toBe(400);
+
+      for (const verb of ['enable', 'disable', 'destroy']) {
+        const refused = await post(`/v1/${secret}/versions/3:${verb}`, {});
+        const refusedBody = (await refused.json()) as { error: { status: string } };
+
+        expect(refused.status).toBe(400);
+        expect(refusedBody.error.status).toBe('FAILED_PRECONDITION');
+      }
+
+      const missing = await post(`/v1/${secret}/versions/42:destroy`, {});
+      const missingBody = (await missing.json()) as {
+        error: { status: string; details: Array<{ resourceType: string }> };
+      };
+
+      expect(missing.status).toBe(404);
+      expect(missingBody.error.details[0]?.resourceType).toBe('SecretVersion');
+    });
+  }
 });
 
 describe('Secret Manager E2E: official client over REST', () => {
@@ -227,4 +329,82 @@ describe('Secret Manager E2E: official client over REST', () => {
 
     client.close();
   });
+
+  for (const parent of ['projects/client-project', 'projects/client-project/locations/us-east1']) {
+    test(`lists and changes version state under ${parent}`, async () => {
+      const client = new SecretManagerServiceClient({
+        fallback: 'rest',
+        apiEndpoint: 'localhost',
+        port: emulatorPort,
+        protocol: 'http',
+        auth: createFakeAuth('client-project') as never,
+      });
+
+      const [secret] = await client.createSecret({
+        parent,
+        secretId: 'stateful',
+        secret: parent.includes('/locations/') ? {} : { replication: { automatic: {} } },
+      });
+
+      for (const value of ['one', 'two']) {
+        await client.addSecretVersion({
+          parent: secret.name,
+          payload: { data: Buffer.from(value) },
+        });
+      }
+
+      const [versions, nextRequest, raw] = await client.listSecretVersions(
+        { parent: secret.name, pageSize: 1 },
+        { autoPaginate: false }
+      );
+
+      expect(versions.map(version => version.name)).toEqual([`${secret.name}/versions/2`]);
+      expect(raw?.totalSize).toBe(2);
+      expect(nextRequest?.pageToken).toBeTypeOf('string');
+
+      const [all] = await client.listSecretVersions({ parent: secret.name });
+
+      expect(all.map(version => version.name)).toEqual([
+        `${secret.name}/versions/2`,
+        `${secret.name}/versions/1`,
+      ]);
+
+      const [disabled] = await client.disableSecretVersion({ name: `${secret.name}/versions/1` });
+
+      expect(disabled.state).toBe('DISABLED');
+
+      const [enabled] = await client.enableSecretVersion({
+        name: `${secret.name}/versions/1`,
+        etag: disabled.etag ?? '',
+      });
+
+      expect(enabled.state).toBe('ENABLED');
+
+      const stale = client.disableSecretVersion({
+        name: `${secret.name}/versions/1`,
+        etag: disabled.etag ?? '',
+      });
+
+      await expect(stale).rejects.toHaveProperty('code', 10);
+
+      const [destroyed] = await client.destroySecretVersion({ name: `${secret.name}/versions/1` });
+
+      expect(destroyed.state).toBe('DESTROYED');
+      expect(destroyed.destroyTime).toBeTypeOf('object');
+
+      const again = client.destroySecretVersion({ name: `${secret.name}/versions/1` });
+
+      await expect(again).rejects.toHaveProperty('code', 9);
+
+      client.close();
+    });
+  }
 });
+
+function post(path: string, body: unknown): Promise<Response> {
+  return fetch(url(path), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}

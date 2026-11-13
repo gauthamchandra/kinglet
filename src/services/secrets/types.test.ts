@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import type { SecretVersionState, VersionTransition } from './types.ts';
 import {
+  nextVersionState,
+  parsePageToken,
   parseSecretName,
   parseSecretParent,
+  resolvePageSize,
   resolveSpec,
   SecretManagerError,
   secretNameIn,
@@ -86,6 +90,64 @@ describe('resolveSpec', () => {
     expect(error).toBeInstanceOf(SecretManagerError);
     expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
   });
+});
+
+describe('list paging', () => {
+  test('defaults a missing or zero page size to 100 and caps it at 25000', () => {
+    expect(resolvePageSize(null)).toBe(100);
+    expect(resolvePageSize(0)).toBe(100);
+    expect(resolvePageSize(7)).toBe(7);
+    expect(resolvePageSize(25_000)).toBe(25_000);
+    expect(resolvePageSize(25_001)).toBe(25_000);
+  });
+
+  test('rejects a negative page size', () => {
+    const error = capture(() => resolvePageSize(-1));
+
+    expect(error).toBeInstanceOf(SecretManagerError);
+    expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
+  });
+
+  test('reads an empty page token as the start and rejects a malformed one', () => {
+    expect(parsePageToken(null)).toBe(0);
+    expect(parsePageToken('20')).toBe(20);
+
+    for (const bad of ['abc', '-1', '1.5']) {
+      const error = capture(() => parsePageToken(bad));
+
+      expect(error).toBeInstanceOf(SecretManagerError);
+      expect((error as SecretManagerError).code).toBe('INVALID_ARGUMENT');
+    }
+  });
+});
+
+describe('nextVersionState', () => {
+  const name = 'projects/p/secrets/db/versions/1';
+
+  const allowed: ReadonlyArray<[SecretVersionState, VersionTransition, SecretVersionState | null]> =
+    [
+      ['ENABLED', 'enable', null],
+      ['ENABLED', 'disable', 'DISABLED'],
+      ['ENABLED', 'destroy', 'DESTROYED'],
+      ['DISABLED', 'enable', 'ENABLED'],
+      ['DISABLED', 'disable', null],
+      ['DISABLED', 'destroy', 'DESTROYED'],
+    ];
+
+  for (const [current, transition, expected] of allowed) {
+    test(`${transition} of ${current} yields ${String(expected)}`, () => {
+      expect(nextVersionState(current, transition, name)).toBe(expected);
+    });
+  }
+
+  for (const transition of ['enable', 'disable', 'destroy'] as const) {
+    test(`${transition} of DESTROYED is FAILED_PRECONDITION`, () => {
+      const error = capture(() => nextVersionState('DESTROYED', transition, name));
+
+      expect(error).toBeInstanceOf(SecretManagerError);
+      expect((error as SecretManagerError).code).toBe('FAILED_PRECONDITION');
+    });
+  }
 });
 
 function emptyInput() {

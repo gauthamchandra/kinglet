@@ -11,12 +11,20 @@
 | `POST` | `/v1/projects/:project/locations/:location/secrets` | `projects.locations.secrets.create` |
 | `GET` | `/v1/projects/:project/locations/:location/secrets/:secret` | `projects.locations.secrets.get` |
 | `POST` | `/v1/projects/:project/locations/:location/secrets/:secret:addVersion` | `projects.locations.secrets.addVersion` |
+| `GET` | `/v1/projects/:project/locations/:location/secrets/:secret/versions` | `projects.locations.secrets.versions.list` |
 | `GET` | `/v1/projects/:project/locations/:location/secrets/:secret/versions/:version` | `projects.locations.secrets.versions.get` |
 | `GET` | `/v1/projects/:project/locations/:location/secrets/:secret/versions/:version:access` | `projects.locations.secrets.versions.access` |
+| `POST` | `/v1/projects/:project/locations/:location/secrets/:secret/versions/:version:destroy` | `projects.locations.secrets.versions.destroy` |
+| `POST` | `/v1/projects/:project/locations/:location/secrets/:secret/versions/:version:disable` | `projects.locations.secrets.versions.disable` |
+| `POST` | `/v1/projects/:project/locations/:location/secrets/:secret/versions/:version:enable` | `projects.locations.secrets.versions.enable` |
 | `POST` | `/v1/projects/:project/secrets` | `projects.secrets.create` |
 | `GET` | `/v1/projects/:project/secrets/:secret` | `projects.secrets.get` |
 | `POST` | `/v1/projects/:project/secrets/:secret:addVersion` | `projects.secrets.addVersion` |
+| `GET` | `/v1/projects/:project/secrets/:secret/versions` | `projects.secrets.versions.list` |
 | `GET` | `/v1/projects/:project/secrets/:secret/versions/:version` | `projects.secrets.versions.get` |
 | `GET` | `/v1/projects/:project/secrets/:secret/versions/:version:access` | `projects.secrets.versions.access` |
+| `POST` | `/v1/projects/:project/secrets/:secret/versions/:version:destroy` | `projects.secrets.versions.destroy` |
+| `POST` | `/v1/projects/:project/secrets/:secret/versions/:version:disable` | `projects.secrets.versions.disable` |
+| `POST` | `/v1/projects/:project/secrets/:secret/versions/:version:enable` | `projects.secrets.versions.enable` |
 
 Regenerate with `bun run docs:generate:api`. CI enforces that this file matches the codebase.
