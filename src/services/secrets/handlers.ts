@@ -87,6 +87,7 @@ interface RestParts {
   readonly secret: string | null;
   readonly version: string | null;
   readonly body: unknown;
+  readonly bodyParseError: boolean;
   readonly query: (name: string) => string | undefined;
 }
 
@@ -300,6 +301,7 @@ function restParts(request: RouteRequest): RestParts {
     secret: request.params.secret === undefined ? null : request.params.secret,
     version: request.params.version === undefined ? null : request.params.version,
     body: request.body,
+    bodyParseError: request.bodyParseError === true,
     query: name => readQuery(request.query[name]),
   };
 }
@@ -402,10 +404,16 @@ function versionChange(transition: VersionTransition): BoundEntry {
       method: 'POST',
       suffix: `/secrets/:secret/versions/:version:${transition}`,
       id: `secrets.versions.${transition}`,
-      toMessage: parts => ({
-        ...(isRecord(parts.body) ? parts.body : {}),
-        name: versionResource(parts),
-      }),
+      toMessage: parts => {
+        if (parts.bodyParseError) {
+          throw new SecretManagerError('INVALID_ARGUMENT', 'Request body is not valid JSON');
+        }
+
+        return {
+          ...(isRecord(parts.body) ? parts.body : {}),
+          name: versionResource(parts),
+        };
+      },
     },
     call: async (manager, message, dialect) => {
       const { name, etag } = decodeVersionChange(message);

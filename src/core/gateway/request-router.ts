@@ -76,6 +76,8 @@ export interface RouteRequest {
   readonly headers: Record<string, string>;
   readonly params: Record<string, string>;
   readonly body?: unknown;
+  /** Set to true when the request carried an application/json body that could not be parsed. */
+  readonly bodyParseError?: true;
   readonly originalRequest: Request;
 }
 
@@ -574,13 +576,22 @@ export class RequestRouter {
 
     // Parse body for non-GET requests
     let body: unknown;
+    let bodyParseError: true | undefined;
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       const contentType = headers['content-type'] || headers['Content-Type'] || '';
 
       try {
         if (contentType.includes('application/json')) {
-          body = await request.json();
+          const text = await request.text();
+
+          if (text.length > 0) {
+            try {
+              body = JSON.parse(text) as unknown;
+            } catch {
+              bodyParseError = true;
+            }
+          }
         } else if (contentType.includes('application/x-www-form-urlencoded')) {
           body = Object.fromEntries(new URLSearchParams(await request.text()));
         } else if (contentType.includes('multipart/form-data')) {
@@ -589,7 +600,7 @@ export class RequestRouter {
           body = await request.text();
         }
       } catch {
-        // If body parsing fails, leave as undefined
+        // If body reading fails, leave as undefined
       }
     }
 
@@ -602,6 +613,7 @@ export class RequestRouter {
       headers,
       params: {}, // Will be populated by route matching
       body,
+      ...(bodyParseError === true ? { bodyParseError } : {}),
       originalRequest: request,
     };
   }

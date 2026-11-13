@@ -214,6 +214,61 @@ describe('secret manager RPC table', () => {
     expect(againBody.error.status).toBe('FAILED_PRECONDITION');
   });
 
+  test('a malformed body on version state routes is INVALID_ARGUMENT and leaves payload intact', async () => {
+    const router = await routerWithSecret('projects/p', 'malformed-body');
+    const base = 'http://localhost/v1/projects/p/secrets/malformed-body';
+
+    await post(router, `${base}:addVersion`, {
+      payload: { data: Buffer.from('secret-value').toString('base64') },
+    });
+
+    for (const verb of ['enable', 'disable', 'destroy']) {
+      const response = await router.route(
+        new Request(`${base}/versions/1:${verb}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{"etag":"old"',
+        })
+      );
+      const body = (await response.json()) as { error: { status: string } };
+
+      expect(response.status).toBe(400);
+      expect(body.error.status).toBe('INVALID_ARGUMENT');
+    }
+
+    const accessed = await router.route(new Request(`${base}/versions/1:access`));
+    const accessBody = (await accessed.json()) as { payload: { data: string } };
+
+    expect(accessed.status).toBe(200);
+    expect(accessBody.payload.data).toBe(Buffer.from('secret-value').toString('base64'));
+  });
+
+  test('an empty body or {} on version state routes still succeeds (etag omitted)', async () => {
+    const router = await routerWithSecret('projects/p', 'empty-body');
+    const base = 'http://localhost/v1/projects/p/secrets/empty-body';
+
+    await post(router, `${base}:addVersion`, {
+      payload: { data: Buffer.from('x').toString('base64') },
+    });
+
+    const disabled = await post(router, `${base}/versions/1:disable`, {});
+    const disabledBody = (await disabled.json()) as { state: string };
+
+    expect(disabled.status).toBe(200);
+    expect(disabledBody.state).toBe('DISABLED');
+
+    const enabled = await router.route(
+      new Request(`${base}/versions/1:enable`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+    const enabledBody = (await enabled.json()) as { state: string };
+
+    expect(enabled.status).toBe(200);
+    expect(enabledBody.state).toBe('ENABLED');
+  });
+
   test('lists versions with versions, totalSize, and no token on the last page', async () => {
     const router = await routerWithSecret('projects/p', 'listed');
     const base = 'http://localhost/v1/projects/p/secrets/listed';
