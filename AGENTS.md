@@ -11,6 +11,12 @@ everything it also describes.
 Cursor reads this file natively. Cursor Bugbot does **not** — it reads only
 `.cursor/BUGBOT.md`, which carries the review-time versions of these rules.
 
+## Writing
+
+Agents writing code, commits, pull requests, ADRs, and tickets follow
+[write-for-humans](.agents/skills/write-for-humans/SKILL.md). Repository rules win
+when they conflict.
+
 ## Pull request follow-through
 
 After you open a pull request, stay with it until it is merged or closed. Do this
