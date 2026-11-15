@@ -10,6 +10,7 @@ import type {
 } from '@/core/gateway/request-router.ts';
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { parsePageSize } from '@/shared/utils/pagination.ts';
 import type { BucketMetagenerationPreconditions, BucketService } from './bucket-service.ts';
 import { handleGcsError } from './error-handler.ts';
 
@@ -89,11 +90,7 @@ export class BucketHandlers {
   private async handleListBuckets(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
       const project = (req.query.project as string) ?? '';
-      const pageSizeRaw = req.query.maxResults
-        ? parseInt(req.query.maxResults as string, 10)
-        : undefined;
-      const pageSize =
-        pageSizeRaw && !Number.isNaN(pageSizeRaw) && pageSizeRaw > 0 ? pageSizeRaw : undefined;
+      const pageSize = parsePageSize(req.query.maxResults);
       const pageToken = (req.query.pageToken as string) || undefined;
 
       const result = await this.service.listBuckets(project, pageSize, pageToken);
