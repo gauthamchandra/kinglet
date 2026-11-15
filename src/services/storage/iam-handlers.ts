@@ -1,8 +1,9 @@
 /**
- * Bucket IAM HTTP routes.
+ * Bucket and object IAM HTTP routes.
  *
  * Discovery: https://storage.googleapis.com/$discovery/rest?version=v1
- * buckets.getIamPolicy, buckets.setIamPolicy, buckets.testIamPermissions.
+ * buckets.getIamPolicy, buckets.setIamPolicy, buckets.testIamPermissions,
+ * objects.getIamPolicy, objects.setIamPolicy, objects.testIamPermissions.
  */
 
 import type {
@@ -16,6 +17,7 @@ import type { Logger } from '@/shared/utils/logger.ts';
 import { GcsError } from './bucket-service.ts';
 import { handleGcsError } from './error-handler.ts';
 import type { IamService } from './iam-service.ts';
+import { parseObjectName } from './types.ts';
 
 export class IamHandlers {
   private service: IamService;
@@ -47,6 +49,24 @@ export class IamHandlers {
         path: '/storage/v1/b/:bucket/iam/testPermissions',
         handler: (req, ctx) => this.handleTestIamPermissions(req, ctx),
       },
+      {
+        id: 'storage.objects.getIamPolicy',
+        method: 'GET',
+        path: '/storage/v1/b/:bucket/o/:object/iam',
+        handler: (req, ctx) => this.handleGetObjectIamPolicy(req, ctx),
+      },
+      {
+        id: 'storage.objects.setIamPolicy',
+        method: 'PUT',
+        path: '/storage/v1/b/:bucket/o/:object/iam',
+        handler: (req, ctx) => this.handleSetObjectIamPolicy(req, ctx),
+      },
+      {
+        id: 'storage.objects.testIamPermissions',
+        method: 'GET',
+        path: '/storage/v1/b/:bucket/o/:object/iam/testPermissions',
+        handler: (req, ctx) => this.handleTestObjectIamPermissions(req, ctx),
+      },
     ];
   }
 
@@ -55,7 +75,7 @@ export class IamHandlers {
       const result = await this.service.getIamPolicy(req.params.bucket ?? '');
       return this.responseUtils.success(result);
     } catch (err) {
-      return this.handleError(err);
+      return this.handleError(err, 'Bucket');
     }
   }
 
@@ -64,7 +84,7 @@ export class IamHandlers {
       const result = await this.service.setIamPolicy(req.params.bucket ?? '', req.body);
       return this.responseUtils.success(result);
     } catch (err) {
-      return this.handleError(err);
+      return this.handleError(err, 'Bucket');
     }
   }
 
@@ -77,12 +97,60 @@ export class IamHandlers {
       const result = await this.service.testIamPermissions(req.params.bucket ?? '', permissions);
       return this.responseUtils.success(result);
     } catch (err) {
-      return this.handleError(err);
+      return this.handleError(err, 'Bucket');
     }
   }
 
-  private handleError(err: unknown): RouteResponse {
-    return handleGcsError(err, 'Bucket', this.responseUtils);
+  private async handleGetObjectIamPolicy(
+    req: RouteRequest,
+    _ctx: RouteContext
+  ): Promise<RouteResponse> {
+    try {
+      const result = await this.service.getObjectIamPolicy(
+        req.params.bucket ?? '',
+        parseObjectName(req.params.object ?? '')
+      );
+      return this.responseUtils.success(result);
+    } catch (err) {
+      return this.handleError(err, 'Object');
+    }
+  }
+
+  private async handleSetObjectIamPolicy(
+    req: RouteRequest,
+    _ctx: RouteContext
+  ): Promise<RouteResponse> {
+    try {
+      const result = await this.service.setObjectIamPolicy(
+        req.params.bucket ?? '',
+        parseObjectName(req.params.object ?? ''),
+        req.body
+      );
+      return this.responseUtils.success(result);
+    } catch (err) {
+      return this.handleError(err, 'Object');
+    }
+  }
+
+  private async handleTestObjectIamPermissions(
+    req: RouteRequest,
+    _ctx: RouteContext
+  ): Promise<RouteResponse> {
+    try {
+      const permissions = readPermissions(req.query);
+      const result = await this.service.testObjectIamPermissions(
+        req.params.bucket ?? '',
+        parseObjectName(req.params.object ?? ''),
+        permissions
+      );
+      return this.responseUtils.success(result);
+    } catch (err) {
+      return this.handleError(err, 'Object');
+    }
+  }
+
+  private handleError(err: unknown, resourceType: string): RouteResponse {
+    return handleGcsError(err, resourceType, this.responseUtils);
   }
 }
 

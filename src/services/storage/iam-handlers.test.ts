@@ -67,6 +67,30 @@ describe('IamHandlers', () => {
           permissions: ['storage.buckets.get'],
         })
       ),
+      getObjectIamPolicy: mock(() =>
+        Promise.resolve({
+          kind: 'storage#policy',
+          resourceId: 'projects/_/buckets/obj-iam/objects/echo.txt',
+          version: 1,
+          etag: 'etag-1',
+          bindings: [],
+        })
+      ),
+      setObjectIamPolicy: mock(() =>
+        Promise.resolve({
+          kind: 'storage#policy',
+          resourceId: 'projects/_/buckets/obj-iam/objects/echo.txt',
+          version: 1,
+          etag: 'etag-2',
+          bindings: [],
+        })
+      ),
+      testObjectIamPermissions: mock(() =>
+        Promise.resolve({
+          kind: 'storage#testIamPermissionsResponse',
+          permissions: ['storage.objects.get'],
+        })
+      ),
     } as unknown as IamService;
 
     handlers = new IamHandlers(mockService, createMockLogger());
@@ -75,7 +99,6 @@ describe('IamHandlers', () => {
   test('getRoutes returns the three bucket IAM routes', () => {
     const routes = handlers.getRoutes();
 
-    expect(routes).toHaveLength(3);
     expect(findRoute(routes, 'storage.buckets.getIamPolicy')).toMatchObject({
       method: 'GET',
       path: '/storage/v1/b/:bucket/iam',
@@ -185,6 +208,142 @@ describe('IamHandlers', () => {
     const route = findRoute(handlers.getRoutes(), 'storage.buckets.getIamPolicy');
     const result = await route.handler(
       createRequest({ params: { bucket: 'missing' } }),
+      createContext()
+    );
+
+    expect(result.status).toBe(404);
+  });
+
+  test('getRoutes returns the three object IAM routes', () => {
+    const routes = handlers.getRoutes();
+
+    expect(routes).toHaveLength(6);
+    expect(findRoute(routes, 'storage.objects.getIamPolicy')).toMatchObject({
+      method: 'GET',
+      path: '/storage/v1/b/:bucket/o/:object/iam',
+    });
+    expect(findRoute(routes, 'storage.objects.setIamPolicy')).toMatchObject({
+      method: 'PUT',
+      path: '/storage/v1/b/:bucket/o/:object/iam',
+    });
+    expect(findRoute(routes, 'storage.objects.testIamPermissions')).toMatchObject({
+      method: 'GET',
+      path: '/storage/v1/b/:bucket/o/:object/iam/testPermissions',
+    });
+  });
+
+  test('object getIamPolicy decodes the name and does not rewrite version from the query', async () => {
+    (mockService.getObjectIamPolicy as ReturnType<typeof mock>).mockResolvedValue({
+      kind: 'storage#policy',
+      resourceId: 'projects/_/buckets/obj-iam/objects/folder/nested.txt',
+      version: 3,
+      etag: 'etag-1',
+      bindings: [],
+    });
+
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.getIamPolicy');
+    const result = await route.handler(
+      createRequest({
+        path: '/storage/v1/b/obj-iam/o/folder%2Fnested.txt/iam',
+        params: { bucket: 'obj-iam', object: 'folder%2Fnested.txt' },
+        query: { optionsRequestedPolicyVersion: '1', userProject: 'other' },
+      }),
+      createContext()
+    );
+
+    expect(result.status).toBe(200);
+    expect(mockService.getObjectIamPolicy).toHaveBeenCalledWith('obj-iam', 'folder/nested.txt');
+    expect(result.body).toMatchObject({ version: 3, kind: 'storage#policy' });
+  });
+
+  test('object setIamPolicy passes the decoded name and body through', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.setIamPolicy');
+    const body = { bindings: [], etag: 'etag-1' };
+    const result = await route.handler(
+      createRequest({
+        method: 'PUT',
+        params: { bucket: 'obj-iam', object: 'folder%2Fnested.txt' },
+        body,
+      }),
+      createContext()
+    );
+
+    expect(result.status).toBe(200);
+    expect(mockService.setObjectIamPolicy).toHaveBeenCalledWith(
+      'obj-iam',
+      'folder/nested.txt',
+      body
+    );
+  });
+
+  test('object testIamPermissions accepts one permission or several', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.testIamPermissions');
+
+    await route.handler(
+      createRequest({
+        params: { bucket: 'obj-iam', object: 'echo.txt' },
+        query: { permissions: 'storage.objects.get' },
+      }),
+      createContext()
+    );
+    await route.handler(
+      createRequest({
+        params: { bucket: 'obj-iam', object: 'echo.txt' },
+        query: { permissions: ['storage.objects.get', 'storage.objects.delete'] },
+      }),
+      createContext()
+    );
+
+    expect(mockService.testObjectIamPermissions).toHaveBeenNthCalledWith(1, 'obj-iam', 'echo.txt', [
+      'storage.objects.get',
+    ]);
+    expect(mockService.testObjectIamPermissions).toHaveBeenNthCalledWith(2, 'obj-iam', 'echo.txt', [
+      'storage.objects.get',
+      'storage.objects.delete',
+    ]);
+  });
+
+  test('object testIamPermissions without permissions is 400', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.testIamPermissions');
+    const result = await route.handler(
+      createRequest({ params: { bucket: 'obj-iam', object: 'echo.txt' }, query: {} }),
+      createContext()
+    );
+
+    expect(result.status).toBe(400);
+    expect(mockService.testObjectIamPermissions).not.toHaveBeenCalled();
+  });
+
+  test('a stale object etag is 409 or 412', async () => {
+    (mockService.setObjectIamPolicy as ReturnType<typeof mock>).mockRejectedValue(
+      new GcsError('ABORTED', 'The IAM policy etag does not match')
+    );
+
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.setIamPolicy');
+    const result = await route.handler(
+      createRequest({
+        method: 'PUT',
+        params: { bucket: 'obj-iam', object: 'stale.txt' },
+        body: { etag: 'stale', bindings: [] },
+      }),
+      createContext()
+    );
+
+    // Recorded stale-etag status: 409 ABORTED. 412 is accepted and is not locked.
+    expect([409, 412]).toContain(result.status);
+    expect(result.body).toMatchObject({
+      error: { code: result.status },
+    });
+  });
+
+  test('a missing object is 404', async () => {
+    (mockService.getObjectIamPolicy as ReturnType<typeof mock>).mockRejectedValue(
+      new GcsError('NOT_FOUND', 'Object missing.txt not found in bucket obj-iam')
+    );
+
+    const route = findRoute(handlers.getRoutes(), 'storage.objects.getIamPolicy');
+    const result = await route.handler(
+      createRequest({ params: { bucket: 'obj-iam', object: 'missing.txt' } }),
       createContext()
     );
 

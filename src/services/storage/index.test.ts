@@ -67,6 +67,9 @@ describe('CloudStorageService', () => {
     expect(ids).toContain('storage.projects.hmacKeys.list');
     expect(ids).toContain('storage.projects.hmacKeys.update');
     expect(ids).toContain('storage.projects.hmacKeys.delete');
+    expect(ids).toContain('storage.objects.getIamPolicy');
+    expect(ids).toContain('storage.objects.setIamPolicy');
+    expect(ids).toContain('storage.objects.testIamPermissions');
 
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(ids.length);

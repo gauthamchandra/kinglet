@@ -2,23 +2,40 @@
  * Object Service - business logic for Cloud Storage object operations
  */
 
+import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { BlobStore } from './blob-store.ts';
 import type { BucketRepository } from './bucket-repository.ts';
 import { GcsError } from './bucket-service.ts';
+import type { IamPolicyRepository } from './iam-repository.ts';
 import type { ObjectRepository } from './object-repository.ts';
 import type { ObjectListResponse, ObjectResponse, RewriteResponse } from './types.ts';
-import { ComposeRequestSchema, objectRecordToResponse, requestToObjectRecord } from './types.ts';
+import {
+  ComposeRequestSchema,
+  objectIamResourceId,
+  objectRecordToResponse,
+  requestToObjectRecord,
+} from './types.ts';
 
 export class ObjectService {
   private objectRepo: ObjectRepository;
   private bucketRepo: BucketRepository;
   private blobStore: BlobStore;
+  private iamRepo: IamPolicyRepository;
+  private writes: ResourceMutex;
   private generationCounter = 0;
 
-  constructor(objectRepo: ObjectRepository, bucketRepo: BucketRepository, blobStore: BlobStore) {
+  constructor(
+    objectRepo: ObjectRepository,
+    bucketRepo: BucketRepository,
+    blobStore: BlobStore,
+    iamRepo: IamPolicyRepository,
+    writes: ResourceMutex
+  ) {
     this.objectRepo = objectRepo;
     this.bucketRepo = bucketRepo;
     this.blobStore = blobStore;
+    this.iamRepo = iamRepo;
+    this.writes = writes;
   }
 
   async insertObject(
@@ -36,13 +53,9 @@ export class ObjectService {
   ): Promise<ObjectResponse> {
     await this.ensureBucketExists(bucket);
 
-    // Delete existing object with the same name (overwrite)
-    const existing = await this.objectRepo.getObject(bucket, name);
-
-    if (existing) {
-      await this.blobStore.delete(existing.blobPath);
-      await this.objectRepo.deleteObject(bucket, name);
-    }
+    // Overwrite removes the previous object and its IAM policy under the same
+    // lock as setIamPolicy, so a set cannot land on the name after it is gone.
+    await this.removeObjectAndPolicy(bucket, name);
 
     this.generationCounter++;
     const generation = String(Date.now() * 1000 + this.generationCounter);
@@ -193,14 +206,27 @@ export class ObjectService {
   }
 
   async deleteObject(bucket: string, name: string): Promise<void> {
-    const record = await this.objectRepo.getObject(bucket, name);
+    const removed = await this.removeObjectAndPolicy(bucket, name);
 
-    if (!record) {
+    if (!removed) {
       throw new GcsError('NOT_FOUND', `Object ${name} not found in bucket ${bucket}`);
     }
+  }
 
-    await this.blobStore.delete(record.blobPath);
-    await this.objectRepo.deleteObject(bucket, name);
+  private async removeObjectAndPolicy(bucket: string, name: string): Promise<boolean> {
+    return this.writes.runExclusively(objectIamResourceId(bucket, name), async () => {
+      const record = await this.objectRepo.getObject(bucket, name);
+
+      if (!record) {
+        return false;
+      }
+
+      await this.blobStore.delete(record.blobPath);
+      await this.objectRepo.deleteObject(bucket, name);
+      await this.iamRepo.deleteByResourceId(objectIamResourceId(bucket, name));
+
+      return true;
+    });
   }
 
   async copyObject(

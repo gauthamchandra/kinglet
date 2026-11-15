@@ -1,29 +1,87 @@
 /**
- * Bucket IAM. Policies are stored and returned. They are not evaluated.
+ * Bucket and object IAM. Policies are stored and returned. They are not evaluated.
  */
 
 import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { BucketRepository } from './bucket-repository.ts';
 import { GcsError } from './bucket-service.ts';
 import type { IamPolicyRepository } from './iam-repository.ts';
+import type { ObjectRepository } from './object-repository.ts';
 import type { PolicyBinding, PolicyResponse, TestIamPermissionsResponse } from './types.ts';
-import { bucketIamResourceId, SetIamPolicyRequestSchema } from './types.ts';
+import { bucketIamResourceId, objectIamResourceId, SetIamPolicyRequestSchema } from './types.ts';
 
 export class IamService {
   private bucketRepo: BucketRepository;
   private iamRepo: IamPolicyRepository;
   private writes: ResourceMutex;
+  private objectRepo: ObjectRepository;
 
-  constructor(bucketRepo: BucketRepository, iamRepo: IamPolicyRepository, writes: ResourceMutex) {
+  constructor(
+    bucketRepo: BucketRepository,
+    iamRepo: IamPolicyRepository,
+    writes: ResourceMutex,
+    objectRepo: ObjectRepository
+  ) {
     this.bucketRepo = bucketRepo;
     this.iamRepo = iamRepo;
     this.writes = writes;
+    this.objectRepo = objectRepo;
   }
 
   async getIamPolicy(bucket: string): Promise<PolicyResponse> {
     await this.ensureBucket(bucket);
 
-    const resourceId = bucketIamResourceId(bucket);
+    return this.readPolicy(bucketIamResourceId(bucket));
+  }
+
+  async setIamPolicy(bucket: string, body: unknown): Promise<PolicyResponse> {
+    return this.writePolicy(bucketIamResourceId(bucket), () => this.ensureBucket(bucket), body);
+  }
+
+  async testIamPermissions(
+    bucket: string,
+    permissions: string[]
+  ): Promise<TestIamPermissionsResponse> {
+    await this.ensureBucket(bucket);
+
+    return {
+      kind: 'storage#testIamPermissionsResponse',
+      permissions,
+    };
+  }
+
+  async getObjectIamPolicy(bucket: string, objectName: string): Promise<PolicyResponse> {
+    await this.ensureObject(bucket, objectName);
+
+    return this.readPolicy(objectIamResourceId(bucket, objectName));
+  }
+
+  async setObjectIamPolicy(
+    bucket: string,
+    objectName: string,
+    body: unknown
+  ): Promise<PolicyResponse> {
+    return this.writePolicy(
+      objectIamResourceId(bucket, objectName),
+      () => this.ensureObject(bucket, objectName),
+      body
+    );
+  }
+
+  async testObjectIamPermissions(
+    bucket: string,
+    objectName: string,
+    permissions: string[]
+  ): Promise<TestIamPermissionsResponse> {
+    await this.ensureObject(bucket, objectName);
+
+    return {
+      kind: 'storage#testIamPermissionsResponse',
+      permissions,
+    };
+  }
+
+  private async readPolicy(resourceId: string): Promise<PolicyResponse> {
     const stored = await this.iamRepo.getByResourceId(resourceId);
 
     if (!stored) {
@@ -33,19 +91,22 @@ export class IamService {
     return policyFromRecord(stored.resourceId, stored.version, stored.etag, stored.bindings);
   }
 
-  async setIamPolicy(bucket: string, body: unknown): Promise<PolicyResponse> {
+  private async writePolicy(
+    resourceId: string,
+    ensureResource: () => Promise<void>,
+    body: unknown
+  ): Promise<PolicyResponse> {
     const parsed = SetIamPolicyRequestSchema.safeParse(body);
 
     if (!parsed.success) {
       throw new GcsError('INVALID_ARGUMENT', `Invalid IAM policy: ${parsed.error.message}`);
     }
 
-    const resourceId = bucketIamResourceId(bucket);
-
-    // Same lock as bucket delete. The bucket is checked again inside it so a
-    // delete that ran while this set was queued cannot be followed by a write.
+    // Same lock as delete of this resource. The resource is checked again
+    // inside it so a delete that ran while this set was queued cannot be
+    // followed by a write.
     return this.writes.runExclusively(resourceId, async () => {
-      await this.ensureBucket(bucket);
+      await ensureResource();
 
       const stored = await this.iamRepo.getByResourceId(resourceId);
       const currentEtag = stored ? stored.etag : emptyPolicyEtag(resourceId);
@@ -73,23 +134,19 @@ export class IamService {
     });
   }
 
-  async testIamPermissions(
-    bucket: string,
-    permissions: string[]
-  ): Promise<TestIamPermissionsResponse> {
-    await this.ensureBucket(bucket);
-
-    return {
-      kind: 'storage#testIamPermissionsResponse',
-      permissions,
-    };
-  }
-
   private async ensureBucket(bucket: string): Promise<void> {
     const record = await this.bucketRepo.getBucketByName(bucket);
 
     if (!record) {
       throw new GcsError('NOT_FOUND', `Bucket ${bucket} not found`);
+    }
+  }
+
+  private async ensureObject(bucket: string, objectName: string): Promise<void> {
+    const record = await this.objectRepo.getObject(bucket, objectName);
+
+    if (!record) {
+      throw new GcsError('NOT_FOUND', `Object ${objectName} not found in bucket ${bucket}`);
     }
   }
 }
@@ -126,7 +183,10 @@ function isPresentEtag(etag: string | undefined): etag is string {
 }
 
 function emptyPolicyEtag(resourceId: string): string {
-  return btoa(`kinglet-empty-iam:${resourceId}`);
+  // UTF-8, then base64. btoa rejects code points above Latin-1, and object names may be Unicode.
+  const bytes = new TextEncoder().encode(`kinglet-empty-iam:${resourceId}`);
+
+  return Buffer.from(bytes).toString('base64');
 }
 
 function freshEtag(): string {

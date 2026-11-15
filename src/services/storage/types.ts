@@ -407,6 +407,11 @@ export function bucketIamResourceId(bucket: string): string {
   return `projects/_/buckets/${bucket}`;
 }
 
+/** v2 `TestIamPermissions` object resource: `projects/_/buckets/{bucket}/objects/{object}`. */
+export function objectIamResourceId(bucket: string, objectName: string): string {
+  return `projects/_/buckets/${bucket}/objects/${objectName}`;
+}
+
 export function parseBucketName(name: string): string {
   if (!name || name.length === 0) {
     throw new Error('Bucket name cannot be empty');

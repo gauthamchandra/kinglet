@@ -3,9 +3,11 @@ import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { BlobStore } from './blob-store.ts';
 import { BucketRepository } from './bucket-repository.ts';
 import { GcsError } from './bucket-service.ts';
+import { IamPolicyRepository } from './iam-repository.ts';
 import { ObjectRepository } from './object-repository.ts';
 import { ObjectService } from './object-service.ts';
 import { requestToBucketRecord } from './types.ts';
@@ -29,7 +31,10 @@ describe('ObjectService', () => {
     objectRepo = new ObjectRepository(storage);
     await objectRepo.initialize();
 
-    service = new ObjectService(objectRepo, bucketRepo, blobStore);
+    const iamRepo = new IamPolicyRepository(storage);
+    await iamRepo.initialize();
+
+    service = new ObjectService(objectRepo, bucketRepo, blobStore, iamRepo, new ResourceMutex());
 
     // Create a default test bucket
     await bucketRepo.createBucket(

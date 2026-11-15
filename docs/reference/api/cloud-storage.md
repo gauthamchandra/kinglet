@@ -25,6 +25,9 @@
 | `PATCH` | `/storage/v1/b/:bucket/o/:object` | `storage.objects.patch` |
 | `PUT` | `/storage/v1/b/:bucket/o/:object` | `storage.objects.update` |
 | `POST` | `/storage/v1/b/:bucket/o/:object/compose` | `storage.objects.compose` |
+| `GET` | `/storage/v1/b/:bucket/o/:object/iam` | `storage.objects.getIamPolicy` |
+| `PUT` | `/storage/v1/b/:bucket/o/:object/iam` | `storage.objects.setIamPolicy` |
+| `GET` | `/storage/v1/b/:bucket/o/:object/iam/testPermissions` | `storage.objects.testIamPermissions` |
 | `POST` | `/storage/v1/b/:srcBucket/o/:srcObject/copyTo/b/:dstBucket/o/:dstObject` | `storage.objects.copy` |
 | `POST` | `/storage/v1/b/:srcBucket/o/:srcObject/rewriteTo/b/:dstBucket/o/:dstObject` | `storage.objects.rewrite` |
 | `GET` | `/storage/v1/projects/:projectId/hmacKeys` | `storage.projects.hmacKeys.list` |
