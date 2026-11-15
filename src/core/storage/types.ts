@@ -303,6 +303,13 @@ export interface StorageProvider extends StorageOperations {
   createTable(name: string, schema: TableSchema): Promise<void>;
 
   /**
+   * Drop an index and recreate it on `columns` when those columns differ.
+   * Returns whether the index was rebuilt. CREATE INDEX IF NOT EXISTS does
+   * not retarget an existing index.
+   */
+  retargetIndex(table: string, indexName: string, columns: readonly string[]): boolean;
+
+  /**
    * Drop a table
    */
   dropTable(name: string): Promise<void>;

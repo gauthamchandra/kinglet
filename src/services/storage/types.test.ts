@@ -12,6 +12,7 @@ import {
   objectRecordToResponse,
   parseBucketName,
   parseObjectName,
+  projectNumberFromProjectId,
   requestToBucketRecord,
   requestToObjectRecord,
   StorageClass,
@@ -170,6 +171,7 @@ describe('bucketRecordToResponse', () => {
     labels: JSON.stringify({ env: 'test' }),
     cors: null,
     lifecycle: null,
+    projectId: 'demo-project',
     projectNumber: '123456',
   };
 
@@ -186,6 +188,15 @@ describe('bucketRecordToResponse', () => {
   test('converts metageneration to string', () => {
     const response = bucketRecordToResponse(record);
     expect(response.metageneration).toBe('2');
+  });
+
+  test('projectNumber is the stored bare decimal', () => {
+    const response = bucketRecordToResponse({
+      ...record,
+      projectNumber: '2052754419519117448',
+    });
+    expect(response.projectNumber).toBe('2052754419519117448');
+    expect(response).not.toHaveProperty('projectId');
   });
 
   test('deserializes JSON fields', () => {
@@ -265,13 +276,20 @@ describe('objectRecordToResponse', () => {
   });
 });
 
+describe('projectNumberFromProjectId', () => {
+  test('my-project is the BigInt decimal 2052754419519117448', () => {
+    expect(projectNumberFromProjectId('my-project')).toBe('2052754419519117448');
+  });
+});
+
 describe('requestToBucketRecord', () => {
   test('applies defaults', () => {
-    const record = requestToBucketRecord('my-bucket', { name: 'my-bucket' }, 'proj-123');
+    const record = requestToBucketRecord('my-bucket', { name: 'my-bucket' }, 'my-project');
     expect(record.location).toBe('US');
     expect(record.storageClass).toBe('STANDARD');
     expect(record.metageneration).toBe(1);
-    expect(record.projectNumber).toBe('proj-123');
+    expect(record.projectId).toBe('my-project');
+    expect(record.projectNumber).toBe('2052754419519117448');
   });
 
   test('uses custom values', () => {

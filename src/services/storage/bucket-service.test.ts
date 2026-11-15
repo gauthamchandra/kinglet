@@ -32,15 +32,26 @@ describe('BucketService', () => {
   // ── createBucket ──
 
   test('createBucket with defaults', async () => {
-    const result = await service.createBucket('proj-1', { name: 'my-bucket' });
+    const result = await service.createBucket('my-project', { name: 'my-bucket' });
 
     expect(result.kind).toBe('storage#bucket');
     expect(result.name).toBe('my-bucket');
     expect(result.location).toBe('US');
     expect(result.storageClass).toBe('STANDARD');
     expect(result.metageneration).toBe('1');
-    expect(result.projectNumber).toBe('proj-1');
+    expect(result.projectNumber).toBe('2052754419519117448');
     expect(result.timeCreated).toBeTypeOf('string');
+  });
+
+  test('listBuckets filters the caller project id', async () => {
+    await service.createBucket('my-project', { name: 'my-bucket' });
+
+    const byId = await service.listBuckets('my-project');
+    expect(byId.items?.map(item => item.name)).toEqual(['my-bucket']);
+    expect(byId.items?.[0]?.projectNumber).toBe('2052754419519117448');
+
+    const byNumber = await service.listBuckets('2052754419519117448');
+    expect(byNumber.items).toHaveLength(0);
   });
 
   test('createBucket with custom values', async () => {
