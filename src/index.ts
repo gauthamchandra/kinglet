@@ -16,6 +16,7 @@ import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { RequestRouter } from '@/core/gateway/request-router.ts';
 import { toStorageConfig } from '@/core/storage/config.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
+import type { StorageType } from '@/core/storage/types.ts';
 import { buildHealthBody, type KingletCloudArmorEvaluationServerStatus } from '@/health-status.ts';
 import { AlloyDbService } from '@/services/alloydb/index.ts';
 import { CloudSqlService } from '@/services/cloudsql/index.ts';
@@ -48,6 +49,7 @@ let cloudSqlService: CloudSqlService | null = null;
 let computeService: ComputeService | null = null;
 let networkSecurityService: NetworkSecurityService | null = null;
 let secretsService: SecretsService | null = null;
+let storageType: StorageType = 'sqlite';
 
 async function main(): Promise<void> {
   try {
@@ -55,6 +57,8 @@ async function main(): Promise<void> {
     logger.info('Bun version:', Bun.version);
 
     const config = await getConfig();
+
+    storageType = config.storage.type;
 
     logger.info('Configuration loaded', {
       httpPort: config.server.httpPort,
@@ -142,7 +146,10 @@ async function main(): Promise<void> {
     }
 
     if (config.services.storage.enabled) {
-      cloudStorageService = new CloudStorageService(storageManager, new Logger('Storage'));
+      cloudStorageService = new CloudStorageService(storageManager, new Logger('Storage'), {
+        blobPath: config.storage.blobPath,
+        storageType: config.storage.type,
+      });
       await cloudStorageService.initialize();
 
       for (const route of cloudStorageService.getRoutes()) {
@@ -447,7 +454,7 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
     }
 
     if (cloudStorageService) {
-      await cloudStorageService.stop();
+      await cloudStorageService.stop(storageType);
       logger.info('Cloud Storage service stopped');
     }
 

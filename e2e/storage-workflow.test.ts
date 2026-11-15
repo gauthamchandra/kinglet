@@ -8,6 +8,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Storage } from '@google-cloud/storage';
 import type { Server } from 'bun';
 import { StorageManager } from '@/core/storage/manager.ts';
@@ -21,6 +25,7 @@ import { buildProductionRouter } from './e2e-helpers.ts';
 let emulatorServer: Server;
 let emulatorPort: number;
 let cloudStorageService: CloudStorageService;
+let blobRoot: string;
 
 function emulatorUrl(path: string): string {
   return `http://localhost:${emulatorPort}${path}`;
@@ -30,12 +35,16 @@ function emulatorUrl(path: string): string {
 
 beforeAll(async () => {
   emulatorPort = await getAvailablePort();
+  blobRoot = await mkdtemp(join(tmpdir(), 'kinglet-e2e-storage-'));
 
   const storage = new StorageManager();
   await storage.initialize({ type: 'memory' });
 
   const logger = new Logger('e2e-storage', 'error');
-  cloudStorageService = new CloudStorageService(storage, logger);
+  cloudStorageService = new CloudStorageService(storage, logger, {
+    blobPath: blobRoot,
+    storageType: 'memory',
+  });
   await cloudStorageService.initialize();
 
   const routes = cloudStorageService.getRoutes();
@@ -48,8 +57,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await cloudStorageService.stop();
+  await cloudStorageService.stop('memory');
   emulatorServer.stop();
+  rmSync(blobRoot, { recursive: true, force: true });
 });
 
 // ── Test Path 1: Raw HTTP Fetch ──

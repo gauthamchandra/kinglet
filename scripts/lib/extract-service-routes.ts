@@ -2,6 +2,9 @@
  * Extract kinglet route tables per emulated GCP service at runtime.
  */
 
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createLocationRoutes } from '@/core/gateway/location-routes.ts';
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import { StorageManager } from '@/core/storage/manager.ts';
@@ -42,7 +45,6 @@ const SERVICE_FACTORIES: Record<string, ServiceFactory> = {
   'cloud-kms': (storage, logger) => new CloudKmsService(storage, logger),
   'cloud-scheduler': (storage, logger) => new SchedulerService(storage, logger),
   'cloud-sql': (storage, logger) => new CloudSqlService(storage, logger, { enabled: false }),
-  'cloud-storage': (storage, logger) => new CloudStorageService(storage, logger),
   'cloud-tasks': (storage, logger) => new CloudTasksService(storage, logger),
   memorystore: (storage, logger) => new MemorystoreService(storage, logger, { enabled: false }),
   networksecurity: (storage, logger) => new NetworkSecurityService(storage, logger),
@@ -82,6 +84,26 @@ export async function extractRoutesForService(serviceName: string): Promise<Extr
     return [];
   }
 
+  const storage = new StorageManager();
+  await storage.initialize({ type: 'memory' });
+  const logger = new Logger('docs', 'error');
+
+  if (serviceName === 'cloud-storage') {
+    const blobRoot = await mkdtemp(join(tmpdir(), 'kinglet-blob-'));
+
+    try {
+      const service = new CloudStorageService(storage, logger, {
+        blobPath: blobRoot,
+        storageType: 'memory',
+      });
+      await service.initialize();
+
+      return dedupeRoutes(service.getRoutes().map(toExtractedRoute));
+    } finally {
+      await rm(blobRoot, { recursive: true, force: true });
+    }
+  }
+
   const factory = SERVICE_FACTORIES[serviceName];
 
   if (!factory) {
@@ -90,10 +112,6 @@ export async function extractRoutesForService(serviceName: string): Promise<Extr
     );
   }
 
-  const storage = new StorageManager();
-  await storage.initialize({ type: 'memory' });
-
-  const logger = new Logger('docs', 'error');
   const service = factory(storage, logger);
 
   await service.initialize();

@@ -5,7 +5,8 @@
   },
   "storage": {
     "type": "sqlite",
-    "sqlitePath": "/app/data/emulator.db"
+    "sqlitePath": "/app/data/emulator.db",
+    "blobPath": "/app/data/blobs"
   },
   "server": {
     "maxConnections": 500
