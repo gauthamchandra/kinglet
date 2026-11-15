@@ -976,4 +976,82 @@ describe('RequestRouter', () => {
       expect(deleteBody.params.schema).toBe('s1');
     });
   });
+
+  describe('Fallback routes', () => {
+    const idHandler = (routeId: string) => async (): Promise<RouteResponse> => ({
+      status: 200,
+      body: { routeId },
+    });
+
+    // Cloud Tasks get is about 60% static. `/:bucket/**` is about 67% because
+    // `**` counts as a static segment, so score alone would prefer the catch-all.
+    const tasksGetPath = '/v2/projects/:project/locations/:location/queues/:queueId/tasks/:taskId';
+    const tasksGetRequest = '/v2/projects/p/locations/us-central1/queues/q/tasks/t';
+
+    test('rejects a second fallback for the same method', () => {
+      router.addRoute(
+        createRoute.get('/:bucket/**', idHandler('first'), { id: 'first', fallback: true })
+      );
+
+      expect(() =>
+        router.addRoute(
+          createRoute.get('/other/:name/**', idHandler('second'), {
+            id: 'second',
+            fallback: true,
+          })
+        )
+      ).toThrow("Route 'second' conflicts with fallback 'first': GET already has a fallback route");
+    });
+
+    test('allows one fallback on each method', () => {
+      router.addRoute(
+        createRoute.get('/:bucket/**', idHandler('get'), { id: 'get-fallback', fallback: true })
+      );
+      router.addRoute(
+        createRoute.put('/:bucket/**', idHandler('put'), { id: 'put-fallback', fallback: true })
+      );
+
+      expect(
+        router
+          .getAllRoutes()
+          .map(route => route.id)
+          .sort()
+      ).toEqual(['get-fallback', 'put-fallback']);
+    });
+
+    test('a normal route wins even when a fallback scores higher', async () => {
+      router.addRoute(
+        createRoute.get(tasksGetPath, idHandler('tasks.tasks.get'), { id: 'tasks.tasks.get' })
+      );
+      router.addRoute(
+        createRoute.get('/:bucket/**', idHandler('fallback.get'), {
+          id: 'fallback.get',
+          fallback: true,
+        })
+      );
+
+      const response = await router.route(createMockRequest('GET', tasksGetRequest));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ routeId: 'tasks.tasks.get' });
+
+      const fallback = await router.route(createMockRequest('GET', '/my-bucket/nested/object'));
+
+      expect(fallback.status).toBe(200);
+      expect(await fallback.json()).toEqual({ routeId: 'fallback.get' });
+    });
+
+    test('returns 404 when neither an ordinary route nor the fallback matches', async () => {
+      router.addRoute(
+        createRoute.get('/:bucket/**', idHandler('fallback.get'), {
+          id: 'fallback.get',
+          fallback: true,
+        })
+      );
+
+      const response = await router.route(createMockRequest('POST', '/my-bucket/nested/object'));
+
+      expect(response.status).toBe(404);
+    });
+  });
 });
