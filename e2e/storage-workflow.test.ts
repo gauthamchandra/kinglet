@@ -14,7 +14,7 @@ import { StorageManager } from '@/core/storage/manager.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
-import { buildRouter } from './e2e-helpers.ts';
+import { buildProductionRouter } from './e2e-helpers.ts';
 
 // ── Test Infrastructure ──
 
@@ -39,7 +39,7 @@ beforeAll(async () => {
   await cloudStorageService.initialize();
 
   const routes = cloudStorageService.getRoutes();
-  const router = buildRouter(routes);
+  const router = buildProductionRouter(routes);
 
   emulatorServer = Bun.serve({
     port: emulatorPort,

@@ -177,9 +177,10 @@ jobs:
       # (test-utils/valkey.ts additionally turns a missing binary into a hard error when CI=true).
       - name: Install valkey-server and PostgreSQL
         run: |
+          set -o pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ca-certificates curl
-          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/keyrings/postgresql.asc > /dev/null
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/keyrings/postgresql.asc > /dev/null
           . /etc/os-release
           echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
@@ -232,9 +233,10 @@ jobs:
       # running unnoticed. See the matching step in the `test` job.
       - name: Install valkey-server and PostgreSQL
         run: |
+          set -o pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ca-certificates curl
-          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/keyrings/postgresql.asc > /dev/null
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/keyrings/postgresql.asc > /dev/null
           . /etc/os-release
           echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update

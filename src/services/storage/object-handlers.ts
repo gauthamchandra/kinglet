@@ -47,12 +47,14 @@ export class ObjectHandlers {
         id: 'storage.objects.resumable',
         method: 'PUT',
         path: '/upload/storage/v1/b/:bucket/o',
+        metadata: { rawBody: true },
         handler: (req, ctx) => this.handleResumableUpload(req, ctx),
       },
       {
         id: 'storage.objects.get',
         method: 'GET',
         path: '/storage/v1/b/:bucket/o/:object',
+        metadata: { rawBody: true },
         handler: (req, ctx) => this.handleGetObject(req, ctx),
       },
       {

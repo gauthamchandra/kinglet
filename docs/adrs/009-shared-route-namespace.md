@@ -133,5 +133,5 @@ promised so far.
 - Cloud Tasks keeps its own `/v2` locations routes. They sit on a different API
   version and do not collide.
 - `e2e/e2e-helpers.ts` now exposes two routers. `buildProductionRouter` is the
-  right default; `buildRouter` remains for suites that return binary bodies,
-  which the production router does not yet support.
+  right default. `buildRouter` remains a simplified matcher for older suites.
+  Binary bodies go through the production router (ADR-020).

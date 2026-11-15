@@ -510,6 +510,86 @@ describe('RequestRouter', () => {
       expect(body.userAgent).toBe('TestAgent/1.0');
     });
 
+    test('rawBody is the request bytes even when Content-Type is application/json', async () => {
+      const bytes = new Uint8Array([0xff, 0x00, 0x41, 0x42]);
+      let received: unknown;
+
+      router.addRoute(
+        createRoute.post(
+          '/raw',
+          async request => {
+            received = request.body;
+
+            return { status: 204 };
+          },
+          { id: 'raw', metadata: { rawBody: true } }
+        )
+      );
+
+      const response = await router.route(
+        new Request('http://localhost/raw', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: bytes,
+        })
+      );
+
+      expect(response.status).toBe(204);
+      expect(received).toEqual(bytes);
+    });
+
+    test('shared upload POST stays JSON only for resumable session start', async () => {
+      const bytes = new Uint8Array([0xff, 0x00, 0x41, 0x42]);
+      let received: unknown;
+
+      router.addRoute(
+        createRoute.post(
+          '/upload/storage/v1/b/:bucket/o',
+          async request => {
+            received = request.body;
+
+            return { status: 204 };
+          },
+          { id: 'storage.objects.insert' }
+        )
+      );
+
+      const media = await router.route(
+        new Request('http://localhost/upload/storage/v1/b/bucket/o?uploadType=media&name=a', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: bytes,
+        })
+      );
+
+      expect(media.status).toBe(204);
+      expect(received).toEqual(bytes);
+
+      const multipartBody = new Uint8Array([0x2d, 0x2d, 0x62, 0xff]);
+
+      const multipart = await router.route(
+        new Request('http://localhost/upload/storage/v1/b/bucket/o?uploadType=multipart', {
+          method: 'POST',
+          headers: { 'content-type': 'multipart/related; boundary=b' },
+          body: multipartBody,
+        })
+      );
+
+      expect(multipart.status).toBe(204);
+      expect(received).toEqual(multipartBody);
+
+      const init = await router.route(
+        new Request('http://localhost/upload/storage/v1/b/bucket/o?uploadType=resumable', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: 'obj', contentType: 'text/plain' }),
+        })
+      );
+
+      expect(init.status).toBe(204);
+      expect(received).toEqual({ name: 'obj', contentType: 'text/plain' });
+    });
+
     test('should parse JSON body', async () => {
       const bodyHandler = async (request: RouteRequest): Promise<RouteResponse> => ({
         status: 200,
@@ -864,6 +944,67 @@ describe('RequestRouter', () => {
       const text = await response.text();
 
       expect(text).toBe('Plain text response');
+    });
+
+    test('passes Uint8Array, ArrayBuffer, and ReadableStream through unchanged', async () => {
+      const bytes = new Uint8Array([0xff, 0x00, 0x41, 0x42]);
+      const buffer = new Uint8Array([0x10, 0x20]).buffer;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([0x01, 0x02, 0x03]));
+          controller.close();
+        },
+      });
+
+      router.addRoute(
+        createRoute.get(
+          '/bytes',
+          async () => ({
+            status: 200,
+            body: bytes,
+          }),
+          { id: 'bytes' }
+        )
+      );
+      router.addRoute(
+        createRoute.get(
+          '/buffer',
+          async () => ({
+            status: 200,
+            headers: { 'content-type': 'application/octet-stream' },
+            body: buffer,
+          }),
+          { id: 'buffer' }
+        )
+      );
+      router.addRoute(
+        createRoute.get(
+          '/stream',
+          async () => ({
+            status: 200,
+            body: stream,
+          }),
+          { id: 'stream' }
+        )
+      );
+
+      const bytesResponse = await router.route(createMockRequest('GET', '/bytes'));
+
+      expect(bytesResponse.status).toBe(200);
+      expect(bytesResponse.headers.get('content-type')).toBeNull();
+      expect(new Uint8Array(await bytesResponse.arrayBuffer())).toEqual(bytes);
+
+      const bufferResponse = await router.route(createMockRequest('GET', '/buffer'));
+
+      expect(bufferResponse.headers.get('content-type')).toBe('application/octet-stream');
+      expect(new Uint8Array(await bufferResponse.arrayBuffer())).toEqual(new Uint8Array(buffer));
+
+      const streamResponse = await router.route(createMockRequest('GET', '/stream'));
+
+      expect(streamResponse.headers.get('content-type')).toBeNull();
+      expect(new Uint8Array(await streamResponse.arrayBuffer())).toEqual(
+        new Uint8Array([0x01, 0x02, 0x03])
+      );
     });
 
     test('should handle empty responses', async () => {
