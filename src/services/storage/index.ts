@@ -34,10 +34,6 @@ export class CloudStorageService {
   private blobPath: string;
   private storageType: StorageType;
   private blobStore: BlobStore | null = null;
-  private bucketRepo: BucketRepository | null = null;
-  private objectRepo: ObjectRepository | null = null;
-  private bucketService: BucketService | null = null;
-  private objectService: ObjectService | null = null;
   private bucketHandlers: BucketHandlers | null = null;
   private objectHandlers: ObjectHandlers | null = null;
   private hmacRepo: HmacKeyRepository | null = null;
@@ -62,11 +58,11 @@ export class CloudStorageService {
       trackWrittenPaths: this.storageType === 'memory',
     });
 
-    this.bucketRepo = new BucketRepository(this.storage);
-    await this.bucketRepo.initialize();
+    const bucketRepo = new BucketRepository(this.storage);
+    await bucketRepo.initialize();
 
-    this.objectRepo = new ObjectRepository(this.storage);
-    await this.objectRepo.initialize();
+    const objectRepo = new ObjectRepository(this.storage);
+    await objectRepo.initialize();
 
     const iamRepo = new IamPolicyRepository(this.storage);
     await iamRepo.initialize();
@@ -76,19 +72,19 @@ export class CloudStorageService {
 
     const writes = new ResourceMutex();
 
-    this.bucketService = new BucketService(this.bucketRepo, this.objectRepo, iamRepo, writes);
-    this.objectService = new ObjectService(
-      this.objectRepo,
-      this.bucketRepo,
+    const bucketService = new BucketService(bucketRepo, objectRepo, iamRepo, writes);
+    const objectService = new ObjectService(
+      objectRepo,
+      bucketRepo,
       this.blobStore,
       iamRepo,
       writes
     );
-    const iamService = new IamService(this.bucketRepo, iamRepo, writes, this.objectRepo);
-    const notificationService = new NotificationService(notificationRepo, this.bucketRepo);
+    const iamService = new IamService(bucketRepo, iamRepo, writes, objectRepo);
+    const notificationService = new NotificationService(notificationRepo, bucketRepo);
 
-    this.bucketHandlers = new BucketHandlers(this.bucketService, this.logger);
-    this.objectHandlers = new ObjectHandlers(this.objectService, this.logger);
+    this.bucketHandlers = new BucketHandlers(bucketService, this.logger);
+    this.objectHandlers = new ObjectHandlers(objectService, this.logger);
     this.iamHandlers = new IamHandlers(iamService, this.logger);
     this.notificationHandlers = new NotificationHandlers(notificationService, this.logger);
 
