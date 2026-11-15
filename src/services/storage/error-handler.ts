@@ -19,8 +19,14 @@ export function handleGcsError(
         return responseUtils.alreadyExists(resourceType, err.message);
       case 'INVALID_ARGUMENT':
         return responseUtils.badRequest(err.message);
-      case 'FAILED_PRECONDITION':
+      case 'BUCKET_NOT_EMPTY':
         return responseUtils.conflict(err.message);
+      case 'CONDITION_NOT_MET':
+        return preconditionFailed(err.message);
+      case 'NOT_MODIFIED':
+        return { status: 304 };
+      case 'PERMISSION_DENIED':
+        return responseUtils.forbidden(err.message);
       case 'ABORTED':
         // Stale IAM etag returns 409 ABORTED. Callers accept 412 and do not lock it.
         return responseUtils.aborted(err.message);
@@ -28,4 +34,24 @@ export function handleGcsError(
   }
 
   return responseUtils.badRequest(err instanceof Error ? err.message : 'Unknown error');
+}
+
+/**
+ * 412 with the shared GCP envelope. The gRPC status stays `FAILED_PRECONDITION`;
+ * HTTP 412 is what separates a precondition miss from `BUCKET_NOT_EMPTY` (409).
+ */
+function preconditionFailed(message: string): RouteResponse {
+  return {
+    status: 412,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    body: {
+      error: {
+        code: 412,
+        message,
+        status: 'FAILED_PRECONDITION',
+      },
+    },
+  };
 }

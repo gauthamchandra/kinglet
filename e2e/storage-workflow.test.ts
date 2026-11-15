@@ -550,6 +550,93 @@ describe('Cloud Storage E2E: Error Cases', () => {
     expect(response.status).toBe(404);
   });
 
+  test('PATCH with a mismatched ifMetagenerationMatch returns 412', async () => {
+    const bucketName = 'precondition-mismatch-bucket';
+
+    const created = await fetch(emulatorUrl(`/storage/v1/b?project=${project}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: bucketName }),
+    });
+
+    expect(created.status).toBe(200);
+
+    const response = await fetch(
+      emulatorUrl(`/storage/v1/b/${bucketName}?ifMetagenerationMatch=9`),
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ labels: { env: 'prod' } }),
+      }
+    );
+
+    expect(response.status).toBe(412);
+
+    const body = (await response.json()) as { error: { code: number; status: string } };
+
+    expect(body.error.code).toBe(412);
+    expect(body.error.status).toBe('FAILED_PRECONDITION');
+
+    await fetch(emulatorUrl(`/storage/v1/b/${bucketName}`), { method: 'DELETE' });
+  });
+
+  test('GET with a matching ifMetagenerationNotMatch returns 304 and an empty body', async () => {
+    const bucketName = 'precondition-not-modified-bucket';
+
+    const created = await fetch(emulatorUrl(`/storage/v1/b?project=${project}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: bucketName }),
+    });
+
+    expect(created.status).toBe(200);
+
+    const response = await fetch(
+      emulatorUrl(`/storage/v1/b/${bucketName}?ifMetagenerationNotMatch=1`)
+    );
+
+    expect(response.status).toBe(304);
+    expect(await response.text()).toBe('');
+
+    await fetch(emulatorUrl(`/storage/v1/b/${bucketName}`), { method: 'DELETE' });
+  });
+
+  test('DELETE of a non-empty bucket returns 409 FAILED_PRECONDITION', async () => {
+    const bucketName = 'precondition-nonempty-bucket';
+
+    const created = await fetch(emulatorUrl(`/storage/v1/b?project=${project}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: bucketName }),
+    });
+
+    expect(created.status).toBe(200);
+
+    const uploaded = await fetch(
+      emulatorUrl(`/upload/storage/v1/b/${bucketName}/o?uploadType=media&name=file.txt`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: 'data',
+      }
+    );
+
+    expect(uploaded.status).toBe(200);
+
+    const response = await fetch(emulatorUrl(`/storage/v1/b/${bucketName}`), { method: 'DELETE' });
+
+    expect(response.status).toBe(409);
+
+    const body = (await response.json()) as { error: { code: number; status: string } };
+
+    expect(body.error.code).toBe(409);
+    expect(body.error.status).toBe('FAILED_PRECONDITION');
+
+    const stillThere = await fetch(emulatorUrl(`/storage/v1/b/${bucketName}`));
+
+    expect(stillThere.status).toBe(200);
+  });
+
   test('Delete non-existent object returns 404', async () => {
     const bucketName = 'error-obj-bucket';
 
