@@ -73,4 +73,27 @@ describe('IamPolicyRepository', () => {
     expect(one?.etag).toBe('etag-one');
     expect(two?.etag).toBe('etag-two');
   });
+
+  test('deleteByResourceId removes one policy and leaves another', async () => {
+    await repo.save({
+      resourceId: 'projects/_/buckets/one',
+      version: 1,
+      etag: 'etag-one',
+      bindings: '[]',
+    });
+    await repo.save({
+      resourceId: 'projects/_/buckets/two',
+      version: 1,
+      etag: 'etag-two',
+      bindings: '[]',
+    });
+
+    const removed = await repo.deleteByResourceId('projects/_/buckets/one');
+    const missing = await repo.deleteByResourceId('projects/_/buckets/absent');
+
+    expect(removed).toBe(true);
+    expect(missing).toBe(false);
+    expect(await repo.getByResourceId('projects/_/buckets/one')).toBeNull();
+    expect((await repo.getByResourceId('projects/_/buckets/two'))?.etag).toBe('etag-two');
+  });
 });

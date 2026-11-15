@@ -325,6 +325,10 @@ export const ComposeRequestSchema = z.object({
 
 // ── Helper Functions ──
 
+export function bucketIamResourceId(bucket: string): string {
+  return `projects/_/buckets/${bucket}`;
+}
+
 export function parseBucketName(name: string): string {
   if (!name || name.length === 0) {
     throw new Error('Bucket name cannot be empty');

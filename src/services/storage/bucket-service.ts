@@ -3,9 +3,11 @@
  */
 
 import type { BucketRepository } from './bucket-repository.ts';
+import type { IamPolicyRepository } from './iam-repository.ts';
 import type { ObjectRepository } from './object-repository.ts';
 import type { BucketListResponse, BucketResponse } from './types.ts';
 import {
+  bucketIamResourceId,
   bucketRecordToResponse,
   CreateBucketRequestSchema,
   DEFAULT_STORAGE_CLASS,
@@ -34,10 +36,16 @@ export class GcsError extends Error {
 export class BucketService {
   private bucketRepo: BucketRepository;
   private objectRepo: ObjectRepository;
+  private iamRepo: IamPolicyRepository;
 
-  constructor(bucketRepo: BucketRepository, objectRepo: ObjectRepository) {
+  constructor(
+    bucketRepo: BucketRepository,
+    objectRepo: ObjectRepository,
+    iamRepo: IamPolicyRepository
+  ) {
     this.bucketRepo = bucketRepo;
     this.objectRepo = objectRepo;
+    this.iamRepo = iamRepo;
   }
 
   async createBucket(project: string, body: unknown): Promise<BucketResponse> {
@@ -191,5 +199,6 @@ export class BucketService {
     }
 
     await this.bucketRepo.deleteBucket(name);
+    await this.iamRepo.deleteByResourceId(bucketIamResourceId(name));
   }
 }

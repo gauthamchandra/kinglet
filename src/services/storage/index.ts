@@ -48,7 +48,7 @@ export class CloudStorageService {
     const iamRepo = new IamPolicyRepository(this.storage);
     await iamRepo.initialize();
 
-    this.bucketService = new BucketService(this.bucketRepo, this.objectRepo);
+    this.bucketService = new BucketService(this.bucketRepo, this.objectRepo, iamRepo);
     this.objectService = new ObjectService(this.objectRepo, this.bucketRepo, this.blobStore);
     const iamService = new IamService(this.bucketRepo, iamRepo);
 

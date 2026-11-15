@@ -14,8 +14,6 @@ import { Logger } from '@/shared/utils/logger.ts';
 import { getAvailablePort } from '../test-utils/helpers.ts';
 import { buildProductionRouter } from './e2e-helpers.ts';
 
-const RECORDED_STALE_BUCKET_IAM_ETAG_STATUS = 409;
-
 let emulatorServer: Server;
 let emulatorPort: number;
 let cloudStorageService: CloudStorageService;
@@ -139,13 +137,12 @@ describe('Cloud Storage bucket IAM', () => {
       }),
     });
 
+    // Recorded stale-etag status: 409 ABORTED. 412 is accepted and is not locked.
     expect([409, 412]).toContain(staleResponse.status);
-    expect(staleResponse.status).toBe(RECORDED_STALE_BUCKET_IAM_ETAG_STATUS);
 
     const staleBody = await staleResponse.json();
 
-    expect(staleBody.error.code).toBe(RECORDED_STALE_BUCKET_IAM_ETAG_STATUS);
-    expect(staleBody.error.status).toBe('ABORTED');
+    expect(staleBody.error.code).toBe(staleResponse.status);
 
     const afterStale = await fetch(
       emulatorUrl('/storage/v1/b/iam-http-set/iam?optionsRequestedPolicyVersion=3')

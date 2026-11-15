@@ -23,7 +23,7 @@ describe('IamService', () => {
     const iamRepo = new IamPolicyRepository(storage);
     await iamRepo.initialize();
 
-    buckets = new BucketService(bucketRepo, objectRepo);
+    buckets = new BucketService(bucketRepo, objectRepo, iamRepo);
     service = new IamService(bucketRepo, iamRepo);
   });
 
@@ -219,6 +219,70 @@ describe('IamService', () => {
 
     await expect(promise).rejects.toBeInstanceOf(GcsError);
     await expect(promise).rejects.toHaveProperty('code', 'INVALID_ARGUMENT');
+  });
+
+  test('concurrent sets that carry the same etag do not both succeed', async () => {
+    await buckets.createBucket('proj', { name: 'iam-race' });
+
+    const initial = await service.getIamPolicy('iam-race');
+    const firstWave = await Promise.allSettled([
+      service.setIamPolicy('iam-race', {
+        etag: initial.etag,
+        bindings: [{ role: 'roles/storage.objectViewer', members: ['user:a@example.com'] }],
+      }),
+      service.setIamPolicy('iam-race', {
+        etag: initial.etag,
+        bindings: [{ role: 'roles/storage.admin', members: ['user:b@example.com'] }],
+      }),
+    ]);
+
+    const firstSucceeded = firstWave.filter(result => result.status === 'fulfilled');
+    const firstFailed = firstWave.filter(result => result.status === 'rejected');
+
+    expect(firstSucceeded).toHaveLength(1);
+    expect(firstFailed).toHaveLength(1);
+
+    const firstFailure = firstFailed[0] as PromiseRejectedResult;
+
+    expect(firstFailure.reason).toHaveProperty('code', 'ABORTED');
+
+    const stored = await service.getIamPolicy('iam-race');
+    const secondWave = await Promise.allSettled([
+      service.setIamPolicy('iam-race', {
+        etag: stored.etag,
+        bindings: [{ role: 'roles/storage.objectAdmin', members: ['allUsers'] }],
+      }),
+      service.setIamPolicy('iam-race', {
+        etag: stored.etag,
+        bindings: [{ role: 'roles/storage.objectCreator', members: ['allAuthenticatedUsers'] }],
+      }),
+    ]);
+
+    const secondSucceeded = secondWave.filter(result => result.status === 'fulfilled');
+    const secondFailed = secondWave.filter(result => result.status === 'rejected');
+
+    expect(secondSucceeded).toHaveLength(1);
+    expect(secondFailed).toHaveLength(1);
+
+    const secondFailure = secondFailed[0] as PromiseRejectedResult;
+
+    expect(secondFailure.reason).toHaveProperty('code', 'ABORTED');
+  });
+
+  test('deleting a bucket drops its IAM policy', async () => {
+    await buckets.createBucket('proj', { name: 'iam-recreate' });
+    await service.setIamPolicy('iam-recreate', {
+      bindings: [{ role: 'roles/storage.admin', members: ['user:a@example.com'] }],
+    });
+
+    await buckets.deleteBucket('iam-recreate');
+    await buckets.createBucket('proj', { name: 'iam-recreate' });
+
+    const policy = await service.getIamPolicy('iam-recreate');
+
+    expect(policy.version).toBe(1);
+    expect(policy.bindings).toEqual([]);
+    expect(policy.resourceId).toBe('projects/_/buckets/iam-recreate');
   });
 
   test('input resourceId is ignored', async () => {

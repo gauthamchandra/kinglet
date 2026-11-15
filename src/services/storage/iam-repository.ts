@@ -49,4 +49,14 @@ export class IamPolicyRepository {
 
     return updated;
   }
+
+  async deleteByResourceId(resourceId: string): Promise<boolean> {
+    const existing = await this.getByResourceId(resourceId);
+
+    if (!existing) {
+      return false;
+    }
+
+    return this.storage.deleteById(IAM_POLICIES_TABLE, existing.id);
+  }
 }

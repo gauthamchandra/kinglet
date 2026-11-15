@@ -2,15 +2,17 @@
  * Bucket IAM. Policies are stored and returned. They are not evaluated.
  */
 
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { BucketRepository } from './bucket-repository.ts';
 import { GcsError } from './bucket-service.ts';
 import type { IamPolicyRepository } from './iam-repository.ts';
 import type { PolicyBinding, PolicyResponse, TestIamPermissionsResponse } from './types.ts';
-import { SetIamPolicyRequestSchema } from './types.ts';
+import { bucketIamResourceId, SetIamPolicyRequestSchema } from './types.ts';
 
 export class IamService {
   private bucketRepo: BucketRepository;
   private iamRepo: IamPolicyRepository;
+  private writes = new ResourceMutex();
 
   constructor(bucketRepo: BucketRepository, iamRepo: IamPolicyRepository) {
     this.bucketRepo = bucketRepo;
@@ -20,7 +22,7 @@ export class IamService {
   async getIamPolicy(bucket: string): Promise<PolicyResponse> {
     await this.ensureBucket(bucket);
 
-    const resourceId = bucketResourceId(bucket);
+    const resourceId = bucketIamResourceId(bucket);
     const stored = await this.iamRepo.getByResourceId(resourceId);
 
     if (!stored) {
@@ -39,30 +41,35 @@ export class IamService {
       throw new GcsError('INVALID_ARGUMENT', `Invalid IAM policy: ${parsed.error.message}`);
     }
 
-    const resourceId = bucketResourceId(bucket);
-    const stored = await this.iamRepo.getByResourceId(resourceId);
-    const currentEtag = stored ? stored.etag : emptyPolicyEtag(resourceId);
+    const resourceId = bucketIamResourceId(bucket);
 
-    // A missing or empty etag is an unconditional write. A non-empty etag must match.
-    if (isPresentEtag(parsed.data.etag) && parsed.data.etag !== currentEtag) {
-      throw new GcsError(
-        'ABORTED',
-        'The IAM policy etag does not match. Re-read the policy and retry.'
-      );
-    }
+    // The etag check and the write are one decision. Two sets must not both
+    // observe the same etag and then both store a new policy.
+    return this.writes.runExclusively(resourceId, async () => {
+      const stored = await this.iamRepo.getByResourceId(resourceId);
+      const currentEtag = stored ? stored.etag : emptyPolicyEtag(resourceId);
 
-    // A missing version is 1. A version the caller sent is stored as given.
-    const version = parsed.data.version != null ? parsed.data.version : 1;
-    const bindings = parsed.data.bindings ?? [];
-    const etag = rotateEtag(currentEtag);
-    const saved = await this.iamRepo.save({
-      resourceId,
-      version,
-      etag,
-      bindings: JSON.stringify(bindings),
+      // A missing or empty etag is an unconditional write. A non-empty etag must match.
+      if (isPresentEtag(parsed.data.etag) && parsed.data.etag !== currentEtag) {
+        throw new GcsError(
+          'ABORTED',
+          'The IAM policy etag does not match. Re-read the policy and retry.'
+        );
+      }
+
+      // A missing version is 1. A version the caller sent is stored as given.
+      const version = parsed.data.version != null ? parsed.data.version : 1;
+      const bindings = parsed.data.bindings ?? [];
+      const etag = rotateEtag(currentEtag);
+      const saved = await this.iamRepo.save({
+        resourceId,
+        version,
+        etag,
+        bindings: JSON.stringify(bindings),
+      });
+
+      return policyFromRecord(saved.resourceId, saved.version, saved.etag, saved.bindings);
     });
-
-    return policyFromRecord(saved.resourceId, saved.version, saved.etag, saved.bindings);
   }
 
   async testIamPermissions(
@@ -86,11 +93,9 @@ export class IamService {
   }
 }
 
-function bucketResourceId(bucket: string): string {
-  return `projects/_/buckets/${bucket}`;
-}
-
 function emptyPolicy(resourceId: string): PolicyResponse {
+  // No stored policy means no bindings. Real GCS also returns the project's
+  // legacy bucket roles. This emulator has no project members to put there.
   return {
     kind: 'storage#policy',
     resourceId,

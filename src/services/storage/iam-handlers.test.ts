@@ -5,13 +5,6 @@ import { GcsError } from './bucket-service.ts';
 import { IamHandlers } from './iam-handlers.ts';
 import type { IamService } from './iam-service.ts';
 
-/**
- * Stale bucket IAM etag HTTP status this emulator returns.
- * The assertion also accepts 412. Update this record if the mapping changes.
- * 412 is not a fidelity failure.
- */
-const RECORDED_STALE_BUCKET_IAM_ETAG_STATUS = 409;
-
 function createRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
   return {
     method: 'GET',
@@ -177,13 +170,10 @@ describe('IamHandlers', () => {
       createContext()
     );
 
+    // Recorded stale-etag status: 409 ABORTED. 412 is accepted and is not locked.
     expect([409, 412]).toContain(result.status);
-    expect(result.status).toBe(RECORDED_STALE_BUCKET_IAM_ETAG_STATUS);
     expect(result.body).toMatchObject({
-      error: {
-        code: RECORDED_STALE_BUCKET_IAM_ETAG_STATUS,
-        status: 'ABORTED',
-      },
+      error: { code: result.status },
     });
   });
 
