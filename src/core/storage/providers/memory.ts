@@ -444,6 +444,34 @@ export class MemoryStorageProvider implements StorageProvider {
     this.tables.set(name, memoryTable);
   }
 
+  /**
+   * Point `indexName` at `columns` when those columns differ. The schema
+   * object is copied so the shared TableSchema constant is left alone.
+   * An index that already lists `columns` is left in place.
+   */
+  retargetIndex(table: string, indexName: string, columns: readonly string[]): boolean {
+    const memoryTable = this.getTable(table);
+    const indexes = memoryTable.schema.indexes ?? [];
+    const current = indexes.find(index => index.name === indexName);
+
+    if (
+      current &&
+      current.columns.length === columns.length &&
+      current.columns.every((name, index) => name === columns[index])
+    ) {
+      return false;
+    }
+
+    memoryTable.schema = {
+      ...memoryTable.schema,
+      indexes: indexes.map(index =>
+        index.name === indexName ? { ...index, columns: [...columns] } : index
+      ),
+    };
+
+    return true;
+  }
+
   async dropTable(name: string): Promise<void> {
     const deleted = this.tables.delete(name);
 

@@ -525,6 +525,44 @@ export class SQLiteStorageProvider implements StorageProvider {
     }
   }
 
+  /**
+   * Drop and recreate an index on `columns` when those columns differ.
+   *
+   * createTable names the index `idx_${table}_${indexName}` and uses
+   * CREATE INDEX IF NOT EXISTS, which does not change the columns of an
+   * index that already exists. ADR-010 does not retarget indexes either.
+   * An index that already lists `columns` is left in place.
+   */
+  retargetIndex(table: string, indexName: string, columns: readonly string[]): boolean {
+    if (!this.db) {
+      throw new ConnectionError('Database not initialized');
+    }
+
+    const sqlName = `idx_${table}_${indexName}`;
+    const existing = this.db.prepare(`PRAGMA index_info(${sqlName})`).all() as Array<{
+      seqno: number;
+      name: string;
+    }>;
+    const existingColumns = existing
+      .slice()
+      .sort((left, right) => left.seqno - right.seqno)
+      .map(column => column.name);
+
+    if (
+      existingColumns.length === columns.length &&
+      existingColumns.every((name, index) => name === columns[index])
+    ) {
+      return false;
+    }
+
+    const columnList = columns.join(', ');
+
+    this.db.run(`DROP INDEX IF EXISTS ${sqlName}`);
+    this.db.run(`CREATE INDEX ${sqlName} ON ${table} (${columnList})`);
+
+    return true;
+  }
+
   private syncTableSchema(name: string, schema: TableSchema): void {
     if (!this.db || !this.tableExists(name)) {
       return;

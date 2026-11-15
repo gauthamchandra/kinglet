@@ -173,6 +173,7 @@ export interface BucketRecord extends BaseRecord {
   labels: string | null; // JSON
   cors: string | null; // JSON
   lifecycle: string | null; // JSON
+  projectId: string | null;
   projectNumber: string;
 }
 
@@ -230,11 +231,12 @@ export const bucketsTableSchema: TableSchema = {
     { name: 'labels', type: 'json', nullable: true },
     { name: 'cors', type: 'json', nullable: true },
     { name: 'lifecycle', type: 'json', nullable: true },
+    { name: 'projectId', type: 'string', nullable: true },
     { name: 'projectNumber', type: 'string' },
   ],
   indexes: [
     { name: 'idx_storage_buckets_name', columns: ['name'], unique: true },
-    { name: 'idx_storage_buckets_project', columns: ['projectNumber'] },
+    { name: 'idx_storage_buckets_project', columns: ['projectId'] },
   ],
   timestamps: true,
 };
@@ -535,6 +537,21 @@ export function notificationRecordToResponse(record: NotificationRecord): Notifi
   return response;
 }
 
+/**
+ * Decimal form of the first 8 bytes of SHA-256(projectId), big-endian.
+ *
+ * Real GCS projectNumber is a uint64. The conversion is
+ * BigInt("0x" + hex).toString(10), not Number. Number rounds integers above
+ * 2^53-1, and the rounded value still matches /^\d+$/. toString(10) does not
+ * pad leading zeros. Project id "my-project" (bytes 1c7cd944c28cd888) is
+ * 2052754419519117448.
+ */
+export function projectNumberFromProjectId(projectId: string): string {
+  const hex = new Bun.CryptoHasher('sha256').update(projectId).digest('hex').substring(0, 16);
+
+  return BigInt(`0x${hex}`).toString(10);
+}
+
 export function requestToBucketRecord(
   name: string,
   body: CreateBucketRequest,
@@ -553,7 +570,8 @@ export function requestToBucketRecord(
     labels: body.labels ? JSON.stringify(body.labels) : null,
     cors: body.cors ? JSON.stringify(body.cors) : null,
     lifecycle: body.lifecycle ? JSON.stringify(body.lifecycle) : null,
-    projectNumber: project,
+    projectId: project,
+    projectNumber: projectNumberFromProjectId(project),
   };
 }
 
