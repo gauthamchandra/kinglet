@@ -18,7 +18,8 @@ export type GcsErrorCode =
   | 'NOT_FOUND'
   | 'ALREADY_EXISTS'
   | 'INVALID_ARGUMENT'
-  | 'FAILED_PRECONDITION';
+  | 'FAILED_PRECONDITION'
+  | 'ABORTED';
 
 export class GcsError extends Error {
   readonly code: GcsErrorCode;

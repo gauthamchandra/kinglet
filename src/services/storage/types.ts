@@ -9,6 +9,7 @@ import type { BaseRecord, TableSchema } from '@/core/storage/types.ts';
 
 export const BUCKETS_TABLE = 'storage_buckets';
 export const OBJECTS_TABLE = 'storage_objects';
+export const IAM_POLICIES_TABLE = 'storage_iam_policies';
 
 export const StorageClass = {
   STANDARD: 'STANDARD',
@@ -94,6 +95,30 @@ export interface RewriteResponse {
   resource: ObjectResponse;
 }
 
+export interface PolicyBinding {
+  role: string;
+  members: string[];
+  condition?: {
+    title?: string;
+    description?: string;
+    expression?: string;
+    location?: string;
+  };
+}
+
+export interface PolicyResponse {
+  kind: 'storage#policy';
+  resourceId: string;
+  version: number;
+  etag: string;
+  bindings: PolicyBinding[];
+}
+
+export interface TestIamPermissionsResponse {
+  kind: 'storage#testIamPermissionsResponse';
+  permissions: string[];
+}
+
 // ── Storage Records ──
 
 export interface BucketRecord extends BaseRecord {
@@ -108,6 +133,13 @@ export interface BucketRecord extends BaseRecord {
   cors: string | null; // JSON
   lifecycle: string | null; // JSON
   projectNumber: string;
+}
+
+export interface IamPolicyRecord extends BaseRecord {
+  resourceId: string;
+  version: number;
+  etag: string;
+  bindings: string; // JSON
 }
 
 export interface ObjectRecord extends BaseRecord {
@@ -152,6 +184,18 @@ export const bucketsTableSchema: TableSchema = {
     { name: 'idx_storage_buckets_name', columns: ['name'], unique: true },
     { name: 'idx_storage_buckets_project', columns: ['projectNumber'] },
   ],
+  timestamps: true,
+};
+
+export const iamPoliciesTableSchema: TableSchema = {
+  name: IAM_POLICIES_TABLE,
+  columns: [
+    { name: 'resourceId', type: 'string', unique: true },
+    { name: 'version', type: 'number' },
+    { name: 'etag', type: 'string' },
+    { name: 'bindings', type: 'json' },
+  ],
+  indexes: [{ name: 'idx_storage_iam_policies_resource', columns: ['resourceId'], unique: true }],
   timestamps: true,
 };
 
@@ -240,6 +284,25 @@ export const UpdateBucketRequestSchema = z.object({
       rule: z.array(z.record(z.string(), z.unknown())),
     })
     .optional(),
+});
+
+const PolicyBindingSchema = z.object({
+  role: z.string().min(1),
+  members: z.array(z.string()),
+  condition: z
+    .object({
+      title: z.string().optional(),
+      description: z.string().optional(),
+      expression: z.string().optional(),
+      location: z.string().optional(),
+    })
+    .optional(),
+});
+
+export const SetIamPolicyRequestSchema = z.object({
+  bindings: z.array(PolicyBindingSchema).optional(),
+  etag: z.string().optional(),
+  version: z.number().int().optional(),
 });
 
 export const ComposeRequestSchema = z.object({

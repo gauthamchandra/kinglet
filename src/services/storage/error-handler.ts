@@ -21,6 +21,9 @@ export function handleGcsError(
         return responseUtils.badRequest(err.message);
       case 'FAILED_PRECONDITION':
         return responseUtils.conflict(err.message);
+      case 'ABORTED':
+        // Stale IAM etag. 409 ABORTED is the status returned today; 412 is not locked.
+        return responseUtils.aborted(err.message);
     }
   }
 

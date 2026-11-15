@@ -12,6 +12,9 @@ import { BlobStore } from './blob-store.ts';
 import { BucketHandlers } from './bucket-handlers.ts';
 import { BucketRepository } from './bucket-repository.ts';
 import { BucketService } from './bucket-service.ts';
+import { IamHandlers } from './iam-handlers.ts';
+import { IamPolicyRepository } from './iam-repository.ts';
+import { IamService } from './iam-service.ts';
 import { ObjectHandlers } from './object-handlers.ts';
 import { ObjectRepository } from './object-repository.ts';
 import { ObjectService } from './object-service.ts';
@@ -26,6 +29,7 @@ export class CloudStorageService {
   private objectService: ObjectService | null = null;
   private bucketHandlers: BucketHandlers | null = null;
   private objectHandlers: ObjectHandlers | null = null;
+  private iamHandlers: IamHandlers | null = null;
 
   constructor(storage: StorageManager, logger: Logger) {
     this.storage = storage;
@@ -41,21 +45,30 @@ export class CloudStorageService {
     this.objectRepo = new ObjectRepository(this.storage);
     await this.objectRepo.initialize();
 
+    const iamRepo = new IamPolicyRepository(this.storage);
+    await iamRepo.initialize();
+
     this.bucketService = new BucketService(this.bucketRepo, this.objectRepo);
     this.objectService = new ObjectService(this.objectRepo, this.bucketRepo, this.blobStore);
+    const iamService = new IamService(this.bucketRepo, iamRepo);
 
     this.bucketHandlers = new BucketHandlers(this.bucketService, this.logger);
     this.objectHandlers = new ObjectHandlers(this.objectService, this.logger);
+    this.iamHandlers = new IamHandlers(iamService, this.logger);
 
     this.logger.info('Cloud Storage service initialized');
   }
 
   getRoutes(): RouteDefinition[] {
-    if (!this.bucketHandlers || !this.objectHandlers) {
+    if (!this.bucketHandlers || !this.objectHandlers || !this.iamHandlers) {
       throw new Error('CloudStorageService not initialized. Call initialize() first.');
     }
 
-    return [...this.bucketHandlers.getRoutes(), ...this.objectHandlers.getRoutes()];
+    return [
+      ...this.bucketHandlers.getRoutes(),
+      ...this.objectHandlers.getRoutes(),
+      ...this.iamHandlers.getRoutes(),
+    ];
   }
 
   start(): void {
