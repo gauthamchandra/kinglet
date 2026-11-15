@@ -46,6 +46,14 @@ export interface RouteMetadata {
   readonly rateLimit?: RateLimitConfig;
   readonly cache?: CacheConfig;
   readonly timeout?: number;
+  /**
+   * When true, the request body is the raw bytes (`Uint8Array` from
+   * `arrayBuffer()`), including when `Content-Type` is `application/json`.
+   *
+   * <p>Do not set this on `POST /upload/storage/v1/b/:bucket/o`. That URL is
+   * both a media upload and a resumable session start. See ADR-020.
+   */
+  readonly rawBody?: boolean;
 }
 
 export interface RateLimitConfig {
@@ -115,6 +123,12 @@ export interface RouterConfig {
   readonly maxParams: number;
   readonly enableMetrics: boolean;
 }
+
+/**
+ * Media upload and resumable session start share this URL (ADR-020).
+ * JSON only when `uploadType=resumable` and `Content-Type` is `application/json`.
+ */
+const SHARED_OBJECT_UPLOAD_PATH = '/upload/storage/v1/b/:bucket/o';
 
 export const DEFAULT_ROUTER_CONFIG: RouterConfig = {
   enablePathNormalization: true,
@@ -260,10 +274,8 @@ export class RequestRouter {
     const startTime = Date.now();
 
     try {
-      // Parse request
-      const routeRequest = await this.parseRequest(request);
-
-      // Find matching route
+      // Match on path and query before reading the body (ADR-020).
+      const routeRequest = this.parseRequest(request);
       const match = this.findRoute(routeRequest);
 
       if (!match) {
@@ -276,7 +288,8 @@ export class RequestRouter {
         );
       }
 
-      // Create route context
+      const body = await this.readBody(request, routeRequest, match.route);
+
       const context: RouteContext = {
         routeId: match.route.id,
         startTime: Date.now(),
@@ -287,10 +300,10 @@ export class RequestRouter {
         logger: this.logger.child({ routeId: match.route.id }),
       };
 
-      // Update request with extracted parameters
       const requestWithParams = {
         ...routeRequest,
         params: match.params,
+        body,
       };
 
       // Execute route with middleware chain
@@ -575,12 +588,11 @@ export class RequestRouter {
   }
 
   /**
-   * Parse incoming request
+   * Parse path, query, and headers. The body is read after the route matches.
    */
-  private async parseRequest(request: Request): Promise<RouteRequest> {
+  private parseRequest(request: Request): RouteRequest {
     const url = new URL(request.url);
 
-    // Parse query parameters
     const query: Record<string, string | string[]> = {};
 
     for (const [key, value] of url.searchParams.entries()) {
@@ -596,33 +608,11 @@ export class RequestRouter {
       }
     }
 
-    // Parse headers
     const headers: Record<string, string> = {};
 
     request.headers.forEach((value, key) => {
       headers[key] = value;
     });
-
-    // Parse body for non-GET requests
-    let body: unknown;
-
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
-      const contentType = headers['content-type'] || headers['Content-Type'] || '';
-
-      try {
-        if (contentType.includes('application/json')) {
-          body = await request.json();
-        } else if (contentType.includes('application/x-www-form-urlencoded')) {
-          body = Object.fromEntries(new URLSearchParams(await request.text()));
-        } else if (contentType.includes('multipart/form-data')) {
-          body = await request.formData();
-        } else {
-          body = await request.text();
-        }
-      } catch {
-        // If body parsing fails, leave as undefined
-      }
-    }
 
     return {
       method: request.method.toUpperCase(),
@@ -632,9 +622,70 @@ export class RequestRouter {
       query,
       headers,
       params: {}, // Will be populated by route matching
-      body,
       originalRequest: request,
     };
+  }
+
+  /**
+   * Read the body for a matched route.
+   *
+   * <p>`metadata.rawBody` is always a `Uint8Array`. The shared object-upload
+   * POST is JSON only for a resumable session start; every other body on that
+   * POST, including `multipart/related`, is raw bytes. ADR-020.
+   */
+  private async readBody(
+    request: Request,
+    routeRequest: RouteRequest,
+    route: RouteDefinition
+  ): Promise<unknown> {
+    const contentType = (routeRequest.headers['content-type'] ?? '').toLowerCase();
+
+    if (route.metadata?.rawBody || this.isRawSharedUpload(route, routeRequest.query, contentType)) {
+      return new Uint8Array(await request.arrayBuffer());
+    }
+
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      return undefined;
+    }
+
+    try {
+      if (contentType.includes('application/json')) {
+        return await request.json();
+      }
+
+      if (contentType.includes('application/x-www-form-urlencoded')) {
+        return Object.fromEntries(new URLSearchParams(await request.text()));
+      }
+
+      if (contentType.includes('multipart/form-data')) {
+        return await request.formData();
+      }
+
+      return await request.text();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * True when the shared upload POST must be read as bytes.
+   *
+   * <p>`uploadType=resumable` with `Content-Type: application/json` stays
+   * `request.json()` so the handler can read `name` and `contentType`.
+   */
+  private isRawSharedUpload(
+    route: RouteDefinition,
+    query: Record<string, string | string[]>,
+    contentType: string
+  ): boolean {
+    if (route.method !== 'POST' || route.path !== SHARED_OBJECT_UPLOAD_PATH) {
+      return false;
+    }
+
+    const resumableJson =
+      query.uploadType === 'resumable' && contentType.includes('application/json');
+
+    return !resumableJson;
   }
 
   /**
@@ -878,9 +929,11 @@ export class RequestRouter {
    */
   private createHttpResponse(routeResponse: RouteResponse): Response {
     const headers = new Headers(routeResponse.headers);
+    const payload = routeResponse.body;
+    const passthrough = this.isPassthroughBody(payload);
 
-    if (!headers.has('Content-Type') && routeResponse.body) {
-      if (typeof routeResponse.body === 'object') {
+    if (!headers.has('Content-Type') && payload && !passthrough) {
+      if (typeof payload === 'object') {
         headers.set('Content-Type', 'application/json');
       } else {
         headers.set('Content-Type', 'text/plain');
@@ -889,18 +942,38 @@ export class RequestRouter {
 
     let body: BodyInit | null = null;
 
-    if (routeResponse.body !== undefined) {
-      if (typeof routeResponse.body === 'object') {
-        body = JSON.stringify(routeResponse.body);
-      } else {
-        body = String(routeResponse.body);
-      }
+    if (payload instanceof Uint8Array) {
+      // Uint8Array<ArrayBufferLike> is not a BodyInit. A view over an ArrayBuffer is.
+      const buffer = payload.buffer;
+
+      body =
+        buffer instanceof ArrayBuffer
+          ? new Uint8Array(buffer, payload.byteOffset, payload.byteLength)
+          : new Uint8Array(payload);
+    } else if (payload instanceof ArrayBuffer) {
+      body = payload;
+    } else if (payload instanceof ReadableStream) {
+      body = payload;
+    } else if (payload !== undefined) {
+      body = typeof payload === 'object' ? JSON.stringify(payload) : String(payload);
     }
 
     return new Response(body, {
       status: routeResponse.status,
       headers,
     });
+  }
+
+  /**
+   * Bytes and streams are already a response body. `JSON.stringify` would turn
+   * a `Uint8Array` into a map of indexes. ADR-020.
+   */
+  private isPassthroughBody(
+    body: unknown
+  ): body is Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> {
+    return (
+      body instanceof Uint8Array || body instanceof ArrayBuffer || body instanceof ReadableStream
+    );
   }
 
   /**

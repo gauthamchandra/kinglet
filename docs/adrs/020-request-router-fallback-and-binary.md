@@ -47,14 +47,14 @@ topic path misses this. Those three score high enough to survive. The
 registration test also skipped Secrets, AlloyDB, Cloud SQL, and Compute, so
 those four were never in the table under test.
 
-Media bytes have a separate problem, and it is not fixed here. The production
-router reads the body before it has chosen a route. A non-JSON body is read
-as text, so the byte `0xFF` becomes the replacement character U+FFFD. On the
-way out, any object body is `JSON.stringify`'d, and a `Uint8Array` is an
-object, so a media download becomes a JSON map of byte indexes. ADR-009 left
-`buildRouter` in place for tests that return raw bytes, because the production
-router cannot. `e2e/storage-workflow.test.ts` uses that test router, so
-`file.save` and `file.download` there do not show what `bun run start` does.
+Media bytes were a separate problem. The production router read the body
+before it had chosen a route. A non-JSON body was read as text, so the byte
+`0xFF` became the replacement character U+FFFD. On the way out, any object
+body was `JSON.stringify`'d, and a `Uint8Array` is an object, so a media
+download became a JSON map of byte indexes. ADR-009 left `buildRouter` in
+place for tests that return raw bytes, because the production router could
+not carry them. `e2e/storage-workflow.test.ts` used that test router, so
+`file.save` and `file.download` there did not show what `bun run start` does.
 
 ## Decision
 
@@ -82,8 +82,7 @@ In the router that is:
 
 ### Binary request and response
 
-The production router will do the following. This change does not.
-`parseRequest` and `createHttpResponse` stay as they are until a later change.
+The production router does the following.
 
 1. Read the path and query first, then choose the route, then read the body.
 2. `metadata.rawBody: true` means the body is the raw bytes (`Uint8Array`
@@ -168,9 +167,9 @@ apart.
   fallbacks exist.
 - No route except storage path-style GET, PUT, and DELETE may set `fallback`.
   Those three are still unregistered.
-- Body parsing and response encoding are unchanged. Until the binary change
-  lands, ADR-009 still holds: tests that return raw bytes use `buildRouter`,
-  and the production router still reads the body before matching and
-  `JSON.stringify`s object bodies.
-- After that binary change, `e2e/storage-workflow.test.ts` uses
-  `buildProductionRouter`.
+- The production router reads the path and query, matches the route, then
+  reads the body. `metadata.rawBody` is a `Uint8Array`. The shared upload POST
+  stays JSON only for `uploadType=resumable` with
+  `Content-Type: application/json`. `Uint8Array`, `ArrayBuffer`, and
+  `ReadableStream` responses are sent unchanged.
+- `e2e/storage-workflow.test.ts` uses `buildProductionRouter`.

@@ -101,6 +101,16 @@ describe('ObjectHandlers', () => {
     expect(route.path).toBe('/upload/storage/v1/b/:bucket/o');
   });
 
+  test('rawBody is set on resumable PUT and object GET, not on the shared upload POST', () => {
+    const insert = findRoute(handlers.getRoutes(), 'storage.objects.insert');
+    const resumable = findRoute(handlers.getRoutes(), 'storage.objects.resumable');
+    const get = findRoute(handlers.getRoutes(), 'storage.objects.get');
+
+    expect(insert.metadata?.rawBody).toBeUndefined();
+    expect(resumable.metadata?.rawBody).toBe(true);
+    expect(get.metadata?.rawBody).toBe(true);
+  });
+
   test('handleInsertObject reads body and extracts name from query', async () => {
     const route = findRoute(handlers.getRoutes(), 'storage.objects.insert');
 

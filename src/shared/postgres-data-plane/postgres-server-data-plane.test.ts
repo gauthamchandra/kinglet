@@ -1058,7 +1058,7 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
       product: CLOUDSQL_DATA_PLANE_PRODUCT,
       dataDirectory: storage === 'memory' ? null : root,
       ...nextRange(),
-      processManager: new PostgresProcessManager(logger),
+      processManager: new PostgresProcessManager(logger, { readinessTimeoutMs: 20_000 }),
     });
 
     planes.push(started);
