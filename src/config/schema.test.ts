@@ -35,6 +35,7 @@ describe('Configuration Schema', () => {
       expect(config.server.grpcPort).toBe(8766);
       expect(config.server.maxConnections).toBe(100);
       expect(config.storage.type).toBe('sqlite');
+      expect(config.storage.blobPath).toBe('./data/blobs');
       expect(config.auth.enabled).toBe(false);
       expect(config.auth.mode).toBe('bypass');
       expect(config.logging.level).toBe('info');
@@ -559,6 +560,12 @@ describe('Configuration Schema', () => {
       expect(env.NODE_ENV).toBe('development');
     });
 
+    test('parses BLOB_PATH', () => {
+      const env = EnvConfigSchema.parse({ BLOB_PATH: './custom/blobs' });
+
+      expect(env.BLOB_PATH).toBe('./custom/blobs');
+    });
+
     test('should handle boolean transformations', () => {
       const env1 = EnvConfigSchema.parse({ AUTH_ENABLED: 'true' });
 
@@ -597,6 +604,17 @@ describe('Configuration Schema', () => {
       expect(config.services?.scheduler?.enabled).toBe(false);
       expect(config.services?.tasks?.enabled).toBe(true);
       expect(config.services?.secrets?.enabled).toBe(false);
+    });
+
+    test('copies BLOB_PATH onto storage.blobPath only when it is set', () => {
+      const configured = mapEnvToConfig({ BLOB_PATH: '/var/lib/kinglet/blobs' });
+
+      expect(configured.storage?.blobPath).toBe('/var/lib/kinglet/blobs');
+
+      const storageTypeOnly = mapEnvToConfig({ STORAGE_TYPE: 'memory' });
+
+      expect(storageTypeOnly.storage?.blobPath).toBeUndefined();
+      expect(mapEnvToConfig({}).storage).toBeUndefined();
     });
 
     test('should handle individual service enablement', () => {

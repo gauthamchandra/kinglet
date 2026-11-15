@@ -15,6 +15,7 @@ const ServerConfigSchema = z.object({
 const StorageConfigSchema = z.object({
   type: z.enum(['memory', 'sqlite']).default('sqlite'),
   sqlitePath: z.string().optional().default('./data/emulator.db'),
+  blobPath: z.string().optional().default('./data/blobs'),
 });
 
 // Authentication configuration schema
@@ -180,6 +181,7 @@ export const EnvConfigSchema = z.object({
     })
     .optional(),
   SQLITE_PATH: z.string().optional(),
+  BLOB_PATH: z.string().optional(),
 
   // Authentication configuration
   AUTH_ENABLED: z
@@ -330,10 +332,15 @@ export function mapEnvToConfig(env: Partial<EnvConfig>): DeepPartial<Config> {
     if (env.MAX_CONNECTIONS !== undefined) config.server.maxConnections = env.MAX_CONNECTIONS;
   }
 
-  if (env.STORAGE_TYPE !== undefined || env.SQLITE_PATH !== undefined) {
+  if (
+    env.STORAGE_TYPE !== undefined ||
+    env.SQLITE_PATH !== undefined ||
+    env.BLOB_PATH !== undefined
+  ) {
     config.storage = {};
     if (env.STORAGE_TYPE !== undefined) config.storage.type = env.STORAGE_TYPE;
     if (env.SQLITE_PATH !== undefined) config.storage.sqlitePath = env.SQLITE_PATH;
+    if (env.BLOB_PATH !== undefined) config.storage.blobPath = env.BLOB_PATH;
   }
 
   if (

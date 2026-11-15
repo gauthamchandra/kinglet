@@ -2,8 +2,7 @@
  * Blob Store - filesystem-based binary object data storage for GCS emulation
  */
 
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface BlobStoreResult {
@@ -44,26 +43,33 @@ function computeCrc32c(data: Uint8Array): number {
 
 export class BlobStore {
   private basePath: string;
+  private trackWrittenPaths: boolean;
+  private writtenPaths = new Set<string>();
 
-  constructor(basePath?: string) {
-    this.basePath = basePath ?? join(tmpdir(), `gcs-blobs-${crypto.randomUUID()}`);
+  constructor(basePath: string, options?: { trackWrittenPaths?: boolean }) {
+    this.basePath = basePath;
+    this.trackWrittenPaths = options?.trackWrittenPaths ?? true;
     mkdirSync(this.basePath, { recursive: true });
   }
 
   async store(
     bucket: string,
-    objectName: string,
-    generation: string,
+    _objectName: string,
+    _generation: string,
     data: Uint8Array
   ): Promise<BlobStoreResult> {
-    const nameHash = new Bun.CryptoHasher('sha256').update(objectName).digest('hex');
     const dir = join(this.basePath, bucket);
 
     mkdirSync(dir, { recursive: true });
 
-    const blobPath = join(dir, `${nameHash}-${generation}`);
+    // generation can match across processes. The file name does not use it.
+    const blobPath = join(dir, crypto.randomUUID());
 
     await Bun.write(blobPath, data);
+
+    if (this.trackWrittenPaths) {
+      this.writtenPaths.add(blobPath);
+    }
 
     const { md5Hash, crc32c } = this.computeHashes(data);
 
@@ -84,10 +90,12 @@ export class BlobStore {
     const file = Bun.file(blobPath);
 
     if (!(await file.exists())) {
+      this.writtenPaths.delete(blobPath);
       return false;
     }
 
     rmSync(blobPath);
+    this.writtenPaths.delete(blobPath);
     return true;
   }
 
@@ -103,8 +111,13 @@ export class BlobStore {
   }
 
   cleanup(): void {
-    if (existsSync(this.basePath)) {
-      rmSync(this.basePath, { recursive: true, force: true });
+    for (const blobPath of this.writtenPaths) {
+      try {
+        rmSync(blobPath, { force: true });
+        this.writtenPaths.delete(blobPath);
+      } catch {
+        // Keep the path so a later cleanup can retry.
+      }
     }
   }
 

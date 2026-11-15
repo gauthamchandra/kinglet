@@ -5,6 +5,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Server } from 'bun';
 import { StorageManager } from '@/core/storage/manager.ts';
 import { CloudStorageService } from '@/services/storage/index.ts';
@@ -15,6 +19,7 @@ import { buildProductionRouter } from './e2e-helpers.ts';
 let emulatorServer: Server;
 let emulatorPort: number;
 let cloudStorageService: CloudStorageService;
+let blobRoot: string;
 
 function url(path: string): string {
   return `http://localhost:${emulatorPort}${path}`;
@@ -32,12 +37,16 @@ async function createBucket(name: string): Promise<void> {
 
 beforeAll(async () => {
   emulatorPort = await getAvailablePort();
+  blobRoot = await mkdtemp(join(tmpdir(), 'kinglet-e2e-storage-notifications-'));
 
   const storage = new StorageManager();
   await storage.initialize({ type: 'memory' });
 
   const logger = new Logger('e2e-storage-notifications', 'error');
-  cloudStorageService = new CloudStorageService(storage, logger);
+  cloudStorageService = new CloudStorageService(storage, logger, {
+    blobPath: blobRoot,
+    storageType: 'memory',
+  });
   await cloudStorageService.initialize();
 
   emulatorServer = Bun.serve({
@@ -47,8 +56,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await cloudStorageService.stop();
+  await cloudStorageService.stop('memory');
   emulatorServer.stop();
+  rmSync(blobRoot, { recursive: true, force: true });
 });
 
 describe('Cloud Storage notificationConfigs', () => {

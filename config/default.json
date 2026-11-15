@@ -6,7 +6,8 @@
   },
   "storage": {
     "type": "sqlite",
-    "sqlitePath": "./data/emulator.db"
+    "sqlitePath": "./data/emulator.db",
+    "blobPath": "./data/blobs"
   },
   "auth": {
     "enabled": false,

@@ -10,6 +10,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildComposedOperationsRoutes,
   type ComposableOperationsStore,
@@ -66,115 +69,123 @@ async function registerEveryService(echoRouteId = false): Promise<RequestRouter>
 
   const logger = new Logger('test', 'error');
   const router = new RequestRouter(logger);
+  const blobRoot = await mkdtemp(join(tmpdir(), 'kinglet-routes-'));
 
-  const add = (route: RouteDefinition): void => {
-    router.addRoute(echoRouteId ? echoRoute(route) : route);
-  };
+  try {
+    const add = (route: RouteDefinition): void => {
+      router.addRoute(echoRouteId ? echoRoute(route) : route);
+    };
 
-  add({
-    id: 'health',
-    method: 'GET',
-    path: '/health',
-    handler: () => ({ status: 200, body: buildHealthBody() }),
-  });
+    add({
+      id: 'health',
+      method: 'GET',
+      path: '/health',
+      handler: () => ({ status: 200, body: buildHealthBody() }),
+    });
 
-  for (const route of createLocationRoutes(logger)) {
-    add(route);
-  }
-
-  const schedulerService = new SchedulerService(storage, logger);
-  const pubsubService = new PubSubService(storage, logger);
-  const tasksService = new CloudTasksService(storage, logger);
-  const secretsService = new SecretsService(storage, logger);
-  const cloudStorageService = new CloudStorageService(storage, logger);
-  const workflowsService = new CloudWorkflowsService(storage, logger);
-  const kmsService = new CloudKmsService(storage, logger);
-  const memorystoreService = new MemorystoreService(storage, logger, { enabled: false });
-  const alloydbService = new AlloyDbService(storage, logger, { enabled: false });
-  const cloudSqlService = new CloudSqlService(storage, logger, { enabled: false });
-  const computeService = new ComputeService(storage, logger);
-  const networkSecurityService = new NetworkSecurityService(storage, logger);
-
-  await schedulerService.initialize();
-  await pubsubService.initialize();
-  await tasksService.initialize();
-  await secretsService.initialize();
-  await cloudStorageService.initialize();
-  await workflowsService.initialize();
-  await kmsService.initialize();
-  await memorystoreService.initialize();
-  await alloydbService.initialize();
-  await cloudSqlService.initialize();
-  await computeService.initialize();
-  await networkSecurityService.initialize();
-
-  // Same order as src/index.ts. Scheduler, Pub/Sub, Tasks, Secrets, Storage,
-  // KMS, Cloud SQL, and Compute register as they start. Workflows, Memorystore,
-  // AlloyDB, and Network Security wait until the composed operations set owns
-  // the shared paths.
-  for (const route of schedulerService.getRoutes()) {
-    add(route);
-  }
-
-  for (const route of pubsubService.getRoutes()) {
-    add(route);
-  }
-
-  for (const route of tasksService.getRoutes()) {
-    add(route);
-  }
-
-  for (const route of secretsService.getRoutes()) {
-    add(route);
-  }
-
-  for (const route of cloudStorageService.getRoutes()) {
-    add(route);
-  }
-
-  for (const route of kmsService.getRoutes()) {
-    add(route);
-  }
-
-  for (const route of cloudSqlService.getRoutes()) {
-    add(route);
-  }
-
-  for (const route of computeService.getRoutes()) {
-    add(route);
-  }
-
-  const stores: ComposableOperationsStore[] = [
-    memorystoreService.getComposableOperationsStore(),
-    workflowsService.getComposableOperationsStore(),
-    alloydbService.getComposableOperationsStore(),
-    networkSecurityService.getComposableOperationsStore(),
-  ];
-
-  const composedOperationsRegistered = stores.length > 1;
-
-  if (composedOperationsRegistered) {
-    for (const route of buildComposedOperationsRoutes(stores, logger)) {
+    for (const route of createLocationRoutes(logger)) {
       add(route);
     }
-  }
 
-  const registerServiceRoutes = (routes: RouteDefinition[]): void => {
-    for (const route of routes) {
-      if (composedOperationsRegistered && isComposedOperationsPath(route.path)) {
-        continue;
+    const schedulerService = new SchedulerService(storage, logger);
+    const pubsubService = new PubSubService(storage, logger);
+    const tasksService = new CloudTasksService(storage, logger);
+    const secretsService = new SecretsService(storage, logger);
+    const cloudStorageService = new CloudStorageService(storage, logger, {
+      blobPath: blobRoot,
+      storageType: 'memory',
+    });
+    const workflowsService = new CloudWorkflowsService(storage, logger);
+    const kmsService = new CloudKmsService(storage, logger);
+    const memorystoreService = new MemorystoreService(storage, logger, { enabled: false });
+    const alloydbService = new AlloyDbService(storage, logger, { enabled: false });
+    const cloudSqlService = new CloudSqlService(storage, logger, { enabled: false });
+    const computeService = new ComputeService(storage, logger);
+    const networkSecurityService = new NetworkSecurityService(storage, logger);
+
+    await schedulerService.initialize();
+    await pubsubService.initialize();
+    await tasksService.initialize();
+    await secretsService.initialize();
+    await cloudStorageService.initialize();
+    await workflowsService.initialize();
+    await kmsService.initialize();
+    await memorystoreService.initialize();
+    await alloydbService.initialize();
+    await cloudSqlService.initialize();
+    await computeService.initialize();
+    await networkSecurityService.initialize();
+
+    // Same order as src/index.ts. Scheduler, Pub/Sub, Tasks, Secrets, Storage,
+    // KMS, Cloud SQL, and Compute register as they start. Workflows, Memorystore,
+    // AlloyDB, and Network Security wait until the composed operations set owns
+    // the shared paths.
+    for (const route of schedulerService.getRoutes()) {
+      add(route);
+    }
+
+    for (const route of pubsubService.getRoutes()) {
+      add(route);
+    }
+
+    for (const route of tasksService.getRoutes()) {
+      add(route);
+    }
+
+    for (const route of secretsService.getRoutes()) {
+      add(route);
+    }
+
+    for (const route of cloudStorageService.getRoutes()) {
+      add(route);
+    }
+
+    for (const route of kmsService.getRoutes()) {
+      add(route);
+    }
+
+    for (const route of cloudSqlService.getRoutes()) {
+      add(route);
+    }
+
+    for (const route of computeService.getRoutes()) {
+      add(route);
+    }
+
+    const stores: ComposableOperationsStore[] = [
+      memorystoreService.getComposableOperationsStore(),
+      workflowsService.getComposableOperationsStore(),
+      alloydbService.getComposableOperationsStore(),
+      networkSecurityService.getComposableOperationsStore(),
+    ];
+
+    const composedOperationsRegistered = stores.length > 1;
+
+    if (composedOperationsRegistered) {
+      for (const route of buildComposedOperationsRoutes(stores, logger)) {
+        add(route);
       }
-
-      add(route);
     }
-  };
 
-  registerServiceRoutes(workflowsService.getRoutes());
-  registerServiceRoutes(memorystoreService.getRoutes());
-  registerServiceRoutes(alloydbService.getRoutes());
-  registerServiceRoutes(networkSecurityService.getRoutes());
+    const registerServiceRoutes = (routes: RouteDefinition[]): void => {
+      for (const route of routes) {
+        if (composedOperationsRegistered && isComposedOperationsPath(route.path)) {
+          continue;
+        }
 
-  return router;
+        add(route);
+      }
+    };
+
+    registerServiceRoutes(workflowsService.getRoutes());
+    registerServiceRoutes(memorystoreService.getRoutes());
+    registerServiceRoutes(alloydbService.getRoutes());
+    registerServiceRoutes(networkSecurityService.getRoutes());
+
+    return router;
+  } finally {
+    await rm(blobRoot, { recursive: true, force: true });
+  }
 }
 
 const UNCLAIMED_PATH = '/my-bucket/nested/object';

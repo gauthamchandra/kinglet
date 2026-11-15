@@ -6,7 +6,9 @@
  */
 
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
+import { resolveBlobPath } from '@/core/storage/config.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
+import type { StorageType } from '@/core/storage/types.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
 import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { BlobStore } from './blob-store.ts';
@@ -26,6 +28,8 @@ import { ObjectService } from './object-service.ts';
 export class CloudStorageService {
   private storage: StorageManager;
   private logger: Logger;
+  private blobPath: string;
+  private storageType: StorageType;
   private blobStore: BlobStore | null = null;
   private bucketRepo: BucketRepository | null = null;
   private objectRepo: ObjectRepository | null = null;
@@ -36,13 +40,21 @@ export class CloudStorageService {
   private iamHandlers: IamHandlers | null = null;
   private notificationHandlers: NotificationHandlers | null = null;
 
-  constructor(storage: StorageManager, logger: Logger) {
+  constructor(
+    storage: StorageManager,
+    logger: Logger,
+    options: { blobPath: string; storageType: StorageType }
+  ) {
     this.storage = storage;
     this.logger = logger;
+    this.blobPath = options.blobPath;
+    this.storageType = options.storageType;
   }
 
   async initialize(): Promise<void> {
-    this.blobStore = new BlobStore();
+    this.blobStore = new BlobStore(resolveBlobPath(this.blobPath), {
+      trackWrittenPaths: this.storageType === 'memory',
+    });
 
     this.bucketRepo = new BucketRepository(this.storage);
     await this.bucketRepo.initialize();
@@ -94,10 +106,14 @@ export class CloudStorageService {
     this.logger.info('Cloud Storage service started');
   }
 
-  async stop(): Promise<void> {
-    // Intentionally do NOT call blobStore.cleanup() here.
-    // Blob data must survive restarts when metadata is persisted via sqlite storage.
-    // cleanup() is only used in tests to remove temporary directories.
+  async stop(storageType: StorageType): Promise<void> {
+    // Memory drops the object rows on exit. Sqlite may share this directory, so
+    // cleanup unlinks only the files this process stored and leaves the tree.
+    // Sqlite stop deletes nothing.
+    if (storageType === 'memory') {
+      this.blobStore?.cleanup();
+    }
+
     this.logger.info('Cloud Storage service stopped');
   }
 }

@@ -16,6 +16,7 @@ All configuration is via environment variables. Defaults are shown below.
 | --- | --- | --- |
 | `STORAGE_TYPE` | `sqlite` | `memory` or `sqlite` |
 | `SQLITE_PATH` | `./data/emulator.db` | Path to SQLite database file |
+| `BLOB_PATH` | `./data/blobs` | Directory for Cloud Storage object bytes |
 
 See [Storage modes](storage.md) for details on each storage type.
 
