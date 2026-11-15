@@ -34,14 +34,6 @@ import { CloudTasksService } from '@/services/tasks/index.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
 
-interface RegisterOptions {
-  /**
-   * Replace each handler with one that returns its route id.
-   * Matching ignores the handler; this is how `route()` reports which id won.
-   */
-  echoRouteId?: boolean;
-}
-
 /**
  * Fill a template with a colon-free token.
  *
@@ -64,8 +56,11 @@ function echoRoute(route: RouteDefinition): RouteDefinition {
   };
 }
 
-async function registerEveryService(options: RegisterOptions = {}): Promise<RequestRouter> {
-  const echoRouteId = options.echoRouteId ?? false;
+/**
+ * @param echoRouteId Replace each handler with one that returns its route id.
+ * Matching ignores the handler; this is how `route()` reports which id won.
+ */
+async function registerEveryService(echoRouteId = false): Promise<RequestRouter> {
   const storage = new StorageManager();
   await storage.initialize({ type: 'memory' });
 
@@ -259,7 +254,7 @@ describe('full route table', () => {
   });
 
   test('resolves every registered route to itself before and after fallbacks', async () => {
-    const router = await registerEveryService({ echoRouteId: true });
+    const router = await registerEveryService(true);
     const routes = router.getAllRoutes();
 
     await expectRoutesResolveToThemselves(router, routes);
