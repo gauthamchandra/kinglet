@@ -10,7 +10,7 @@ import type {
 } from '@/core/gateway/request-router.ts';
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
-import type { BucketService } from './bucket-service.ts';
+import type { BucketMetagenerationPreconditions, BucketService } from './bucket-service.ts';
 import { handleGcsError } from './error-handler.ts';
 
 export class BucketHandlers {
@@ -76,7 +76,10 @@ export class BucketHandlers {
 
   private async handleGetBucket(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
-      const result = await this.service.getBucket(req.params.bucket ?? '');
+      const result = await this.service.getBucket(
+        req.params.bucket ?? '',
+        metagenerationPreconditions(req.query)
+      );
       return this.responseUtils.success(result);
     } catch (err) {
       return this.handleError(err);
@@ -102,7 +105,10 @@ export class BucketHandlers {
 
   private async handleDeleteBucket(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
-      await this.service.deleteBucket(req.params.bucket ?? '');
+      await this.service.deleteBucket(
+        req.params.bucket ?? '',
+        metagenerationPreconditions(req.query)
+      );
       return { status: 204 };
     } catch (err) {
       return this.handleError(err);
@@ -111,7 +117,11 @@ export class BucketHandlers {
 
   private async handlePatchBucket(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
-      const result = await this.service.patchBucket(req.params.bucket ?? '', req.body);
+      const result = await this.service.patchBucket(
+        req.params.bucket ?? '',
+        req.body,
+        metagenerationPreconditions(req.query)
+      );
       return this.responseUtils.success(result);
     } catch (err) {
       return this.handleError(err);
@@ -120,7 +130,11 @@ export class BucketHandlers {
 
   private async handleUpdateBucket(req: RouteRequest, _ctx: RouteContext): Promise<RouteResponse> {
     try {
-      const result = await this.service.updateBucket(req.params.bucket ?? '', req.body);
+      const result = await this.service.updateBucket(
+        req.params.bucket ?? '',
+        req.body,
+        metagenerationPreconditions(req.query)
+      );
       return this.responseUtils.success(result);
     } catch (err) {
       return this.handleError(err);
@@ -130,4 +144,43 @@ export class BucketHandlers {
   private handleError(err: unknown): RouteResponse {
     return handleGcsError(err, 'Bucket', this.responseUtils);
   }
+}
+
+/**
+ * Read `ifMetagenerationMatch` / `ifMetagenerationNotMatch`.
+ *
+ * A repeated query parameter uses the last value. An empty value is treated
+ * as absent so it does not become an `INVALID_ARGUMENT`.
+ */
+function metagenerationPreconditions(
+  query: RouteRequest['query']
+): BucketMetagenerationPreconditions | undefined {
+  const ifMetagenerationMatch = readQueryValue(query.ifMetagenerationMatch);
+  const ifMetagenerationNotMatch = readQueryValue(query.ifMetagenerationNotMatch);
+
+  if (ifMetagenerationMatch === undefined && ifMetagenerationNotMatch === undefined) {
+    return undefined;
+  }
+
+  const preconditions: BucketMetagenerationPreconditions = {};
+
+  if (ifMetagenerationMatch !== undefined) {
+    preconditions.ifMetagenerationMatch = ifMetagenerationMatch;
+  }
+
+  if (ifMetagenerationNotMatch !== undefined) {
+    preconditions.ifMetagenerationNotMatch = ifMetagenerationNotMatch;
+  }
+
+  return preconditions;
+}
+
+function readQueryValue(value: string | string[] | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const raw = Array.isArray(value) ? value[value.length - 1] : value;
+
+  return raw === '' ? undefined : raw;
 }

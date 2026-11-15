@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { RouteContext, RouteDefinition, RouteRequest } from '@/core/gateway/request-router.ts';
+import { StorageManager } from '@/core/storage/manager.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { createMockLogger } from '../../../test-utils/mock-logger.ts';
 import { BucketHandlers } from './bucket-handlers.ts';
-import type { BucketService } from './bucket-service.ts';
-import { GcsError } from './bucket-service.ts';
+import { BucketRepository } from './bucket-repository.ts';
+import { BucketService, GcsError } from './bucket-service.ts';
+import { IamPolicyRepository } from './iam-repository.ts';
+import { ObjectRepository } from './object-repository.ts';
 
 function createRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
   return {
@@ -81,7 +85,7 @@ describe('BucketHandlers', () => {
     const result = await route.handler(req, createContext());
 
     expect(result.status).toBe(200);
-    expect(mockService.getBucket).toHaveBeenCalledWith('my-bucket');
+    expect(mockService.getBucket).toHaveBeenCalledWith('my-bucket', undefined);
   });
 
   test('handleListBuckets passes pagination from query', async () => {
@@ -114,9 +118,11 @@ describe('BucketHandlers', () => {
     const result = await route.handler(req, createContext());
 
     expect(result.status).toBe(200);
-    expect(mockService.patchBucket).toHaveBeenCalledWith('patch-bucket', {
-      labels: { env: 'test' },
-    });
+    expect(mockService.patchBucket).toHaveBeenCalledWith(
+      'patch-bucket',
+      { labels: { env: 'test' } },
+      undefined
+    );
   });
 
   // ── Error mapping ──
@@ -163,9 +169,9 @@ describe('BucketHandlers', () => {
     expect(result.status).toBe(400);
   });
 
-  test('FAILED_PRECONDITION maps to 409 for non-empty bucket', async () => {
+  test('BUCKET_NOT_EMPTY maps to 409 FAILED_PRECONDITION', async () => {
     (mockService.deleteBucket as ReturnType<typeof mock>).mockRejectedValue(
-      new GcsError('FAILED_PRECONDITION', 'Bucket not empty')
+      new GcsError('BUCKET_NOT_EMPTY', 'Bucket not empty')
     );
 
     const route = findRoute(handlers.getRoutes(), 'storage.buckets.delete');
@@ -175,5 +181,168 @@ describe('BucketHandlers', () => {
     );
 
     expect(result.status).toBe(409);
+
+    const error = (result.body as { error: { code: number; message: string; status: string } })
+      .error;
+
+    expect(error.code).toBe(409);
+    expect(error.status).toBe('FAILED_PRECONDITION');
+    expect(error.message).toBe('Bucket not empty');
+  });
+
+  test('CONDITION_NOT_MET maps to 412 FAILED_PRECONDITION', async () => {
+    (mockService.updateBucket as ReturnType<typeof mock>).mockRejectedValue(
+      new GcsError('CONDITION_NOT_MET', 'metageneration mismatch')
+    );
+
+    const route = findRoute(handlers.getRoutes(), 'storage.buckets.update');
+    const result = await route.handler(
+      createRequest({
+        method: 'PUT',
+        params: { bucket: 'b' },
+        body: {},
+        query: { ifMetagenerationMatch: '1' },
+      }),
+      createContext()
+    );
+
+    expect(result.status).toBe(412);
+
+    const error = (result.body as { error: { code: number; message: string; status: string } })
+      .error;
+
+    expect(error.code).toBe(412);
+    expect(error.status).toBe('FAILED_PRECONDITION');
+    expect(error.message).toBe('metageneration mismatch');
+  });
+
+  test('bucket GET ifMetagenerationNotMatch returns 304 with an empty body', async () => {
+    const storage = new StorageManager();
+    await storage.initialize({ type: 'memory' });
+
+    const bucketRepo = new BucketRepository(storage);
+    await bucketRepo.initialize();
+
+    const objectRepo = new ObjectRepository(storage);
+    await objectRepo.initialize();
+
+    const iamRepo = new IamPolicyRepository(storage);
+    await iamRepo.initialize();
+
+    const service = new BucketService(bucketRepo, objectRepo, iamRepo, new ResourceMutex());
+    await service.createBucket('proj', { name: 'get-304' });
+
+    const realHandlers = new BucketHandlers(service, createMockLogger());
+    const route = findRoute(realHandlers.getRoutes(), 'storage.buckets.get');
+    const result = await route.handler(
+      createRequest({
+        params: { bucket: 'get-304' },
+        query: { ifMetagenerationNotMatch: '1' },
+      }),
+      createContext()
+    );
+
+    expect(result.status).toBe(304);
+    expect(result.body).toBeUndefined();
+  });
+
+  test('NOT_MODIFIED maps to 304 with an empty body', async () => {
+    (mockService.getBucket as ReturnType<typeof mock>).mockRejectedValue(
+      new GcsError('NOT_MODIFIED', 'not modified')
+    );
+
+    const route = findRoute(handlers.getRoutes(), 'storage.buckets.get');
+    const result = await route.handler(createRequest({ params: { bucket: 'b' } }), createContext());
+
+    expect(result.status).toBe(304);
+    expect(result.body).toBeUndefined();
+  });
+
+  test('PERMISSION_DENIED maps to 403', async () => {
+    (mockService.updateBucket as ReturnType<typeof mock>).mockRejectedValue(
+      new GcsError('PERMISSION_DENIED', 'retention locked')
+    );
+
+    const route = findRoute(handlers.getRoutes(), 'storage.buckets.update');
+    const result = await route.handler(
+      createRequest({ method: 'PUT', params: { bucket: 'b' }, body: {} }),
+      createContext()
+    );
+
+    expect(result.status).toBe(403);
+
+    const error = (result.body as { error: { code: number; status: string } }).error;
+
+    expect(error.code).toBe(403);
+    expect(error.status).toBe('PERMISSION_DENIED');
+  });
+
+  test('handleUpdateBucket passes metageneration preconditions from the query', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.buckets.update');
+
+    const req = createRequest({
+      method: 'PUT',
+      params: { bucket: 'upd-bucket' },
+      body: { storageClass: 'NEARLINE' },
+      query: { ifMetagenerationMatch: '2', ifMetagenerationNotMatch: '1' },
+    });
+
+    const result = await route.handler(req, createContext());
+
+    expect(result.status).toBe(200);
+    expect(mockService.updateBucket).toHaveBeenCalledWith(
+      'upd-bucket',
+      { storageClass: 'NEARLINE' },
+      { ifMetagenerationMatch: '2', ifMetagenerationNotMatch: '1' }
+    );
+  });
+
+  test('handleGetBucket passes metageneration preconditions from the query', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.buckets.get');
+
+    const req = createRequest({
+      params: { bucket: 'get-bucket' },
+      query: { ifMetagenerationMatch: '4' },
+    });
+
+    await route.handler(req, createContext());
+
+    expect(mockService.getBucket).toHaveBeenCalledWith('get-bucket', {
+      ifMetagenerationMatch: '4',
+    });
+  });
+
+  test('handlePatchBucket passes metageneration preconditions from the query', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.buckets.patch');
+
+    const req = createRequest({
+      params: { bucket: 'patch-bucket' },
+      body: { labels: { env: 'test' } },
+      query: { ifMetagenerationNotMatch: '3' },
+    });
+
+    await route.handler(req, createContext());
+
+    expect(mockService.patchBucket).toHaveBeenCalledWith(
+      'patch-bucket',
+      { labels: { env: 'test' } },
+      { ifMetagenerationNotMatch: '3' }
+    );
+  });
+
+  test('handleDeleteBucket passes metageneration preconditions from the query', async () => {
+    const route = findRoute(handlers.getRoutes(), 'storage.buckets.delete');
+
+    const req = createRequest({
+      params: { bucket: 'del-bucket' },
+      query: { ifMetagenerationMatch: ['1', '5'] },
+    });
+
+    const result = await route.handler(req, createContext());
+
+    expect(result.status).toBe(204);
+    expect(mockService.deleteBucket).toHaveBeenCalledWith('del-bucket', {
+      ifMetagenerationMatch: '5',
+    });
   });
 });

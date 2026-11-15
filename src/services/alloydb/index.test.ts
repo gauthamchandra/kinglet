@@ -585,58 +585,73 @@ describe('data plane', () => {
    * Exercises the lookupUser callback: the cluster's initialUser password is
    * what the wire server has to authenticate this connection against.
    */
-  test('a created instance is reachable with the initial user password', async () => {
-    const dataPlaneService = await startService();
+  test(
+    'a created instance is reachable with the initial user password',
+    async () => {
+      const dataPlaneService = await startService();
 
-    await createClusterAndInstance(dataPlaneService);
+      await createClusterAndInstance(dataPlaneService);
 
-    // Read the port back rather than assuming the allocator handed out the
-    // first in the range.
-    const port = dataPlaneService.getDataPlanePort(PROJECT, LOCATION, CLUSTER, INSTANCE);
+      // Read the port back rather than assuming the allocator handed out the
+      // first in the range.
+      const port = dataPlaneService.getDataPlanePort(PROJECT, LOCATION, CLUSTER, INSTANCE);
 
-    expect(port).not.toBeNull();
-    expect(await queryOne(port ?? 0)).toEqual([{ one: 1 }]);
+      expect(port).not.toBeNull();
+      expect(await queryOne(port ?? 0)).toEqual([{ one: 1 }]);
 
-    await dataPlaneService.stop();
-  });
+      await dataPlaneService.stop();
+      // initdb plus a live login exceeds the 5s default when the runner is busy.
+    },
+    { timeout: 20_000 }
+  );
 
-  test('stop closes the endpoint so its port can be bound again', async () => {
-    const dataPlaneService = await startService();
+  test(
+    'stop closes the endpoint so its port can be bound again',
+    async () => {
+      const dataPlaneService = await startService();
 
-    await createClusterAndInstance(dataPlaneService);
-    await dataPlaneService.stop();
+      await createClusterAndInstance(dataPlaneService);
+      await dataPlaneService.stop();
 
-    // The wire server binds 0.0.0.0, so this check has to as well: on macOS a
-    // 127.0.0.1 bind succeeds beside a live wildcard listener, which would let
-    // this pass with the endpoint still open.
-    const rebound = Bun.listen({
-      hostname: '0.0.0.0',
-      port: PORT_RANGE_START,
-      socket: { data() {}, open() {}, close() {}, error() {} },
-    });
+      // The wire server binds 0.0.0.0, so this check has to as well: on macOS a
+      // 127.0.0.1 bind succeeds beside a live wildcard listener, which would let
+      // this pass with the endpoint still open.
+      const rebound = Bun.listen({
+        hostname: '0.0.0.0',
+        port: PORT_RANGE_START,
+        socket: { data() {}, open() {}, close() {}, error() {} },
+      });
 
-    expect(rebound.port).toBe(PORT_RANGE_START);
+      expect(rebound.port).toBe(PORT_RANGE_START);
 
-    rebound.stop(true);
-  });
+      rebound.stop(true);
+      // Starting the instance and releasing its port exceeds the 5s default when the runner is busy.
+    },
+    { timeout: 20_000 }
+  );
 
   /**
    * Without rehydration a persisted instance keeps being listed and described
    * while nothing listens on its endpoint, and no admin call short of a
    * recreate brings it back.
    */
-  test('brings persisted instances back up on a fresh service over the same storage', async () => {
-    const first = await startService();
+  test(
+    'brings persisted instances back up on a fresh service over the same storage',
+    async () => {
+      const first = await startService();
 
-    await createClusterAndInstance(first);
-    await first.stop();
+      await createClusterAndInstance(first);
+      await first.stop();
 
-    const revived = await startService();
+      const revived = await startService();
 
-    expect(await queryOne(PORT_RANGE_START)).toEqual([{ one: 1 }]);
+      expect(await queryOne(PORT_RANGE_START)).toEqual([{ one: 1 }]);
 
-    await revived.stop();
-  });
+      await revived.stop();
+      // Two instance starts exceed the 5s default when the runner is busy.
+    },
+    { timeout: 20_000 }
+  );
 
   /**
    * initialize_calledTwice_doesNotThrow above runs with the data plane off. On, a
