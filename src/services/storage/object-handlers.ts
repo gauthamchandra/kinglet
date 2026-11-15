@@ -10,6 +10,7 @@ import type {
 } from '@/core/gateway/request-router.ts';
 import { ResponseUtils, StandardResponseFormatter } from '@/core/gateway/response-handlers.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { parsePageSize } from '@/shared/utils/pagination.ts';
 import { handleGcsError } from './error-handler.ts';
 import type { ObjectService } from './object-service.ts';
 import { parseObjectName } from './types.ts';
@@ -206,13 +207,7 @@ export class ObjectHandlers {
       const bucket = req.params.bucket ?? '';
       const prefix = (req.query.prefix as string) || undefined;
       const delimiter = (req.query.delimiter as string) || undefined;
-      const maxResultsRaw = req.query.maxResults
-        ? parseInt(req.query.maxResults as string, 10)
-        : undefined;
-      const maxResults =
-        maxResultsRaw && !Number.isNaN(maxResultsRaw) && maxResultsRaw > 0
-          ? maxResultsRaw
-          : undefined;
+      const maxResults = parsePageSize(req.query.maxResults);
       const pageToken = (req.query.pageToken as string) || undefined;
 
       const listOptions: Parameters<typeof this.service.listObjects>[1] = {};

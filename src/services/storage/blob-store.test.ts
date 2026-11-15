@@ -116,15 +116,8 @@ describe('BlobStore', () => {
 
     const { md5Hash, crc32c } = store.computeHashes(data);
 
-    expect(md5Hash).toBeTypeOf('string');
-    expect(md5Hash.length).toBeGreaterThan(0);
-    expect(crc32c).toBeTypeOf('string');
-    expect(crc32c.length).toBeGreaterThan(0);
-
-    // Deterministic: same input should produce same output
-    const { md5Hash: md5Hash2, crc32c: crc32c2 } = store.computeHashes(data);
-    expect(md5Hash2).toBe(md5Hash);
-    expect(crc32c2).toBe(crc32c);
+    expect(md5Hash).toBe('qc+AIzFTDNo+rg05FooMzw==');
+    expect(crc32c).toBe('9IpBvg==');
   });
 
   test('nested directories are auto-created', async () => {
