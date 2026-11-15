@@ -15,6 +15,9 @@ import { BlobStore } from './blob-store.ts';
 import { BucketHandlers } from './bucket-handlers.ts';
 import { BucketRepository } from './bucket-repository.ts';
 import { BucketService } from './bucket-service.ts';
+import { HmacKeyHandlers } from './hmac-handlers.ts';
+import { HmacKeyRepository } from './hmac-repository.ts';
+import { HmacKeyService } from './hmac-service.ts';
 import { IamHandlers } from './iam-handlers.ts';
 import { IamPolicyRepository } from './iam-repository.ts';
 import { IamService } from './iam-service.ts';
@@ -37,6 +40,9 @@ export class CloudStorageService {
   private objectService: ObjectService | null = null;
   private bucketHandlers: BucketHandlers | null = null;
   private objectHandlers: ObjectHandlers | null = null;
+  private hmacRepo: HmacKeyRepository | null = null;
+  private hmacService: HmacKeyService | null = null;
+  private hmacHandlers: HmacKeyHandlers | null = null;
   private iamHandlers: IamHandlers | null = null;
   private notificationHandlers: NotificationHandlers | null = null;
 
@@ -80,6 +86,11 @@ export class CloudStorageService {
     this.iamHandlers = new IamHandlers(iamService, this.logger);
     this.notificationHandlers = new NotificationHandlers(notificationService, this.logger);
 
+    this.hmacRepo = new HmacKeyRepository(this.storage);
+    await this.hmacRepo.initialize();
+    this.hmacService = new HmacKeyService(this.hmacRepo);
+    this.hmacHandlers = new HmacKeyHandlers(this.hmacService, this.logger);
+
     this.logger.info('Cloud Storage service initialized');
   }
 
@@ -88,7 +99,8 @@ export class CloudStorageService {
       !this.bucketHandlers ||
       !this.objectHandlers ||
       !this.iamHandlers ||
-      !this.notificationHandlers
+      !this.notificationHandlers ||
+      !this.hmacHandlers
     ) {
       throw new Error('CloudStorageService not initialized. Call initialize() first.');
     }
@@ -98,6 +110,7 @@ export class CloudStorageService {
       ...this.objectHandlers.getRoutes(),
       ...this.iamHandlers.getRoutes(),
       ...this.notificationHandlers.getRoutes(),
+      ...this.hmacHandlers.getRoutes(),
     ];
   }
 

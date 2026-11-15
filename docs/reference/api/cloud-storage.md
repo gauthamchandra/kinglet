@@ -27,6 +27,11 @@
 | `POST` | `/storage/v1/b/:bucket/o/:object/compose` | `storage.objects.compose` |
 | `POST` | `/storage/v1/b/:srcBucket/o/:srcObject/copyTo/b/:dstBucket/o/:dstObject` | `storage.objects.copy` |
 | `POST` | `/storage/v1/b/:srcBucket/o/:srcObject/rewriteTo/b/:dstBucket/o/:dstObject` | `storage.objects.rewrite` |
+| `GET` | `/storage/v1/projects/:projectId/hmacKeys` | `storage.projects.hmacKeys.list` |
+| `POST` | `/storage/v1/projects/:projectId/hmacKeys` | `storage.projects.hmacKeys.create` |
+| `DELETE` | `/storage/v1/projects/:projectId/hmacKeys/:accessId` | `storage.projects.hmacKeys.delete` |
+| `GET` | `/storage/v1/projects/:projectId/hmacKeys/:accessId` | `storage.projects.hmacKeys.get` |
+| `PUT` | `/storage/v1/projects/:projectId/hmacKeys/:accessId` | `storage.projects.hmacKeys.update` |
 | `POST` | `/upload/storage/v1/b/:bucket/o` | `storage.objects.insert` |
 | `PUT` | `/upload/storage/v1/b/:bucket/o` | `storage.objects.resumable` |
 
