@@ -74,11 +74,17 @@ export class CloudStorageService {
     const notificationRepo = new NotificationRepository(this.storage);
     await notificationRepo.initialize();
 
-    const bucketWrites = new ResourceMutex();
+    const writes = new ResourceMutex();
 
-    this.bucketService = new BucketService(this.bucketRepo, this.objectRepo, iamRepo, bucketWrites);
-    this.objectService = new ObjectService(this.objectRepo, this.bucketRepo, this.blobStore);
-    const iamService = new IamService(this.bucketRepo, iamRepo, bucketWrites);
+    this.bucketService = new BucketService(this.bucketRepo, this.objectRepo, iamRepo, writes);
+    this.objectService = new ObjectService(
+      this.objectRepo,
+      this.bucketRepo,
+      this.blobStore,
+      iamRepo,
+      writes
+    );
+    const iamService = new IamService(this.bucketRepo, iamRepo, writes, this.objectRepo);
     const notificationService = new NotificationService(notificationRepo, this.bucketRepo);
 
     this.bucketHandlers = new BucketHandlers(this.bucketService, this.logger);

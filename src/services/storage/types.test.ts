@@ -9,6 +9,7 @@ import {
   DEFAULT_LOCATION,
   DEFAULT_STORAGE_CLASS,
   OBJECTS_TABLE,
+  objectIamResourceId,
   objectRecordToResponse,
   parseBucketName,
   parseObjectName,
@@ -73,6 +74,14 @@ describe('parseObjectName', () => {
 
   test('handles nested paths', () => {
     expect(parseObjectName('a%2Fb%2Fc.txt')).toBe('a/b/c.txt');
+  });
+});
+
+describe('objectIamResourceId', () => {
+  test('uses the object resource name, including slashes in the object', () => {
+    expect(objectIamResourceId('obj-iam', 'folder/nested.txt')).toBe(
+      'projects/_/buckets/obj-iam/objects/folder/nested.txt'
+    );
   });
 });
 
