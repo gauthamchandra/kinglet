@@ -21,6 +21,9 @@ export function handleGcsError(
         return responseUtils.badRequest(err.message);
       case 'FAILED_PRECONDITION':
         return responseUtils.conflict(err.message);
+      case 'ABORTED':
+        // Stale IAM etag returns 409 ABORTED. Callers accept 412 and do not lock it.
+        return responseUtils.aborted(err.message);
     }
   }
 

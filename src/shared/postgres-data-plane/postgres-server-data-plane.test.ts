@@ -1344,26 +1344,37 @@ describe.skipIf(!isRealPostgresAvailable)('PostgresServerDataPlane', () => {
     }
   });
 
-  test('applyDatabaseFlags sets a reload-level GUC without restarting', async () => {
-    const { plane: started, root } = await plane('sqlite');
-    const port = await started.startInstance('p', 'wm', ['postgres']);
+  test(
+    'applyDatabaseFlags sets a reload-level GUC without restarting',
+    async () => {
+      const { plane: started, root } = await plane('sqlite');
+      const port = await started.startInstance('p', 'wm', ['postgres']);
 
-    await started.applyDatabaseFlags('p', 'wm', [{ name: 'work_mem', value: '8MB' }], ['postgres']);
+      await started.applyDatabaseFlags(
+        'p',
+        'wm',
+        [{ name: 'work_mem', value: '8MB' }],
+        ['postgres']
+      );
 
-    // Open via the Unix socket so kinglet_admin trust-auth works
-    const conn = new PostgresProcessManager(logger).openAdminConnection(
-      join(root, 'cloudsql', 'p', 'wm'),
-      port ?? 0
-    );
+      // Open via the Unix socket so kinglet_admin trust-auth works
+      const conn = new PostgresProcessManager(logger).openAdminConnection(
+        join(root, 'cloudsql', 'p', 'wm'),
+        port ?? 0
+      );
 
-    try {
-      const rows = await conn<{ v: string }[]>`SELECT current_setting('work_mem') AS v`;
+      try {
+        const rows = await conn<{ v: string }[]>`SELECT current_setting('work_mem') AS v`;
 
-      expect(rows[0]?.v).toBe('8MB');
-    } finally {
-      await conn.close({ timeout: 0 });
-    }
-  });
+        expect(rows[0]?.v).toBe('8MB');
+      } finally {
+        await conn.close({ timeout: 0 });
+      }
+    },
+    // The 5s default matches the readiness window, so a busy runner kills Postgres
+    // before it accepts connections and the start is reported as an early exit.
+    { timeout: 20_000 }
+  );
 
   test('applyDatabaseFlags accepts a timezone that moves the clock backward', async () => {
     const { plane: started, root } = await plane('sqlite');

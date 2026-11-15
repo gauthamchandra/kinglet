@@ -39,6 +39,9 @@ describe('CloudStorageService', () => {
     const ids = routes.map(r => r.id);
     expect(ids).toContain('storage.buckets.insert');
     expect(ids).toContain('storage.objects.insert');
+    expect(ids).toContain('storage.buckets.getIamPolicy');
+    expect(ids).toContain('storage.buckets.setIamPolicy');
+    expect(ids).toContain('storage.buckets.testIamPermissions');
 
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(ids.length);

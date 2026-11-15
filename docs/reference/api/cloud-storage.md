@@ -12,6 +12,9 @@
 | `GET` | `/storage/v1/b/:bucket` | `storage.buckets.get` |
 | `PATCH` | `/storage/v1/b/:bucket` | `storage.buckets.patch` |
 | `PUT` | `/storage/v1/b/:bucket` | `storage.buckets.update` |
+| `GET` | `/storage/v1/b/:bucket/iam` | `storage.buckets.getIamPolicy` |
+| `PUT` | `/storage/v1/b/:bucket/iam` | `storage.buckets.setIamPolicy` |
+| `GET` | `/storage/v1/b/:bucket/iam/testPermissions` | `storage.buckets.testIamPermissions` |
 | `GET` | `/storage/v1/b/:bucket/o` | `storage.objects.list` |
 | `DELETE` | `/storage/v1/b/:bucket/o/:object` | `storage.objects.delete` |
 | `GET` | `/storage/v1/b/:bucket/o/:object` | `storage.objects.get` |
