@@ -109,7 +109,8 @@ ambiguous:
 The repo ships a [compatibility-audit skill](.claude/skills/compatibility-audit/SKILL.md)
 that diffs an implementation against its official discovery document. If you use Claude Code,
 run it on your service before opening the PR. It is not a substitute for reading the
-discovery document yourself.
+discovery document yourself. The same skill is linked from
+`.agents/skills/compatibility-audit` for harnesses that scan that directory.
 
 ---
 

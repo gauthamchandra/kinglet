@@ -1,0 +1,11 @@
+{
+  "name": "pstack",
+  "version": "0.15.36",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 Lauren Tan",
+  "upstream": "https://github.com/cursor/plugins/tree/main/pstack",
+  "snapshot": "Cursor marketplace plugin build 0.15.36 (cache id 3dbd22ff12742fb28c9700b9760baa29ed41dc13). Replace this tree to upgrade; do not edit upstream files in place.",
+  "layout": ".agents/ is the plugin root so upstream relative links (../../docs, ../other-skill) keep working. .agents/skills/<name>/SKILL.md is the Agent Skills discovery path.",
+  "notUpstream": ["VENDOR.json", "skills/compatibility-audit"],
+  "relays": "Claude Code and the Cursor CLI do not scan .agents/skills. .claude/skills/<name> and .cursor/skills/<name> are symlinks to the shared skill directory, except compatibility-audit, which is kinglet's skill and is linked the other way. .claude/agents and .cursor/agents symlink poteto-agent.md and comment-sicko.md."
+}
