@@ -16,6 +16,15 @@ export interface RouteDefinition {
   readonly middleware?: RouteMiddleware[];
   readonly parameters?: RouteParameter[];
   readonly metadata?: RouteMetadata;
+  /**
+   * Consider this route only after every ordinary route for the method has missed.
+   *
+   * <p>Score is compared inside the ordinary set and inside the fallback set,
+   * never across them, so a catch-all cannot outrank a more specific route by
+   * counting `**` as a static segment. At most one fallback may be registered
+   * per method. See ADR-020.
+   */
+  readonly fallback?: boolean;
 }
 
 export interface RouteParameter {
@@ -169,6 +178,7 @@ export class RequestRouter {
       : route.path;
 
     this.validateNoPathConflict(route, normalizedPath);
+    this.validateSingleFallback(route);
 
     const normalizedRoute = {
       ...route,
@@ -469,6 +479,27 @@ export class RequestRouter {
   }
 
   /**
+   * Reject a second fallback for one method.
+   *
+   * <p>A fallback is the route of last resort for that method, so two of them
+   * would compete on score again — the failure mode ADR-020 exists to avoid.
+   */
+  private validateSingleFallback(route: RouteDefinition): void {
+    if (!route.fallback) {
+      return;
+    }
+
+    const existing = this.methodRoutes.get(route.method)?.find(candidate => candidate.fallback);
+
+    if (existing) {
+      throw new Error(
+        `Route '${route.id}' conflicts with fallback '${existing.id}': ` +
+          `${route.method} already has a fallback route`
+      );
+    }
+  }
+
+  /**
    * Reject a route whose method and path are already claimed by another route.
    *
    * <p>Every emulated service registers into one router on a single port, so two
@@ -607,7 +638,11 @@ export class RequestRouter {
   }
 
   /**
-   * Find matching route for request
+   * Find matching route for request.
+   *
+   * <p>Ordinary routes are scored on their own. Fallback routes are scored only
+   * when none of those match, so a catch-all cannot win by outscoring a real
+   * route. See ADR-020.
    */
   private findRoute(request: RouteRequest): RouteMatch | null {
     const methodRoutes = this.methodRoutes.get(request.method as HttpMethod);
@@ -616,10 +651,29 @@ export class RequestRouter {
       return null;
     }
 
+    const ordinary = this.bestMatch(
+      methodRoutes.filter(route => !route.fallback),
+      request
+    );
+
+    if (ordinary) {
+      return ordinary;
+    }
+
+    return this.bestMatch(
+      methodRoutes.filter(route => route.fallback),
+      request
+    );
+  }
+
+  /**
+   * Highest-scoring match in one group. The first route wins a tie.
+   */
+  private bestMatch(routes: readonly RouteDefinition[], request: RouteRequest): RouteMatch | null {
     let bestMatch: RouteMatch | null = null;
     let bestScore = -1;
 
-    for (const route of methodRoutes) {
+    for (const route of routes) {
       const match = this.matchRoute(route, request);
 
       if (match && match.score > bestScore) {

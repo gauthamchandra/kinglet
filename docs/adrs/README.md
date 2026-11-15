@@ -26,6 +26,7 @@ is not edited, because the reasoning that was true at the time is the whole poin
 | [017](017-cloud-armor-waf-adaptive-headers.md) | Cloud Armor Preconfigured WAF and Adaptive Protection Request Headers (addendum to 012) | Proposed |
 | [018](018-native-grpc-server.md) | Native gRPC Server for Cloud Tasks | Accepted |
 | [019](019-real-postgres-data-plane.md) | Real Postgres Data Plane | Accepted |
+| [020](020-request-router-fallback-and-binary.md) | Request Router Fallback Routes and Binary Bodies | Accepted |
 
 ## A note on the project's former name
 
