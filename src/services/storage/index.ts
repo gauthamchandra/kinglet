@@ -16,6 +16,9 @@ import { BucketService } from './bucket-service.ts';
 import { IamHandlers } from './iam-handlers.ts';
 import { IamPolicyRepository } from './iam-repository.ts';
 import { IamService } from './iam-service.ts';
+import { NotificationHandlers } from './notification-handlers.ts';
+import { NotificationRepository } from './notification-repository.ts';
+import { NotificationService } from './notification-service.ts';
 import { ObjectHandlers } from './object-handlers.ts';
 import { ObjectRepository } from './object-repository.ts';
 import { ObjectService } from './object-service.ts';
@@ -31,6 +34,7 @@ export class CloudStorageService {
   private bucketHandlers: BucketHandlers | null = null;
   private objectHandlers: ObjectHandlers | null = null;
   private iamHandlers: IamHandlers | null = null;
+  private notificationHandlers: NotificationHandlers | null = null;
 
   constructor(storage: StorageManager, logger: Logger) {
     this.storage = storage;
@@ -49,21 +53,31 @@ export class CloudStorageService {
     const iamRepo = new IamPolicyRepository(this.storage);
     await iamRepo.initialize();
 
+    const notificationRepo = new NotificationRepository(this.storage);
+    await notificationRepo.initialize();
+
     const bucketWrites = new ResourceMutex();
 
     this.bucketService = new BucketService(this.bucketRepo, this.objectRepo, iamRepo, bucketWrites);
     this.objectService = new ObjectService(this.objectRepo, this.bucketRepo, this.blobStore);
     const iamService = new IamService(this.bucketRepo, iamRepo, bucketWrites);
+    const notificationService = new NotificationService(notificationRepo, this.bucketRepo);
 
     this.bucketHandlers = new BucketHandlers(this.bucketService, this.logger);
     this.objectHandlers = new ObjectHandlers(this.objectService, this.logger);
     this.iamHandlers = new IamHandlers(iamService, this.logger);
+    this.notificationHandlers = new NotificationHandlers(notificationService, this.logger);
 
     this.logger.info('Cloud Storage service initialized');
   }
 
   getRoutes(): RouteDefinition[] {
-    if (!this.bucketHandlers || !this.objectHandlers || !this.iamHandlers) {
+    if (
+      !this.bucketHandlers ||
+      !this.objectHandlers ||
+      !this.iamHandlers ||
+      !this.notificationHandlers
+    ) {
       throw new Error('CloudStorageService not initialized. Call initialize() first.');
     }
 
@@ -71,6 +85,7 @@ export class CloudStorageService {
       ...this.bucketHandlers.getRoutes(),
       ...this.objectHandlers.getRoutes(),
       ...this.iamHandlers.getRoutes(),
+      ...this.notificationHandlers.getRoutes(),
     ];
   }
 

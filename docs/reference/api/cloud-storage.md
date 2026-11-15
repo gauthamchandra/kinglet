@@ -15,6 +15,10 @@
 | `GET` | `/storage/v1/b/:bucket/iam` | `storage.buckets.getIamPolicy` |
 | `PUT` | `/storage/v1/b/:bucket/iam` | `storage.buckets.setIamPolicy` |
 | `GET` | `/storage/v1/b/:bucket/iam/testPermissions` | `storage.buckets.testIamPermissions` |
+| `GET` | `/storage/v1/b/:bucket/notificationConfigs` | `storage.notifications.list` |
+| `POST` | `/storage/v1/b/:bucket/notificationConfigs` | `storage.notifications.insert` |
+| `DELETE` | `/storage/v1/b/:bucket/notificationConfigs/:notification` | `storage.notifications.delete` |
+| `GET` | `/storage/v1/b/:bucket/notificationConfigs/:notification` | `storage.notifications.get` |
 | `GET` | `/storage/v1/b/:bucket/o` | `storage.objects.list` |
 | `DELETE` | `/storage/v1/b/:bucket/o/:object` | `storage.objects.delete` |
 | `GET` | `/storage/v1/b/:bucket/o/:object` | `storage.objects.get` |
