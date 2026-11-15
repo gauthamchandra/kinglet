@@ -2,7 +2,7 @@
  * Bucket IAM. Policies are stored and returned. They are not evaluated.
  */
 
-import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
+import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { BucketRepository } from './bucket-repository.ts';
 import { GcsError } from './bucket-service.ts';
 import type { IamPolicyRepository } from './iam-repository.ts';
@@ -12,11 +12,12 @@ import { bucketIamResourceId, SetIamPolicyRequestSchema } from './types.ts';
 export class IamService {
   private bucketRepo: BucketRepository;
   private iamRepo: IamPolicyRepository;
-  private writes = new ResourceMutex();
+  private writes: ResourceMutex;
 
-  constructor(bucketRepo: BucketRepository, iamRepo: IamPolicyRepository) {
+  constructor(bucketRepo: BucketRepository, iamRepo: IamPolicyRepository, writes: ResourceMutex) {
     this.bucketRepo = bucketRepo;
     this.iamRepo = iamRepo;
+    this.writes = writes;
   }
 
   async getIamPolicy(bucket: string): Promise<PolicyResponse> {
@@ -33,8 +34,6 @@ export class IamService {
   }
 
   async setIamPolicy(bucket: string, body: unknown): Promise<PolicyResponse> {
-    await this.ensureBucket(bucket);
-
     const parsed = SetIamPolicyRequestSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -43,9 +42,11 @@ export class IamService {
 
     const resourceId = bucketIamResourceId(bucket);
 
-    // The etag check and the write are one decision. Two sets must not both
-    // observe the same etag and then both store a new policy.
+    // Same lock as bucket delete. The bucket is checked again inside it so a
+    // delete that ran while this set was queued cannot be followed by a write.
     return this.writes.runExclusively(resourceId, async () => {
+      await this.ensureBucket(bucket);
+
       const stored = await this.iamRepo.getByResourceId(resourceId);
       const currentEtag = stored ? stored.etag : emptyPolicyEtag(resourceId);
 

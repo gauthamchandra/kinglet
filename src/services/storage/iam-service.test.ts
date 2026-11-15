@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { BucketRepository } from './bucket-repository.ts';
 import { BucketService, GcsError } from './bucket-service.ts';
 import { IamPolicyRepository } from './iam-repository.ts';
 import { IamService } from './iam-service.ts';
 import { ObjectRepository } from './object-repository.ts';
+import { bucketIamResourceId } from './types.ts';
 
 describe('IamService', () => {
   let service: IamService;
   let buckets: BucketService;
+  let writes: ResourceMutex;
 
   beforeEach(async () => {
     const storage = new StorageManager();
@@ -23,8 +26,9 @@ describe('IamService', () => {
     const iamRepo = new IamPolicyRepository(storage);
     await iamRepo.initialize();
 
-    buckets = new BucketService(bucketRepo, objectRepo, iamRepo);
-    service = new IamService(bucketRepo, iamRepo);
+    writes = new ResourceMutex();
+    buckets = new BucketService(bucketRepo, objectRepo, iamRepo, writes);
+    service = new IamService(bucketRepo, iamRepo, writes);
   });
 
   test('empty get returns version 1, resourceId, kind, and a stable non-empty etag', async () => {
@@ -267,6 +271,46 @@ describe('IamService', () => {
     const secondFailure = secondFailed[0] as PromiseRejectedResult;
 
     expect(secondFailure.reason).toHaveProperty('code', 'ABORTED');
+  });
+
+  test('a set queued behind a delete does not restore the deleted policy', async () => {
+    await buckets.createBucket('proj', { name: 'iam-queue' });
+    await service.setIamPolicy('iam-queue', {
+      bindings: [{ role: 'roles/storage.admin', members: ['user:a@example.com'] }],
+    });
+
+    let release = () => {};
+
+    const released = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const holder = writes.runExclusively(bucketIamResourceId('iam-queue'), () => released);
+
+    await Bun.sleep(5);
+
+    const deletePromise = buckets.deleteBucket('iam-queue');
+    const setPromise = service.setIamPolicy('iam-queue', {
+      bindings: [{ role: 'roles/storage.admin', members: ['user:a@example.com'] }],
+    });
+
+    release();
+
+    const [deleted, set] = await Promise.allSettled([deletePromise, setPromise, holder]);
+
+    expect(deleted.status).toBe('fulfilled');
+    expect(set.status).toBe('rejected');
+
+    const setRejection = set as PromiseRejectedResult;
+
+    expect(setRejection.reason).toBeInstanceOf(GcsError);
+    expect(setRejection.reason).toHaveProperty('code', 'NOT_FOUND');
+
+    await buckets.createBucket('proj', { name: 'iam-queue' });
+
+    const policy = await service.getIamPolicy('iam-queue');
+
+    expect(policy.version).toBe(1);
+    expect(policy.bindings).toEqual([]);
   });
 
   test('deleting a bucket drops its IAM policy', async () => {

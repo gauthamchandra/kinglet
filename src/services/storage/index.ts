@@ -8,6 +8,7 @@
 import type { RouteDefinition } from '@/core/gateway/request-router.ts';
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { Logger } from '@/shared/utils/logger.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { BlobStore } from './blob-store.ts';
 import { BucketHandlers } from './bucket-handlers.ts';
 import { BucketRepository } from './bucket-repository.ts';
@@ -48,9 +49,11 @@ export class CloudStorageService {
     const iamRepo = new IamPolicyRepository(this.storage);
     await iamRepo.initialize();
 
-    this.bucketService = new BucketService(this.bucketRepo, this.objectRepo, iamRepo);
+    const bucketWrites = new ResourceMutex();
+
+    this.bucketService = new BucketService(this.bucketRepo, this.objectRepo, iamRepo, bucketWrites);
     this.objectService = new ObjectService(this.objectRepo, this.bucketRepo, this.blobStore);
-    const iamService = new IamService(this.bucketRepo, iamRepo);
+    const iamService = new IamService(this.bucketRepo, iamRepo, bucketWrites);
 
     this.bucketHandlers = new BucketHandlers(this.bucketService, this.logger);
     this.objectHandlers = new ObjectHandlers(this.objectService, this.logger);

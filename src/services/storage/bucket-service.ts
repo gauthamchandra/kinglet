@@ -2,6 +2,7 @@
  * Bucket Service - business logic for Cloud Storage bucket operations
  */
 
+import type { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import type { BucketRepository } from './bucket-repository.ts';
 import type { IamPolicyRepository } from './iam-repository.ts';
 import type { ObjectRepository } from './object-repository.ts';
@@ -37,15 +38,18 @@ export class BucketService {
   private bucketRepo: BucketRepository;
   private objectRepo: ObjectRepository;
   private iamRepo: IamPolicyRepository;
+  private writes: ResourceMutex;
 
   constructor(
     bucketRepo: BucketRepository,
     objectRepo: ObjectRepository,
-    iamRepo: IamPolicyRepository
+    iamRepo: IamPolicyRepository,
+    writes: ResourceMutex
   ) {
     this.bucketRepo = bucketRepo;
     this.objectRepo = objectRepo;
     this.iamRepo = iamRepo;
+    this.writes = writes;
   }
 
   async createBucket(project: string, body: unknown): Promise<BucketResponse> {
@@ -183,22 +187,24 @@ export class BucketService {
   }
 
   async deleteBucket(name: string): Promise<void> {
-    const existing = await this.bucketRepo.getBucketByName(name);
+    await this.writes.runExclusively(bucketIamResourceId(name), async () => {
+      const existing = await this.bucketRepo.getBucketByName(name);
 
-    if (!existing) {
-      throw new GcsError('NOT_FOUND', `Bucket ${name} not found`);
-    }
+      if (!existing) {
+        throw new GcsError('NOT_FOUND', `Bucket ${name} not found`);
+      }
 
-    const objectCount = await this.objectRepo.countObjectsInBucket(name);
+      const objectCount = await this.objectRepo.countObjectsInBucket(name);
 
-    if (objectCount > 0) {
-      throw new GcsError(
-        'FAILED_PRECONDITION',
-        `Cannot delete bucket ${name}: bucket is not empty (contains ${objectCount} objects)`
-      );
-    }
+      if (objectCount > 0) {
+        throw new GcsError(
+          'FAILED_PRECONDITION',
+          `Cannot delete bucket ${name}: bucket is not empty (contains ${objectCount} objects)`
+        );
+      }
 
-    await this.bucketRepo.deleteBucket(name);
-    await this.iamRepo.deleteByResourceId(bucketIamResourceId(name));
+      await this.bucketRepo.deleteBucket(name);
+      await this.iamRepo.deleteByResourceId(bucketIamResourceId(name));
+    });
   }
 }

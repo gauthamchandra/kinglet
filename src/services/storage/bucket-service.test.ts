@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { StorageManager } from '@/core/storage/manager.ts';
+import { ResourceMutex } from '@/shared/utils/resource-mutex.ts';
 import { BucketRepository } from './bucket-repository.ts';
 import { BucketService, GcsError } from './bucket-service.ts';
 import { IamPolicyRepository } from './iam-repository.ts';
@@ -25,7 +26,7 @@ describe('BucketService', () => {
     const iamRepo = new IamPolicyRepository(storage);
     await iamRepo.initialize();
 
-    service = new BucketService(bucketRepo, objectRepo, iamRepo);
+    service = new BucketService(bucketRepo, objectRepo, iamRepo, new ResourceMutex());
   });
 
   // ── createBucket ──
