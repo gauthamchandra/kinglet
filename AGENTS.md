@@ -89,22 +89,6 @@ Use TypeScript path aliases for clean imports:
 - `@/shared/*` - shared utilities
 - `@/config` - configuration module
 
-## Skills
-
-Shared skills live at `.agents/skills/<name>/SKILL.md`. Codex, Cursor, Copilot, Gemini CLI,
-and OpenCode scan that path. Claude Code reads `.claude/skills/`, and the Cursor CLI reads
-`.cursor/skills/`. Those entries are symlinks to the shared directory.
-
-pstack 0.15.36 (MIT, Lauren Tan) is vendored at `.agents/` so its relative links keep
-working. `.agents/VENDOR.json` records the snapshot. kinglet's `compatibility-audit` skill
-stays in `.claude/skills/` and is linked into `.agents/skills/` for the other harnesses.
-This tree is the copy Cursor loads. Project settings leave the marketplace plugin off so
-Cursor does not also load the published copy.
-
-When the harness is not Cursor, read `.agents/docs/harness/claude-code.md` once per session
-and map tool names from it. Skip a step that needs Cursor Automations, Bugbot, or a Cursor
-cloud agent. `poteto-agent` and `comment-sicko` briefs are `.agents/agents/`.
-
 ## Planning
 
 For non-trivial work, do not start implementation until the caller has seen a short plan

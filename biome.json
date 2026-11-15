@@ -15,10 +15,7 @@
       "!**/*.config.js",
       "!**/commitlint.config.js",
       "!**/.compatibility-reports",
-      "!**/.discovery-cache",
-      "!**/.agents",
-      "!**/.claude/skills",
-      "!**/.cursor/skills"
+      "!**/.discovery-cache"
     ]
   },
   "formatter": {
