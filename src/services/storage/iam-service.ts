@@ -130,13 +130,8 @@ function emptyPolicyEtag(resourceId: string): string {
 
 function freshEtag(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
-  let binary = '';
 
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-
-  return btoa(binary);
+  return Buffer.from(bytes).toString('base64');
 }
 
 function rotateEtag(previous: string): string {
