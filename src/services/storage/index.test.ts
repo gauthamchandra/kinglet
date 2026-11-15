@@ -48,7 +48,7 @@ describe('CloudStorageService', () => {
     expect(() => service.getRoutes()).toThrow('not initialized');
   });
 
-  test('getRoutes returns combined bucket+object routes with unique IDs', async () => {
+  test('getRoutes returns bucket, object, and hmac routes with unique IDs', async () => {
     await service.initialize();
     const routes = service.getRoutes();
 
@@ -62,6 +62,11 @@ describe('CloudStorageService', () => {
     expect(ids).toContain('storage.notifications.get');
     expect(ids).toContain('storage.notifications.list');
     expect(ids).toContain('storage.notifications.delete');
+    expect(ids).toContain('storage.projects.hmacKeys.create');
+    expect(ids).toContain('storage.projects.hmacKeys.get');
+    expect(ids).toContain('storage.projects.hmacKeys.list');
+    expect(ids).toContain('storage.projects.hmacKeys.update');
+    expect(ids).toContain('storage.projects.hmacKeys.delete');
 
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(ids.length);

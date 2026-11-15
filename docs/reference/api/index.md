@@ -12,7 +12,7 @@ HTTP routes registered by kinglet, grouped by emulated GCP service.
 | [Memorystore for Valkey](memorystore.md) | 38 |
 | [Secret Manager](secret-manager.md) | 6 |
 | [Cloud Pub/Sub](pubsub.md) | 36 |
-| [Cloud Storage](cloud-storage.md) | 23 |
+| [Cloud Storage](cloud-storage.md) | 28 |
 | [Cloud Workflows](workflows.md) | 15 |
 | [Cloud KMS](cloud-kms.md) | 24 |
 | [Cloud SQL](cloud-sql.md) | 22 |

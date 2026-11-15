@@ -616,3 +616,107 @@ export function requestToObjectRecord(
     cacheControl: data.cacheControl ?? null,
   };
 }
+
+// ── HMAC keys ──
+
+export const HMAC_KEYS_TABLE = 'storage_hmac_keys';
+
+/**
+ * Non-deleted HMAC keys allowed for one service account in a project.
+ *
+ * gsutil's integration suite uses 10 (`MAX_SA_HMAC_KEYS` in
+ * `gslib/tests/test_hmac.py`). Deleted keys do not count.
+ */
+export const MAX_HMAC_KEYS_PER_SERVICE_ACCOUNT = 10;
+
+/** Discovery default and cap for `hmacKeys.list` `maxResults`. */
+const HMAC_LIST_MAX_RESULTS = 250;
+
+export const HmacKeyState = {
+  ACTIVE: 'ACTIVE',
+  INACTIVE: 'INACTIVE',
+  DELETED: 'DELETED',
+} as const;
+
+export interface HmacKeyMetadata {
+  kind: 'storage#hmacKeyMetadata';
+  id: string;
+  selfLink: string;
+  accessId: string;
+  projectId: string;
+  serviceAccountEmail: string;
+  state: string;
+  timeCreated: string;
+  updated: string;
+  etag: string;
+}
+
+export interface HmacKey {
+  kind: 'storage#hmacKey';
+  metadata: HmacKeyMetadata;
+  secret: string;
+}
+
+export interface HmacKeyList {
+  kind: 'storage#hmacKeysMetadata';
+  items: HmacKeyMetadata[];
+  nextPageToken?: string;
+}
+
+export interface HmacKeyRecord extends BaseRecord {
+  projectId: string;
+  accessId: string;
+  secret: string;
+  serviceAccountEmail: string;
+  state: string;
+  etag: string;
+  timeCreated: string;
+  updated: string;
+}
+
+export const hmacKeysTableSchema: TableSchema = {
+  name: HMAC_KEYS_TABLE,
+  columns: [
+    { name: 'projectId', type: 'string' },
+    { name: 'accessId', type: 'string', unique: true },
+    { name: 'secret', type: 'string' },
+    { name: 'serviceAccountEmail', type: 'string' },
+    { name: 'state', type: 'string' },
+    { name: 'etag', type: 'string' },
+    { name: 'timeCreated', type: 'string' },
+    { name: 'updated', type: 'string' },
+  ],
+  indexes: [
+    { name: 'idx_storage_hmac_keys_access', columns: ['accessId'], unique: true },
+    { name: 'idx_storage_hmac_keys_project', columns: ['projectId', 'serviceAccountEmail'] },
+  ],
+  timestamps: true,
+};
+
+/**
+ * `maxResults` is the caller's value or 250, whichever is smaller.
+ * A missing or non-positive value uses the discovery default of 250.
+ * `0` is not an empty page.
+ */
+export function resolveHmacPageSize(raw: number | undefined): number {
+  if (raw == null || !Number.isFinite(raw) || raw <= 0) {
+    return HMAC_LIST_MAX_RESULTS;
+  }
+
+  return Math.min(Math.floor(raw), HMAC_LIST_MAX_RESULTS);
+}
+
+export function hmacKeyRecordToMetadata(record: HmacKeyRecord): HmacKeyMetadata {
+  return {
+    kind: 'storage#hmacKeyMetadata',
+    id: `${record.projectId}/${record.accessId}`,
+    selfLink: `https://www.googleapis.com/storage/v1/projects/${record.projectId}/hmacKeys/${record.accessId}`,
+    accessId: record.accessId,
+    projectId: record.projectId,
+    serviceAccountEmail: record.serviceAccountEmail,
+    state: record.state,
+    timeCreated: record.timeCreated,
+    updated: record.updated,
+    etag: record.etag,
+  };
+}
