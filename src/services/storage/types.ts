@@ -10,6 +10,7 @@ import type { BaseRecord, TableSchema } from '@/core/storage/types.ts';
 export const BUCKETS_TABLE = 'storage_buckets';
 export const OBJECTS_TABLE = 'storage_objects';
 export const IAM_POLICIES_TABLE = 'storage_iam_policies';
+export const NOTIFICATIONS_TABLE = 'storage_notifications';
 
 export const StorageClass = {
   STANDARD: 'STANDARD',
@@ -95,6 +96,46 @@ export interface RewriteResponse {
   resource: ObjectResponse;
 }
 
+export type NotificationPayloadFormat = 'JSON_API_V1' | 'NONE';
+
+export const NOTIFICATION_EVENT_TYPES = [
+  'OBJECT_FINALIZE',
+  'OBJECT_METADATA_UPDATE',
+  'OBJECT_DELETE',
+  'OBJECT_ARCHIVE',
+] as const;
+
+export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
+
+export const BUILTIN_NOTIFICATION_ATTRIBUTES = [
+  'eventType',
+  'bucketId',
+  'objectId',
+  'objectGeneration',
+  'eventTime',
+  'payloadFormat',
+  'notificationConfig',
+  'overwroteGeneration',
+  'overwrittenByGeneration',
+] as const;
+
+export interface NotificationResponse {
+  kind: 'storage#notification';
+  id: string;
+  selfLink: string;
+  topic: string;
+  etag: string;
+  payload_format: NotificationPayloadFormat;
+  event_types?: NotificationEventType[];
+  object_name_prefix?: string;
+  custom_attributes?: Record<string, string>;
+}
+
+export interface NotificationListResponse {
+  kind: 'storage#notifications';
+  items: NotificationResponse[];
+}
+
 export interface PolicyBinding {
   role: string;
   members: string[];
@@ -140,6 +181,17 @@ export interface IamPolicyRecord extends BaseRecord {
   version: number;
   etag: string;
   bindings: string; // JSON
+}
+
+export interface NotificationRecord extends BaseRecord {
+  bucket: string;
+  topic: string;
+  payloadFormat: NotificationPayloadFormat;
+  eventTypes: string | null;
+  objectNamePrefix: string | null;
+  customAttributes: string | null;
+  etag: string;
+  ordinal: number;
 }
 
 export interface ObjectRecord extends BaseRecord {
@@ -196,6 +248,22 @@ export const iamPoliciesTableSchema: TableSchema = {
     { name: 'bindings', type: 'json' },
   ],
   indexes: [{ name: 'idx_storage_iam_policies_resource', columns: ['resourceId'], unique: true }],
+  timestamps: true,
+};
+
+export const notificationsTableSchema: TableSchema = {
+  name: NOTIFICATIONS_TABLE,
+  columns: [
+    { name: 'bucket', type: 'string' },
+    { name: 'topic', type: 'string' },
+    { name: 'payloadFormat', type: 'string' },
+    { name: 'eventTypes', type: 'json', nullable: true },
+    { name: 'objectNamePrefix', type: 'string', nullable: true },
+    { name: 'customAttributes', type: 'json', nullable: true },
+    { name: 'etag', type: 'string' },
+    { name: 'ordinal', type: 'number' },
+  ],
+  indexes: [{ name: 'idx_storage_notifications_bucket', columns: ['bucket'] }],
   timestamps: true,
 };
 
@@ -303,6 +371,14 @@ export const SetIamPolicyRequestSchema = z.object({
   bindings: z.array(PolicyBindingSchema).optional(),
   etag: z.string().optional(),
   version: z.number().int().optional(),
+});
+
+export const InsertNotificationRequestSchema = z.object({
+  topic: z.string().min(1),
+  payload_format: z.enum(['JSON_API_V1', 'NONE']),
+  event_types: z.array(z.enum(NOTIFICATION_EVENT_TYPES)).optional(),
+  object_name_prefix: z.string().optional(),
+  custom_attributes: z.record(z.string(), z.string()).optional(),
 });
 
 export const ComposeRequestSchema = z.object({
@@ -421,6 +497,39 @@ export function objectRecordToResponse(record: ObjectRecord): ObjectResponse {
 
   if (record.cacheControl) {
     response.cacheControl = record.cacheControl;
+  }
+
+  return response;
+}
+
+export function notificationRecordToResponse(record: NotificationRecord): NotificationResponse {
+  const response: NotificationResponse = {
+    kind: 'storage#notification',
+    id: record.id,
+    selfLink: `https://www.googleapis.com/storage/v1/b/${record.bucket}/notificationConfigs/${record.id}`,
+    topic: record.topic,
+    etag: record.etag,
+    payload_format: record.payloadFormat,
+  };
+
+  if (record.eventTypes) {
+    const eventTypes = JSON.parse(record.eventTypes) as NotificationEventType[];
+
+    if (eventTypes.length > 0) {
+      response.event_types = eventTypes;
+    }
+  }
+
+  if (record.objectNamePrefix) {
+    response.object_name_prefix = record.objectNamePrefix;
+  }
+
+  if (record.customAttributes) {
+    const customAttributes = JSON.parse(record.customAttributes) as Record<string, string>;
+
+    if (Object.keys(customAttributes).length > 0) {
+      response.custom_attributes = customAttributes;
+    }
   }
 
   return response;

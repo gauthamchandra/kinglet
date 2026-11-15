@@ -42,6 +42,10 @@ describe('CloudStorageService', () => {
     expect(ids).toContain('storage.buckets.getIamPolicy');
     expect(ids).toContain('storage.buckets.setIamPolicy');
     expect(ids).toContain('storage.buckets.testIamPermissions');
+    expect(ids).toContain('storage.notifications.insert');
+    expect(ids).toContain('storage.notifications.get');
+    expect(ids).toContain('storage.notifications.list');
+    expect(ids).toContain('storage.notifications.delete');
 
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(ids.length);
