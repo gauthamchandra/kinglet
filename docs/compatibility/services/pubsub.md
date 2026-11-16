@@ -5,7 +5,7 @@
 **Status:** Implemented
 **API version:** v1
 **Data plane:** Emulated in-process
-**Endpoint coverage:** 34/34 (100%)
+**Endpoint coverage:** 34/34 (100%) + 1 gRPC-only
 
 Topics, subscriptions, publish/pull, ack, snapshots, schemas, and seek.
 
@@ -64,6 +64,10 @@ _None._
 - `GET` `v1/{+resource}:getIamPolicy` — `projects.topics.getIamPolicy`
 - `POST` `v1/{+resource}:setIamPolicy` — `projects.topics.setIamPolicy`
 - `POST` `v1/{+resource}:testIamPermissions` — `projects.topics.testIamPermissions`
+
+## gRPC-only methods
+
+- `Subscriber.StreamingPull`
 
 ## API reference
 

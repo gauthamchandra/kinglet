@@ -105,6 +105,10 @@ Key rings, crypto keys/versions, symmetric encrypt/decrypt, asymmetric sign/decr
 - `POST` `v1/{+resource}:setIamPolicy` — `projects.locations.keyRings.importJobs.setIamPolicy`
 - `POST` `v1/{+resource}:testIamPermissions` — `projects.locations.keyRings.importJobs.testIamPermissions`
 
+## gRPC-only methods
+
+_None._
+
 ## API reference
 
 See [Cloud KMS routes](../../reference/api/cloud-kms.md) for the kinglet route table.

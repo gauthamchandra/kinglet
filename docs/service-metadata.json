@@ -22,8 +22,8 @@
     },
     "cloud-storage": {
       "status": "experimental",
-      "dataPlane": "File-backed objects",
-      "summary": "Bucket CRUD, object upload/download, copy, compose, and rewrite."
+      "dataPlane": "File-backed objects under BLOB_PATH",
+      "summary": "Bucket CRUD, notification configs, bucket and object IAM, and HMAC keys. Uploads and downloads keep media bytes intact and return md5 and crc32c. Bucket projectNumber is a decimal string. Bucket get, patch, update, and delete honor ifMetagenerationMatch and ifMetagenerationNotMatch. HMAC create ignores the request body and userProject, and returns an ACTIVE key."
     },
     "cloud-tasks": {
       "status": "implemented",

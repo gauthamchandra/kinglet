@@ -35,6 +35,10 @@ Job CRUD, pause/resume, and cron execution.
 
 _None._
 
+## gRPC-only methods
+
+_None._
+
 ## API reference
 
 See [Cloud Scheduler routes](../../reference/api/cloud-scheduler.md) for the kinglet route table.

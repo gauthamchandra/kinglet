@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { extractRoutesForService } from './extract-service-routes.ts';
+import { extractRoutesForService, extractServiceSurface } from './extract-service-routes.ts';
 import { pruneGeneratedMarkdown } from './prune-generated-docs.ts';
 
 describe('extractRoutesForService', () => {
@@ -22,6 +22,30 @@ describe('extractRoutesForService', () => {
     expect(ids).toContain('projects.locations.secrets.get');
     expect(ids).toContain('locations.list');
     expect(routes.some(route => route.path === '/v1/projects/:project/locations')).toBe(true);
+  });
+
+  test('cloud storage registers no gRPC methods', async () => {
+    const surface = await extractServiceSurface('cloud-storage');
+
+    expect(surface.grpc).toEqual([]);
+    expect(surface.routes.some(route => route.id === 'storage.buckets.get')).toBe(true);
+  });
+
+  test('registered gRPC methods omit UNIMPLEMENTED stubs and keep StreamingPull', async () => {
+    const tasks = await extractServiceSurface('cloud-tasks');
+    const pubsub = await extractServiceSurface('pubsub');
+    const secrets = await extractServiceSurface('secret-manager');
+
+    expect(tasks.grpc.map(method => method.rpc)).toContain('ListQueues');
+    expect(tasks.grpc.map(method => method.rpc)).not.toContain('GetIamPolicy');
+    expect(tasks.grpc.every(method => method.routes.length > 0)).toBe(true);
+
+    expect(
+      pubsub.grpc.filter(method => method.routes.length === 0).map(method => method.rpc)
+    ).toEqual(['StreamingPull']);
+    expect(pubsub.grpc.map(method => method.rpc)).toContain('Publish');
+
+    expect(secrets.grpc.map(method => method.rpc).sort()).toEqual(['CreateSecret', 'GetSecret']);
   });
 
   test('throws when a registry service has no route extractor', async () => {

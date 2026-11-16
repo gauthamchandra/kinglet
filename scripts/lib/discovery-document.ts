@@ -2,7 +2,7 @@
  * Parse Google REST discovery documents and extract API methods.
  */
 
-import { isIamMethod } from './path-matching.ts';
+import { findMatchingRoute, isIamMethod } from './path-matching.ts';
 
 export interface DiscoveryMethod {
   readonly id: string;
@@ -82,6 +82,61 @@ export function partitionDiscoveryMethods(methods: readonly DiscoveryMethod[]): 
   }
 
   return { comparable, iamDeferred };
+}
+
+export interface ClassifiedDiscoveryMethods {
+  readonly implemented: DiscoveryMethod[];
+  readonly missing: DiscoveryMethod[];
+  readonly iamImplemented: DiscoveryMethod[];
+  readonly iamDeferred: DiscoveryMethod[];
+}
+
+/**
+ * IAM methods with a matching route are implemented. They stay out of the
+ * coverage percentage, which only counts `implemented` and `missing`.
+ */
+export function classifyDiscoveryMethods(
+  methods: readonly DiscoveryMethod[],
+  routes: readonly { method: string; path: string }[]
+): ClassifiedDiscoveryMethods {
+  const implemented: DiscoveryMethod[] = [];
+  const missing: DiscoveryMethod[] = [];
+  const iamImplemented: DiscoveryMethod[] = [];
+  const iamDeferred: DiscoveryMethod[] = [];
+
+  for (const method of methods) {
+    const match = findMatchingRoute(method.httpMethod, method.path, method.parameters, routes);
+
+    if (isIamMethod(method.id)) {
+      if (match) {
+        iamImplemented.push(method);
+      } else {
+        iamDeferred.push(method);
+      }
+
+      continue;
+    }
+
+    if (match) {
+      implemented.push(method);
+    } else {
+      missing.push(method);
+    }
+  }
+
+  return { implemented, missing, iamImplemented, iamDeferred };
+}
+
+/** Keep methods whose ids sit under a registry resource prefix. No prefixes means all methods. */
+export function selectRegistryMethods<T extends { id: string }>(
+  methods: readonly T[],
+  resources: readonly string[] | undefined
+): T[] {
+  if (!resources) {
+    return [...methods];
+  }
+
+  return methods.filter(method => resources.some(resource => method.id.startsWith(`${resource}.`)));
 }
 
 /**

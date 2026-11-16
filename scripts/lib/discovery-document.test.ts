@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { parseDiscoveryDocument, partitionDiscoveryMethods } from './discovery-document.ts';
+import { join } from 'node:path';
+import {
+  classifyDiscoveryMethods,
+  parseDiscoveryDocument,
+  partitionDiscoveryMethods,
+  selectRegistryMethods,
+} from './discovery-document.ts';
 
 describe('parseDiscoveryDocument', () => {
   test('walks nested resources and extracts methods', () => {
@@ -137,5 +143,73 @@ describe('partitionDiscoveryMethods', () => {
     expect(comparable).toHaveLength(1);
     expect(iamDeferred).toHaveLength(1);
     expect(iamDeferred[0]?.id).toBe('projects.locations.jobs.getIamPolicy');
+  });
+});
+
+describe('classifyDiscoveryMethods', () => {
+  const routes = [
+    { method: 'GET', path: '/storage/v1/b/:bucket/iam' },
+    { method: 'POST', path: '/storage/v1/projects/:projectId/hmacKeys' },
+  ];
+
+  test('lists a matching IAM route separately from IAM methods that have no route', () => {
+    const classified = classifyDiscoveryMethods(
+      [
+        {
+          id: 'buckets.getIamPolicy',
+          httpMethod: 'GET',
+          path: 'b/{bucket}/iam',
+          parameters: {},
+        },
+        {
+          id: 'objects.getIamPolicy',
+          httpMethod: 'GET',
+          path: 'b/{bucket}/o/{object}/iam',
+          parameters: {},
+        },
+        {
+          id: 'projects.hmacKeys.create',
+          httpMethod: 'POST',
+          path: 'projects/{projectId}/hmacKeys',
+          parameters: {},
+        },
+        {
+          id: 'projects.hmacKeys.delete',
+          httpMethod: 'DELETE',
+          path: 'projects/{projectId}/hmacKeys/{accessId}',
+          parameters: {},
+        },
+      ],
+      routes
+    );
+
+    expect(classified.iamImplemented.map(method => method.id)).toEqual(['buckets.getIamPolicy']);
+    expect(classified.iamDeferred.map(method => method.id)).toEqual(['objects.getIamPolicy']);
+    expect(classified.implemented.map(method => method.id)).toEqual(['projects.hmacKeys.create']);
+    expect(classified.missing.map(method => method.id)).toEqual(['projects.hmacKeys.delete']);
+  });
+});
+
+describe('selectRegistryMethods', () => {
+  test('networksecurity prefixes match project discovery ids and skip organization ids', async () => {
+    const registry = JSON.parse(
+      await Bun.file(join(import.meta.dir, '../../discovery-document-registry.json')).text()
+    ) as {
+      services: { name: string; resources?: string[] }[];
+    };
+    const resources = registry.services.find(
+      service => service.name === 'networksecurity'
+    )?.resources;
+
+    expect(
+      selectRegistryMethods(
+        [
+          { id: 'projects.locations.addressGroups.list' },
+          { id: 'projects.locations.operations.get' },
+          { id: 'organizations.locations.addressGroups.list' },
+        ],
+        resources
+      ).map(method => method.id)
+    ).toEqual(['projects.locations.addressGroups.list', 'projects.locations.operations.get']);
   });
 });
