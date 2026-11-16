@@ -11,17 +11,18 @@ Config flag exists; service is a stub with no routes yet.
 
 ## Implemented endpoints
 
-_None._
+- `GET` `v1/{+name}` — `projects.locations.get`
+- `GET` `v1/{+name}/locations` — `projects.locations.list`
+- `POST` `v1/{+parent}/secrets` — `projects.locations.secrets.create`
+- `GET` `v1/{+name}` — `projects.locations.secrets.get`
+- `POST` `v1/{+parent}/secrets` — `projects.secrets.create`
+- `GET` `v1/{+name}` — `projects.secrets.get`
 
 ## Missing endpoints
 
-- `GET` `v1/{+name}` — `projects.locations.get`
-- `GET` `v1/{+name}/locations` — `projects.locations.list`
 - `POST` `v1/{+parent}:addVersion` — `projects.locations.secrets.addVersion`
-- `POST` `v1/{+parent}/secrets` — `projects.locations.secrets.create`
 - `DELETE` `v1/{+name}` — `projects.locations.secrets.delete`
 - `POST` `v1/{+parent}:enableManagedRotation` — `projects.locations.secrets.enableManagedRotation`
-- `GET` `v1/{+name}` — `projects.locations.secrets.get`
 - `GET` `v1/{+parent}/secrets` — `projects.locations.secrets.list`
 - `PATCH` `v1/{+name}` — `projects.locations.secrets.patch`
 - `POST` `v1/{+parent}:rotateSecret` — `projects.locations.secrets.rotateSecret`
@@ -32,10 +33,8 @@ _None._
 - `GET` `v1/{+name}` — `projects.locations.secrets.versions.get`
 - `GET` `v1/{+parent}/versions` — `projects.locations.secrets.versions.list`
 - `POST` `v1/{+parent}:addVersion` — `projects.secrets.addVersion`
-- `POST` `v1/{+parent}/secrets` — `projects.secrets.create`
 - `DELETE` `v1/{+name}` — `projects.secrets.delete`
 - `POST` `v1/{+parent}:enableManagedRotation` — `projects.secrets.enableManagedRotation`
-- `GET` `v1/{+name}` — `projects.secrets.get`
 - `GET` `v1/{+parent}/secrets` — `projects.secrets.list`
 - `PATCH` `v1/{+name}` — `projects.secrets.patch`
 - `POST` `v1/{+parent}:rotateSecret` — `projects.secrets.rotateSecret`
