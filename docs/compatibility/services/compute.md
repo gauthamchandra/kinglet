@@ -5,7 +5,7 @@
 **Status:** Experimental
 **API version:** v1
 **Data plane:** Emulated in-process
-**Endpoint coverage:** 13/886 (1%)
+**Endpoint coverage:** 13/893 (1%)
 
 Cloud Armor security policies and global operations with an in-process CEL evaluation listener.
 
@@ -151,6 +151,8 @@ Cloud Armor security policies and global operations with an in-process CEL evalu
 - `PATCH` `projects/{project}/global/forwardingRules/{forwardingRule}` — `globalForwardingRules.patch`
 - `POST` `projects/{project}/global/forwardingRules/{resource}/setLabels` — `globalForwardingRules.setLabels`
 - `POST` `projects/{project}/global/forwardingRules/{forwardingRule}/setTarget` — `globalForwardingRules.setTarget`
+- `GET` `projects/{project}/global/globalFrontendSettings` — `globalFrontendSettings.get`
+- `PATCH` `projects/{project}/global/globalFrontendSettings` — `globalFrontendSettings.patch`
 - `POST` `projects/{project}/global/networkEndpointGroups/{networkEndpointGroup}/attachNetworkEndpoints` — `globalNetworkEndpointGroups.attachNetworkEndpoints`
 - `DELETE` `projects/{project}/global/networkEndpointGroups/{networkEndpointGroup}` — `globalNetworkEndpointGroups.delete`
 - `POST` `projects/{project}/global/networkEndpointGroups/{networkEndpointGroup}/detachNetworkEndpoints` — `globalNetworkEndpointGroups.detachNetworkEndpoints`
@@ -198,6 +200,8 @@ Cloud Armor security policies and global operations with an in-process CEL evalu
 - `PATCH` `projects/{project}/global/httpsHealthChecks/{httpsHealthCheck}` — `httpsHealthChecks.patch`
 - `PUT` `projects/{project}/global/httpsHealthChecks/{httpsHealthCheck}` — `httpsHealthChecks.update`
 - `GET` `projects/{project}/zones/{zone}/imageFamilyViews/{family}` — `imageFamilyViews.get`
+- `GET` `projects/{project}/regions/{region}/imageViews/{resourceId}` — `imageViews.get`
+- `GET` `projects/{project}/regions/{region}/imageViews` — `imageViews.list`
 - `DELETE` `projects/{project}/global/images/{image}` — `images.delete`
 - `POST` `projects/{project}/global/images/{image}/deprecate` — `images.deprecate`
 - `GET` `projects/{project}/global/images/{image}` — `images.get`
@@ -355,6 +359,8 @@ Cloud Armor security policies and global operations with an in-process CEL evalu
 - `GET` `projects/{project}/aggregated/machineTypes` — `machineTypes.aggregatedList`
 - `GET` `projects/{project}/zones/{zone}/machineTypes/{machineType}` — `machineTypes.get`
 - `GET` `projects/{project}/zones/{zone}/machineTypes` — `machineTypes.list`
+- `GET` `projects/{project}/global/managedRulesets/{managedRuleset}` — `managedRulesets.get`
+- `GET` `projects/{project}/global/managedRulesets` — `managedRulesets.list`
 - `GET` `projects/{project}/aggregated/networkAttachments` — `networkAttachments.aggregatedList`
 - `DELETE` `projects/{project}/regions/{region}/networkAttachments/{networkAttachment}` — `networkAttachments.delete`
 - `GET` `projects/{project}/regions/{region}/networkAttachments/{networkAttachment}` — `networkAttachments.get`
@@ -621,6 +627,7 @@ Cloud Armor security policies and global operations with an in-process CEL evalu
 - `POST` `projects/{project}/regions/{region}/firewallPolicies` — `regionNetworkFirewallPolicies.insert`
 - `GET` `projects/{project}/regions/{region}/firewallPolicies` — `regionNetworkFirewallPolicies.list`
 - `PATCH` `projects/{project}/regions/{region}/firewallPolicies/{firewallPolicy}` — `regionNetworkFirewallPolicies.patch`
+- `POST` `projects/{project}/regions/{region}/firewallPolicies/{firewallPolicy}/patchAssociation` — `regionNetworkFirewallPolicies.patchAssociation`
 - `POST` `projects/{project}/regions/{region}/firewallPolicies/{firewallPolicy}/patchRule` — `regionNetworkFirewallPolicies.patchRule`
 - `POST` `projects/{project}/regions/{region}/firewallPolicies/{firewallPolicy}/removeAssociation` — `regionNetworkFirewallPolicies.removeAssociation`
 - `POST` `projects/{project}/regions/{region}/firewallPolicies/{firewallPolicy}/removeRule` — `regionNetworkFirewallPolicies.removeRule`
