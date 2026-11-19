@@ -5,7 +5,7 @@
 import type { StorageManager } from '@/core/storage/manager.ts';
 import type { BaseRecord, QueryCondition } from '@/core/storage/types.ts';
 import { DEFAULT_LIST_PAGE_SIZE, parseOffsetToken } from '@/shared/utils/pagination.ts';
-import { TasksError } from './queue-service.ts';
+import { TasksError } from './errors.ts';
 import type { QueueRecord } from './types.ts';
 import { QueueState, TASKS_QUEUES_TABLE, tasksQueuesTableSchema } from './types.ts';
 
