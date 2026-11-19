@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.1.0](https://github.com/gauthamchandra/kinglet/compare/v4.0.0...v4.1.0) (2026-11-19)
+
+
+### Features
+
+* **gateway:** match fallback routes after ordinary ones ([#132](https://github.com/gauthamchandra/kinglet/issues/132)) ([71a0fc0](https://github.com/gauthamchandra/kinglet/commit/71a0fc03abd9e012a64e3797f0725fab6167c6a9))
+* **secrets:** add, get, and access secret versions ([#113](https://github.com/gauthamchandra/kinglet/issues/113)) ([878f36a](https://github.com/gauthamchandra/kinglet/commit/878f36ae617ec096016372f4027c4ed26c309bba))
+* **storage:** add notificationConfigs CRUD ([#135](https://github.com/gauthamchandra/kinglet/issues/135)) ([d014b2a](https://github.com/gauthamchandra/kinglet/commit/d014b2a4217be85eab4abc1746a9e0f819dff676))
+* **storage:** bucket metageneration preconditions and distinct error codes ([#140](https://github.com/gauthamchandra/kinglet/issues/140)) ([d726788](https://github.com/gauthamchandra/kinglet/commit/d726788b8c8172b3f5b79d57cbe346dc042d052a))
+* **storage:** emulate Cloud Storage HMAC keys ([#138](https://github.com/gauthamchandra/kinglet/issues/138)) ([45696e3](https://github.com/gauthamchandra/kinglet/commit/45696e39603516eb34568bf5dab0cd4dba77c285))
+* **storage:** give bucket preconditions their own HTTP statuses ([d726788](https://github.com/gauthamchandra/kinglet/commit/d726788b8c8172b3f5b79d57cbe346dc042d052a))
+* **storage:** keep Cloud Storage bytes under BLOB_PATH ([#136](https://github.com/gauthamchandra/kinglet/issues/136)) ([de3a29d](https://github.com/gauthamchandra/kinglet/commit/de3a29d6467a8989d8eb78ca3dead48eadc6399f))
+* **storage:** store bucket IAM policies ([#134](https://github.com/gauthamchandra/kinglet/issues/134)) ([f92f619](https://github.com/gauthamchandra/kinglet/commit/f92f6197deaaf35573bd371118c0a418bec28207))
+* **storage:** store object IAM policies ([#145](https://github.com/gauthamchandra/kinglet/issues/145)) ([5eeed06](https://github.com/gauthamchandra/kinglet/commit/5eeed0620bbb6dd32dcfd9b50e19180312924fc6))
+
+
+### Bug Fixes
+
+* **gateway:** keep storage media bodies as bytes ([#144](https://github.com/gauthamchandra/kinglet/issues/144)) ([73a525c](https://github.com/gauthamchandra/kinglet/commit/73a525cbc64d1fade3f8aa480651213e3a8f7a1d))
+* **storage:** store GCS project numbers as decimals ([#137](https://github.com/gauthamchandra/kinglet/issues/137)) ([2d97be8](https://github.com/gauthamchandra/kinglet/commit/2d97be8d3f369103cd8bce858ac39ee178727c0d))
+
 ## [4.0.0](https://github.com/gauthamchandra/kinglet/compare/v3.3.0...v4.0.0) (2026-11-13)
 
 
