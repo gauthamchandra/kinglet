@@ -31,6 +31,10 @@ _None._
 
 _None._
 
+## gRPC-only methods
+
+_None._
+
 ## API reference
 
 See [Cloud Workflows routes](../../reference/api/workflows.md) for the kinglet route table.

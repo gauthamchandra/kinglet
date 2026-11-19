@@ -53,3 +53,7 @@ The Google REST discovery document for this service is not publicly fetchable (M
 - `GET` `/v1/projects/:project/locations/:location/operations/:operation` — `memorystore.operations.get`
 - `POST` `/v1/projects/:project/locations/:location/operations/:operation:cancel` — `memorystore.operations.cancel`
 - `GET` `/v1/projects/:project/locations/:location/sharedRegionalCertificateAuthority` — `memorystore.locations.getSharedRegionalCertificateAuthority`
+
+## gRPC-only methods
+
+_None._

@@ -21,11 +21,17 @@ import { CloudStorageService } from '@/services/storage/index.ts';
 import { CloudTasksService } from '@/services/tasks/index.ts';
 import { CloudWorkflowsService } from '@/services/workflows/index.ts';
 import { Logger } from '@/shared/utils/logger.ts';
+import { type RegisteredGrpcMethod, registeredGrpcMethods } from './grpc-methods.ts';
 
 export interface ExtractedRoute {
   readonly id: string;
   readonly method: string;
   readonly path: string;
+}
+
+export interface ServiceSurface {
+  readonly routes: ExtractedRoute[];
+  readonly grpc: RegisteredGrpcMethod[];
 }
 
 interface EmulatedService {
@@ -80,8 +86,12 @@ function getSharedV1LocationRoutes(logger: Logger): ExtractedRoute[] {
 }
 
 export async function extractRoutesForService(serviceName: string): Promise<ExtractedRoute[]> {
+  return (await extractServiceSurface(serviceName)).routes;
+}
+
+export async function extractServiceSurface(serviceName: string): Promise<ServiceSurface> {
   if (PLANNED_WITHOUT_ROUTES.has(serviceName)) {
-    return [];
+    return { routes: [], grpc: [] };
   }
 
   const storage = new StorageManager();
@@ -98,7 +108,10 @@ export async function extractRoutesForService(serviceName: string): Promise<Extr
       });
       await service.initialize();
 
-      return dedupeRoutes(service.getRoutes().map(toExtractedRoute));
+      return {
+        routes: dedupeRoutes(service.getRoutes().map(toExtractedRoute)),
+        grpc: await registeredGrpcMethods(service),
+      };
     } finally {
       await rm(blobRoot, { recursive: true, force: true });
     }
@@ -117,12 +130,14 @@ export async function extractRoutesForService(serviceName: string): Promise<Extr
   await service.initialize();
 
   const routes = service.getRoutes().map(toExtractedRoute);
+  const withLocations = USES_SHARED_V1_LOCATIONS.has(serviceName)
+    ? [...routes, ...getSharedV1LocationRoutes(logger)]
+    : routes;
 
-  if (USES_SHARED_V1_LOCATIONS.has(serviceName)) {
-    return dedupeRoutes([...routes, ...getSharedV1LocationRoutes(logger)]);
-  }
-
-  return dedupeRoutes(routes);
+  return {
+    routes: dedupeRoutes(withLocations),
+    grpc: await registeredGrpcMethods(service),
+  };
 }
 
 export async function extractRoutesForAllServices(
@@ -131,10 +146,22 @@ export async function extractRoutesForAllServices(
   const routesByService = new Map<string, ExtractedRoute[]>();
 
   for (const serviceName of serviceNames) {
-    routesByService.set(serviceName, await extractRoutesForService(serviceName));
+    routesByService.set(serviceName, (await extractServiceSurface(serviceName)).routes);
   }
 
   return routesByService;
+}
+
+export async function extractServiceSurfaces(
+  serviceNames: readonly string[]
+): Promise<Map<string, ServiceSurface>> {
+  const surfaces = new Map<string, ServiceSurface>();
+
+  for (const serviceName of serviceNames) {
+    surfaces.set(serviceName, await extractServiceSurface(serviceName));
+  }
+
+  return surfaces;
 }
 
 function toExtractedRoute(route: RouteDefinition): ExtractedRoute {

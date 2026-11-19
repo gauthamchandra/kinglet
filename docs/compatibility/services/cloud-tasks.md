@@ -5,7 +5,7 @@
 **Status:** Implemented
 **API version:** v2
 **Data plane:** Emulated in-process
-**Endpoint coverage:** 18/19 (95%)
+**Endpoint coverage:** 18/21 (86%)
 
 Queue lifecycle, task CRUD, and HTTP dispatch.
 
@@ -33,12 +33,18 @@ Queue lifecycle, task CRUD, and HTTP dispatch.
 ## Missing endpoints
 
 - `GET` `v2/{+name}` — `projects.locations.operations.get`
+- `POST` `v2/{+parent}/tasks:batchCreate` — `projects.locations.queues.tasks.batchCreate`
+- `POST` `v2/{+parent}/tasks:batchDelete` — `projects.locations.queues.tasks.batchDelete`
 
 ## IAM endpoints (deferred)
 
 - `POST` `v2/{+resource}:getIamPolicy` — `projects.locations.queues.getIamPolicy`
 - `POST` `v2/{+resource}:setIamPolicy` — `projects.locations.queues.setIamPolicy`
 - `POST` `v2/{+resource}:testIamPermissions` — `projects.locations.queues.testIamPermissions`
+
+## gRPC-only methods
+
+_None._
 
 ## API reference
 

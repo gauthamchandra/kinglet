@@ -59,6 +59,10 @@ Cluster, instance, and user CRUD with LRO operations; each instance exposes a re
 
 _None._
 
+## gRPC-only methods
+
+_None._
+
 ## API reference
 
 See [AlloyDB routes](../../reference/api/alloydb.md) for the kinglet route table.
