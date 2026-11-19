@@ -28,12 +28,18 @@ describe('secret manager RPC table', () => {
     const ids = routes.map(route => route.id).sort();
 
     expect(ids).toEqual([
+      'projects.locations.secrets.addVersion',
       'projects.locations.secrets.create',
       'projects.locations.secrets.get',
+      'projects.locations.secrets.versions.access',
+      'projects.locations.secrets.versions.get',
+      'projects.secrets.addVersion',
       'projects.secrets.create',
       'projects.secrets.get',
+      'projects.secrets.versions.access',
+      'projects.secrets.versions.get',
     ]);
-    expect(routes).toHaveLength(4);
+    expect(routes).toHaveLength(10);
   });
 
   test('deferred RPCs return gRPC UNIMPLEMENTED', async () => {
@@ -84,6 +90,72 @@ describe('secret manager RPC table', () => {
 
     expect(response.status).toBe(400);
     expect(body.error.status).toBe('INVALID_ARGUMENT');
+  });
+
+  test('addVersion uses the secret in the URL when the body names another parent', async () => {
+    const { routes } = await harness();
+    const router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of routes) {
+      router.addRoute(route);
+    }
+
+    const created = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets?secretId=a', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ replication: { automatic: {} } }),
+      })
+    );
+
+    expect(created.status).toBe(200);
+
+    const added = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets/a:addVersion', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          parent: 'projects/p/secrets/b',
+          payload: { data: Buffer.from('s3cret').toString('base64') },
+        }),
+      })
+    );
+    const version = (await added.json()) as { name: string };
+
+    expect(added.status).toBe(200);
+    expect(version.name).toBe('projects/p/secrets/a/versions/1');
+  });
+
+  test('a missing version is reported as SecretVersion', async () => {
+    const { routes } = await harness();
+    const router = new RequestRouter(new Logger('test', 'error'));
+
+    for (const route of routes) {
+      router.addRoute(route);
+    }
+
+    const created = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets?secretId=missing-version', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ replication: { automatic: {} } }),
+      })
+    );
+
+    expect(created.status).toBe(200);
+
+    const response = await router.route(
+      new Request('http://localhost/v1/projects/p/secrets/missing-version/versions/9')
+    );
+    const body = (await response.json()) as {
+      error: { message: string; details: Array<{ resourceType: string }> };
+    };
+
+    expect(response.status).toBe(404);
+    expect(body.error.message).toBe(
+      'SecretVersion projects/p/secrets/missing-version/versions/9 not found'
+    );
+    expect(body.error.details[0]?.resourceType).toBe('SecretVersion');
   });
 });
 

@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { SecretManagerError } from './types.ts';
-import { decodeSecretSpecInput, encodeSecret, GRPC_DIALECT, REST_DIALECT } from './wire.ts';
+import {
+  decodeAdd,
+  decodeSecretSpecInput,
+  encodeSecret,
+  GRPC_DIALECT,
+  REST_DIALECT,
+} from './wire.ts';
 
 describe('secret wire dialects', () => {
   test('REST integer enums and gRPC names decode to the same spec', () => {
@@ -38,6 +44,19 @@ describe('secret wire dialects', () => {
         { replication: { automatic: {} }, ttl: '100000000000000000000s' },
         REST_DIALECT
       )
+    ).toThrow(SecretManagerError);
+  });
+
+  test('accepts an empty REST payload and rejects malformed base64', () => {
+    const empty = decodeAdd(
+      { parent: 'projects/p/secrets/a', payload: { data: '' } },
+      REST_DIALECT
+    );
+
+    expect(empty.payload.data).toEqual(new Uint8Array());
+
+    expect(() =>
+      decodeAdd({ parent: 'projects/p/secrets/a', payload: { data: '%%%' } }, REST_DIALECT)
     ).toThrow(SecretManagerError);
   });
 

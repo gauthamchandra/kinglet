@@ -12,9 +12,25 @@ import type {
 } from '@/core/gateway/request-router.ts';
 import type { ResponseFormatter, ResponseUtils } from '@/core/gateway/response-handlers.ts';
 import type { SecretManager } from './service.ts';
-import { parseSecretName, parseSecretParent, SecretManagerError, secretNameIn } from './types.ts';
+import {
+  parseSecretName,
+  parseSecretParent,
+  parseSecretVersionLocator,
+  SecretManagerError,
+  secretNameIn,
+} from './types.ts';
 import type { WireDialect, WireMessage } from './wire.ts';
-import { decodeCreate, decodeGet, encodeSecret, GRPC_DIALECT, REST_DIALECT } from './wire.ts';
+import {
+  decodeAdd,
+  decodeCreate,
+  decodeGet,
+  decodeVersion,
+  encodeAccessed,
+  encodeSecret,
+  encodeVersion,
+  GRPC_DIALECT,
+  REST_DIALECT,
+} from './wire.ts';
 
 export const SECRET_MANAGER_RPCS = [
   'ListSecrets',
@@ -65,6 +81,7 @@ interface RestParts {
   readonly project: string;
   readonly location: string | null;
   readonly secret: string | null;
+  readonly version: string | null;
   readonly body: unknown;
   readonly query: (name: string) => string | undefined;
 }
@@ -94,7 +111,24 @@ const RPC_TABLE = {
       return encodeSecret(created, dialect);
     },
   }),
-  AddSecretVersion: deferred(),
+  AddSecretVersion: bound({
+    http: {
+      method: 'POST',
+      suffix: '/secrets/:secret:addVersion',
+      id: 'secrets.addVersion',
+      toMessage: parts => ({
+        ...(isRecord(parts.body) ? parts.body : {}),
+        parent: secretResource(parts),
+      }),
+    },
+    call: async (manager, message, dialect) => {
+      const decoded = decodeAdd(message, dialect);
+      const name = parseSecretName(decoded.parentRaw);
+      const added = await manager.addVersion(name, decoded.payload);
+
+      return encodeVersion(added, dialect);
+    },
+  }),
   GetSecret: bound({
     http: {
       method: 'GET',
@@ -120,8 +154,36 @@ const RPC_TABLE = {
   UpdateSecret: deferred(),
   DeleteSecret: deferred(),
   ListSecretVersions: deferred(),
-  GetSecretVersion: deferred(),
-  AccessSecretVersion: deferred(),
+  GetSecretVersion: bound({
+    http: {
+      method: 'GET',
+      suffix: '/secrets/:secret/versions/:version',
+      id: 'secrets.versions.get',
+      toMessage: parts => ({ name: versionResource(parts) }),
+    },
+    call: async (manager, message, dialect) => {
+      const raw = decodeVersion(message);
+      const locator = parseSecretVersionLocator(raw);
+      const version = await manager.getVersion(locator, raw);
+
+      return encodeVersion(version, dialect);
+    },
+  }),
+  AccessSecretVersion: bound({
+    http: {
+      method: 'GET',
+      suffix: '/secrets/:secret/versions/:version:access',
+      id: 'secrets.versions.access',
+      toMessage: parts => ({ name: versionResource(parts) }),
+    },
+    call: async (manager, message, dialect) => {
+      const raw = decodeVersion(message);
+      const locator = parseSecretVersionLocator(raw);
+      const accessed = await manager.accessVersion(locator, raw);
+
+      return encodeAccessed(accessed, dialect);
+    },
+  }),
   DisableSecretVersion: deferred(),
   EnableSecretVersion: deferred(),
   DestroySecretVersion: deferred(),
@@ -214,6 +276,7 @@ function restParts(request: RouteRequest): RestParts {
     project: request.params.project ?? '',
     location: request.params.location === undefined ? null : request.params.location,
     secret: request.params.secret === undefined ? null : request.params.secret,
+    version: request.params.version === undefined ? null : request.params.version,
     body: request.body,
     query: name => readQuery(request.query[name]),
   };
@@ -229,6 +292,10 @@ function parentResource(parts: RestParts): string {
 
 function secretResource(parts: RestParts): string {
   return `${parentResource(parts)}/secrets/${parts.secret ?? ''}`;
+}
+
+function versionResource(parts: RestParts): string {
+  return `${secretResource(parts)}/versions/${parts.version ?? ''}`;
 }
 
 function customVerb(segment: string | null): string | null {
@@ -257,9 +324,12 @@ function secretRestError(
   if (err instanceof SecretManagerError) {
     switch (err.code) {
       case 'NOT_FOUND':
-        return responseUtils.notFound('Secret', err.resourceName ?? 'unknown');
+        return responseUtils.notFound(err.resourceType ?? 'Secret', err.resourceName ?? 'unknown');
       case 'ALREADY_EXISTS':
-        return responseUtils.alreadyExists('Secret', err.resourceName ?? 'unknown');
+        return responseUtils.alreadyExists(
+          err.resourceType ?? 'Secret',
+          err.resourceName ?? 'unknown'
+        );
       case 'INVALID_ARGUMENT':
         return responseUtils.badRequest(err.message);
       case 'FAILED_PRECONDITION':
@@ -309,9 +379,13 @@ function deferred(): DeferredEntry {
 }
 
 function asMessage(value: unknown): WireMessage {
-  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return {};
   }
 
-  return value as WireMessage;
+  return value;
+}
+
+function isRecord(value: unknown): value is WireMessage {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
 }

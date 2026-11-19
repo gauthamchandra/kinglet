@@ -139,6 +139,49 @@ describe('Secret Manager E2E: REST fetch', () => {
     expect(response.status).toBe(400);
     expect(body.error.status).toBe('INVALID_ARGUMENT');
   });
+
+  test('adds a version and accesses it by latest', async () => {
+    const created = await fetch(`${url('/v1/projects/demo/secrets')}?secretId=token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ replication: { automatic: {} } }),
+    });
+
+    expect(created.status).toBe(200);
+
+    const added = await fetch(url('/v1/projects/demo/secrets/token:addVersion'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ payload: { data: Buffer.from('s3cret').toString('base64') } }),
+    });
+    const version = (await added.json()) as { name: string; payload?: unknown; state: string };
+
+    expect(added.status).toBe(200);
+    expect(version.name).toBe('projects/demo/secrets/token/versions/1');
+    expect(version.payload).toBeUndefined();
+    expect(version.state).toBe('ENABLED');
+
+    const access = await fetch(url('/v1/projects/demo/secrets/token/versions/latest:access'));
+    const accessed = (await access.json()) as {
+      name: string;
+      payload: { data: string; dataCrc32c: string };
+    };
+
+    expect(access.status).toBe(200);
+    expect(accessed.name).toBe('projects/demo/secrets/token/versions/1');
+    expect(Buffer.from(accessed.payload.data, 'base64').toString()).toBe('s3cret');
+    expect(accessed.payload.dataCrc32c).toBeTypeOf('string');
+
+    const mismatch = await fetch(url('/v1/projects/demo/secrets/token:addVersion'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        payload: { data: Buffer.from('nope').toString('base64'), dataCrc32c: '1' },
+      }),
+    });
+
+    expect(mismatch.status).toBe(400);
+  });
 });
 
 describe('Secret Manager E2E: official client over REST', () => {
@@ -164,6 +207,19 @@ describe('Secret Manager E2E: official client over REST', () => {
     expect(got.etag).toBe('1');
     expect(got.replication?.automatic).toEqual({ customerManagedEncryption: null });
     expect(got.secretType).toBe('ACCESS_KEY');
+
+    const [version] = await client.addSecretVersion({
+      parent: created.name,
+      payload: { data: Buffer.from('s3cret') },
+    });
+
+    expect(version.name).toBe('projects/client-project/secrets/from-client/versions/1');
+
+    const [accessed] = await client.accessSecretVersion({
+      name: `${created.name}/versions/latest`,
+    });
+
+    expect(Buffer.from(accessed.payload?.data ?? new Uint8Array()).toString()).toBe('s3cret');
 
     const iam = client.getIamPolicy({ resource: created.name });
 
