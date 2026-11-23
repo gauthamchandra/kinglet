@@ -13,36 +13,36 @@ Config flag exists; service is a stub with no routes yet.
 
 - `GET` `v1/{+name}` — `projects.locations.get`
 - `GET` `v1/{+name}/locations` — `projects.locations.list`
+- `POST` `v1/{+parent}:addVersion` — `projects.locations.secrets.addVersion`
 - `POST` `v1/{+parent}/secrets` — `projects.locations.secrets.create`
 - `GET` `v1/{+name}` — `projects.locations.secrets.get`
+- `GET` `v1/{+name}:access` — `projects.locations.secrets.versions.access`
+- `GET` `v1/{+name}` — `projects.locations.secrets.versions.get`
+- `POST` `v1/{+parent}:addVersion` — `projects.secrets.addVersion`
 - `POST` `v1/{+parent}/secrets` — `projects.secrets.create`
 - `GET` `v1/{+name}` — `projects.secrets.get`
+- `GET` `v1/{+name}:access` — `projects.secrets.versions.access`
+- `GET` `v1/{+name}` — `projects.secrets.versions.get`
 
 ## Missing endpoints
 
-- `POST` `v1/{+parent}:addVersion` — `projects.locations.secrets.addVersion`
 - `DELETE` `v1/{+name}` — `projects.locations.secrets.delete`
 - `POST` `v1/{+parent}:enableManagedRotation` — `projects.locations.secrets.enableManagedRotation`
 - `GET` `v1/{+parent}/secrets` — `projects.locations.secrets.list`
 - `PATCH` `v1/{+name}` — `projects.locations.secrets.patch`
 - `POST` `v1/{+parent}:rotateSecret` — `projects.locations.secrets.rotateSecret`
-- `GET` `v1/{+name}:access` — `projects.locations.secrets.versions.access`
 - `POST` `v1/{+name}:destroy` — `projects.locations.secrets.versions.destroy`
 - `POST` `v1/{+name}:disable` — `projects.locations.secrets.versions.disable`
 - `POST` `v1/{+name}:enable` — `projects.locations.secrets.versions.enable`
-- `GET` `v1/{+name}` — `projects.locations.secrets.versions.get`
 - `GET` `v1/{+parent}/versions` — `projects.locations.secrets.versions.list`
-- `POST` `v1/{+parent}:addVersion` — `projects.secrets.addVersion`
 - `DELETE` `v1/{+name}` — `projects.secrets.delete`
 - `POST` `v1/{+parent}:enableManagedRotation` — `projects.secrets.enableManagedRotation`
 - `GET` `v1/{+parent}/secrets` — `projects.secrets.list`
 - `PATCH` `v1/{+name}` — `projects.secrets.patch`
 - `POST` `v1/{+parent}:rotateSecret` — `projects.secrets.rotateSecret`
-- `GET` `v1/{+name}:access` — `projects.secrets.versions.access`
 - `POST` `v1/{+name}:destroy` — `projects.secrets.versions.destroy`
 - `POST` `v1/{+name}:disable` — `projects.secrets.versions.disable`
 - `POST` `v1/{+name}:enable` — `projects.secrets.versions.enable`
-- `GET` `v1/{+name}` — `projects.secrets.versions.get`
 - `GET` `v1/{+parent}/versions` — `projects.secrets.versions.list`
 
 ## IAM endpoints (deferred)
